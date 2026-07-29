@@ -47,5 +47,4 @@ Delivery agents under `backend/app/agents/delivery/**` and report providers unde
 
 ## Commits
 
-Milestone commit hashes are appended after verification.
-
+- `d5560d39f654ae136692f1478efbab29a9d1db49` — verified product demo slice, desktop shell, scripts, tests, and documentation.
