@@ -1,0 +1,100 @@
+"""FastAPI application factory.
+
+The app is assembled here and nowhere else, so tests can build an isolated
+instance and the entrypoint stays a one-liner.
+"""
+
+from __future__ import annotations
+
+import contextlib
+from collections.abc import AsyncIterator
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app import CONTRACT_VERSION, __version__
+from app.agents.base.plugins import get_plugin_registry
+from app.api.errors import install_exception_handlers
+from app.api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
+from app.api.routes import health as health_routes
+from app.core.config import Settings, get_settings
+from app.core.logging import configure_logging, get_logger
+
+logger = get_logger(__name__)
+
+DESCRIPTION = """
+Local-first, evidence-based engineering review platform for ESCO Group.
+
+The platform analyses uploaded engineering documents (Studio 5000 L5X exports,
+interlock schedules, I/O lists, functional descriptions) and produces findings
+that always cite exact evidence.
+
+**Boundaries this API enforces by design**
+
+* It never connects to an industrial controller and never uploads, downloads or
+  modifies controller programs.
+* It does not parse proprietary `.ACD` files and does not claim to.
+* It never applies a PLC or electrical design change; recommendations are
+  proposals for a human engineer.
+* Safety- and equipment-damage-related recommendations cannot be released
+  without a recorded human approval.
+* Model output is never presented as approved engineering, and raw model
+  reasoning is never stored or returned.
+"""
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Start-up and shut-down hooks."""
+    settings: Settings = app.state.settings
+    registry = get_plugin_registry()
+    logger.info(
+        "backend starting",
+        extra={
+            "version": __version__,
+            "contract_version": CONTRACT_VERSION,
+            "environment": settings.environment,
+            "database": "sqlite" if settings.is_sqlite else "postgresql",
+            "enabled_providers": [p.value for p in settings.enabled_providers],
+            "delivery_plugins": sorted(registry.delivery_agents),
+            "report_providers": sorted(registry.report_providers),
+        },
+    )
+    yield
+    logger.info("backend stopped")
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Build the ASGI application."""
+    settings = settings or get_settings()
+    configure_logging(level=settings.log_level, json_output=settings.log_json)
+
+    app = FastAPI(
+        title=settings.app_name,
+        description=DESCRIPTION,
+        version=__version__,
+        lifespan=lifespan,
+        docs_url="/docs",
+        redoc_url=None,
+        openapi_url="/openapi.json",
+    )
+    app.state.settings = settings
+
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
+    )
+
+    install_exception_handlers(app)
+    app.include_router(health_routes.router, prefix=settings.api_prefix)
+
+    return app
+
+
+app = create_app()

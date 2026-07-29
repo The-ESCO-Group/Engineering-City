@@ -1,0 +1,4315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://esco.local/contracts/domain.schema.json",
+  "title": "ESCO Engineering City domain schema",
+  "description": "Domain vocabulary and entity shapes for the ESCO Engineering City API. Generated from the backend Pydantic models; do not edit by hand.",
+  "x-contract-version": "1.0.0",
+  "x-enums": [
+    "ActionType",
+    "AgentKind",
+    "AgentRunStatus",
+    "AgentStatus",
+    "AnchorType",
+    "ApprovalKind",
+    "ApprovalStatus",
+    "AuditAction",
+    "DocumentRole",
+    "EventType",
+    "EvidenceKind",
+    "FileKind",
+    "FileStatus",
+    "FindingCategory",
+    "FindingSeverity",
+    "FindingStatus",
+    "MessageRole",
+    "ProjectRole",
+    "ProjectStatus",
+    "ProviderKind",
+    "RecommendationStatus",
+    "ReportStatus",
+    "RoleName",
+    "TaskKind",
+    "TaskStatus"
+  ],
+  "x-groups": {
+    "agent": [
+      "AgentActionRead",
+      "AgentDefinitionRead",
+      "AgentInstanceRead",
+      "AgentMessageRead",
+      "AgentRunDetail",
+      "AgentRunRead",
+      "AgentRunStatus",
+      "AgentStatus",
+      "MessageRole",
+      "ModelConfigurationRead",
+      "UpdateModelConfigurationRequest"
+    ],
+    "agent_action": [
+      "ActionType",
+      "AgentAction",
+      "ApprovalKind",
+      "CreateFindingPayload",
+      "CreateRecommendationPayload",
+      "CreateTaskPayload",
+      "EvidenceRef",
+      "FindingCategory",
+      "FindingSeverity",
+      "PostMessagePayload",
+      "ReportBlockerPayload",
+      "ReportNoFindingsPayload",
+      "RequestApprovalPayload",
+      "UpdateFindingReviewPayload"
+    ],
+    "approval": [
+      "ApprovalDecisionRequest",
+      "ApprovalKind",
+      "ApprovalRead",
+      "ApprovalStatus"
+    ],
+    "auth": [
+      "CreateUserRequest",
+      "CurrentUserResponse",
+      "LoginRequest",
+      "LoginResponse",
+      "RoleName",
+      "UserSummary"
+    ],
+    "file": [
+      "AnchorType",
+      "DocumentRole",
+      "EvidenceAnchorRead",
+      "EvidenceKind",
+      "FileDetail",
+      "FileKind",
+      "FileStatus",
+      "ParsedArtifactDetail",
+      "ParsedArtifactRead",
+      "ParserWarningRead",
+      "UploadResponse",
+      "UploadResultItem",
+      "UploadedFileRead"
+    ],
+    "finding": [
+      "AnchorType",
+      "CreateFindingCommentRequest",
+      "DiscrepancyMatrixRow",
+      "EvidenceAnchorRead",
+      "EvidenceKind",
+      "FindingCategory",
+      "FindingCommentRead",
+      "FindingDetail",
+      "FindingEvidenceRead",
+      "FindingRead",
+      "FindingSeverity",
+      "FindingStatus",
+      "RecommendationRead",
+      "RecommendationStatus",
+      "UpdateFindingRequest"
+    ],
+    "project": [
+      "AddProjectMemberRequest",
+      "CreateProjectRequest",
+      "ProjectCounts",
+      "ProjectDetail",
+      "ProjectMemberRead",
+      "ProjectRead",
+      "ProjectRole",
+      "ProjectStatus",
+      "UpdateProjectRequest"
+    ],
+    "report": [
+      "ReportRead",
+      "ReportStatus"
+    ],
+    "workflow": [
+      "RunRead",
+      "StartRunRequest",
+      "TaskDetail",
+      "TaskKind",
+      "TaskRead",
+      "TaskStatus",
+      "WorkflowControlRequest",
+      "WorkflowStateResponse"
+    ]
+  },
+  "$defs": {
+    "ActionType": {
+      "title": "ActionType",
+      "type": "string",
+      "enum": [
+        "create_finding",
+        "create_recommendation",
+        "create_task",
+        "post_message",
+        "request_approval",
+        "update_finding_review",
+        "report_blocker",
+        "report_no_findings"
+      ],
+      "description": "The closed set of actions a model is permitted to propose."
+    },
+    "AddProjectMemberRequest": {
+      "properties": {
+        "user_id": {
+          "format": "uuid",
+          "title": "User Id",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/ProjectRole",
+          "default": "engineer"
+        }
+      },
+      "required": [
+        "user_id"
+      ],
+      "title": "AddProjectMemberRequest",
+      "type": "object"
+    },
+    "AgentAction": {
+      "additionalProperties": false,
+      "description": "One proposed action returned by an agent.\n\n``payload`` carries the action-specific body; it is re-validated against the\nmatching payload model before execution, so a malformed or unexpected shape\nis rejected rather than partially applied.",
+      "properties": {
+        "action_type": {
+          "$ref": "#/$defs/ActionType"
+        },
+        "summary": {
+          "description": "One-sentence, human-readable statement of what this action does.",
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "target_type": {
+          "default": "",
+          "description": "Entity kind this action concerns (project, file, finding, task).",
+          "title": "Target Type",
+          "type": "string"
+        },
+        "target_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Id"
+        },
+        "evidence_anchor_ids": {
+          "description": "Anchors supporting the action. Required for technical claims.",
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Evidence Anchor Ids",
+          "type": "array"
+        },
+        "confidence": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "requires_approval": {
+          "default": false,
+          "title": "Requires Approval",
+          "type": "boolean"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "warnings": {
+          "description": "Caveats the agent wants a human to see. Never suppressed.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "action_type",
+        "summary"
+      ],
+      "title": "AgentAction",
+      "type": "object"
+    },
+    "AgentActionRead": {
+      "description": "A model-proposed action, as recorded on the run.\n\n``accepted`` is false for actions the backend refused; ``rejection_reason``\nsays why. Refusals are kept rather than discarded — they are part of the\nrecord of what the model tried to do.",
+      "properties": {
+        "action_type": {
+          "title": "Action Type",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "target_type": {
+          "default": "",
+          "title": "Target Type",
+          "type": "string"
+        },
+        "target_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Id"
+        },
+        "evidence_anchor_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Evidence Anchor Ids",
+          "type": "array"
+        },
+        "confidence": {
+          "default": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "requires_approval": {
+          "default": false,
+          "title": "Requires Approval",
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "accepted": {
+          "default": true,
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "rejection_reason": {
+          "default": "",
+          "title": "Rejection Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action_type",
+        "summary"
+      ],
+      "title": "AgentActionRead",
+      "type": "object"
+    },
+    "AgentDefinitionRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "building": {
+          "default": "",
+          "title": "Building",
+          "type": "string"
+        },
+        "handles_task_kinds": {
+          "items": {},
+          "title": "Handles Task Kinds",
+          "type": "array"
+        },
+        "is_plugin": {
+          "default": false,
+          "title": "Is Plugin",
+          "type": "boolean"
+        },
+        "is_available": {
+          "default": true,
+          "title": "Is Available",
+          "type": "boolean"
+        },
+        "unavailable_reason": {
+          "default": "",
+          "description": "Why the agent cannot run — e.g. its plugin is not installed.",
+          "title": "Unavailable Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "display_name"
+      ],
+      "title": "AgentDefinitionRead",
+      "type": "object"
+    },
+    "AgentInstanceRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "definition_id": {
+          "format": "uuid",
+          "title": "Definition Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentStatus"
+        },
+        "location": {
+          "default": "",
+          "title": "Location",
+          "type": "string"
+        },
+        "current_activity": {
+          "default": "",
+          "title": "Current Activity",
+          "type": "string"
+        },
+        "current_task_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Task Id"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "definition_id",
+        "kind",
+        "display_name",
+        "status",
+        "updated_at"
+      ],
+      "title": "AgentInstanceRead",
+      "type": "object"
+    },
+    "AgentKind": {
+      "title": "AgentKind",
+      "type": "string",
+      "enum": [
+        "project_manager",
+        "plc_review",
+        "interlock_review",
+        "senior_review",
+        "delivery"
+      ],
+      "description": "Stable identifier for an agent definition."
+    },
+    "AgentMessageRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "agent_instance_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Instance Id"
+        },
+        "agent_run_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Run Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "author_user_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author User Id"
+        },
+        "role": {
+          "$ref": "#/$defs/MessageRole"
+        },
+        "agent_kind": {
+          "default": "",
+          "title": "Agent Kind",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "context": {
+          "additionalProperties": true,
+          "title": "Context",
+          "type": "object"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "role",
+        "body",
+        "created_at"
+      ],
+      "title": "AgentMessageRead",
+      "type": "object"
+    },
+    "AgentRunDetail": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "agent_instance_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Instance Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "agent_kind": {
+          "title": "Agent Kind",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentRunStatus"
+        },
+        "provider": {
+          "default": "",
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "default": "",
+          "title": "Model",
+          "type": "string"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finished At"
+        },
+        "duration_ms": {
+          "default": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "iterations": {
+          "default": 0,
+          "title": "Iterations",
+          "type": "integer"
+        },
+        "prompt_tokens": {
+          "default": 0,
+          "title": "Prompt Tokens",
+          "type": "integer"
+        },
+        "completion_tokens": {
+          "default": 0,
+          "title": "Completion Tokens",
+          "type": "integer"
+        },
+        "error_code": {
+          "default": "",
+          "title": "Error Code",
+          "type": "string"
+        },
+        "error_message": {
+          "default": "",
+          "title": "Error Message",
+          "type": "string"
+        },
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/AgentActionRead"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "rejected_actions": {
+          "items": {
+            "$ref": "#/$defs/AgentActionRead"
+          },
+          "title": "Rejected Actions",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {},
+          "title": "Warnings",
+          "type": "array"
+        },
+        "tool_results": {
+          "items": {},
+          "title": "Tool Results",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "agent_kind",
+        "status"
+      ],
+      "title": "AgentRunDetail",
+      "type": "object"
+    },
+    "AgentRunRead": {
+      "description": "Everything persisted about one agent execution.\n\nContains no chain-of-thought by construction: ``rationale`` is a concise\nhuman-facing justification the agent is required to produce.",
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "agent_instance_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Instance Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "agent_kind": {
+          "title": "Agent Kind",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentRunStatus"
+        },
+        "provider": {
+          "default": "",
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "default": "",
+          "title": "Model",
+          "type": "string"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finished At"
+        },
+        "duration_ms": {
+          "default": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "iterations": {
+          "default": 0,
+          "title": "Iterations",
+          "type": "integer"
+        },
+        "prompt_tokens": {
+          "default": 0,
+          "title": "Prompt Tokens",
+          "type": "integer"
+        },
+        "completion_tokens": {
+          "default": 0,
+          "title": "Completion Tokens",
+          "type": "integer"
+        },
+        "error_code": {
+          "default": "",
+          "title": "Error Code",
+          "type": "string"
+        },
+        "error_message": {
+          "default": "",
+          "title": "Error Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "agent_kind",
+        "status"
+      ],
+      "title": "AgentRunRead",
+      "type": "object"
+    },
+    "AgentRunStatus": {
+      "title": "AgentRunStatus",
+      "type": "string",
+      "enum": [
+        "running",
+        "completed",
+        "failed",
+        "timed_out",
+        "cancelled",
+        "budget_exceeded"
+      ],
+      "description": ""
+    },
+    "AgentStatus": {
+      "title": "AgentStatus",
+      "type": "string",
+      "enum": [
+        "idle",
+        "walking",
+        "working",
+        "waiting",
+        "blocked",
+        "offline"
+      ],
+      "description": "Presence state of an agent instance."
+    },
+    "AnchorType": {
+      "title": "AnchorType",
+      "type": "string",
+      "enum": [
+        "l5x_controller",
+        "l5x_program",
+        "l5x_routine",
+        "l5x_rung",
+        "l5x_instruction",
+        "l5x_tag",
+        "l5x_module",
+        "l5x_addon_instruction",
+        "xlsx_workbook",
+        "xlsx_worksheet",
+        "xlsx_cell",
+        "xlsx_range",
+        "csv_row",
+        "csv_cell",
+        "docx_heading",
+        "docx_paragraph",
+        "docx_table_cell",
+        "pdf_page",
+        "pdf_text_range",
+        "xml_element",
+        "file_line",
+        "file_section",
+        "file_whole"
+      ],
+      "description": "The addressing scheme used by an :class:`~app.models.evidence.EvidenceAnchor`."
+    },
+    "ApprovalDecisionRequest": {
+      "description": "A human decision.\n\n``approved`` is required and has no default: approving must always be an\nexplicit act, never the result of an omitted field.",
+      "properties": {
+        "approved": {
+          "title": "Approved",
+          "type": "boolean"
+        },
+        "notes": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "required": [
+        "approved"
+      ],
+      "title": "ApprovalDecisionRequest",
+      "type": "object"
+    },
+    "ApprovalKind": {
+      "title": "ApprovalKind",
+      "type": "string",
+      "enum": [
+        "safety_recommendation",
+        "equipment_damage_recommendation",
+        "design_recommendation",
+        "finding_release",
+        "report_release"
+      ],
+      "description": "Why a human decision is required."
+    },
+    "ApprovalRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "finding_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finding Id"
+        },
+        "recommendation_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recommendation Id"
+        },
+        "report_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Report Id"
+        },
+        "kind": {
+          "$ref": "#/$defs/ApprovalKind"
+        },
+        "status": {
+          "$ref": "#/$defs/ApprovalStatus"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "question": {
+          "description": "Plain-language statement of what the human is accepting responsibility for.",
+          "title": "Question",
+          "type": "string"
+        },
+        "context": {
+          "additionalProperties": true,
+          "description": "Snapshot of evidence and severity at request time; not re-read later.",
+          "title": "Context",
+          "type": "object"
+        },
+        "requested_by_agent_kind": {
+          "default": "",
+          "title": "Requested By Agent Kind",
+          "type": "string"
+        },
+        "requested_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested At"
+        },
+        "decided_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decided By Id"
+        },
+        "decided_by_display_name": {
+          "default": "",
+          "title": "Decided By Display Name",
+          "type": "string"
+        },
+        "decided_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decided At"
+        },
+        "decision_notes": {
+          "default": "",
+          "title": "Decision Notes",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "kind",
+        "status",
+        "title",
+        "question",
+        "created_at"
+      ],
+      "title": "ApprovalRead",
+      "type": "object"
+    },
+    "ApprovalStatus": {
+      "title": "ApprovalStatus",
+      "type": "string",
+      "enum": [
+        "pending",
+        "approved",
+        "rejected",
+        "cancelled"
+      ],
+      "description": ""
+    },
+    "AuditAction": {
+      "title": "AuditAction",
+      "type": "string",
+      "enum": [
+        "user.created",
+        "user.updated",
+        "user.login_succeeded",
+        "user.login_failed",
+        "user.logout",
+        "permission.changed",
+        "project.created",
+        "project.updated",
+        "project.archived",
+        "file.uploaded",
+        "file.rejected",
+        "file.deleted",
+        "analysis.started",
+        "analysis.paused",
+        "analysis.resumed",
+        "analysis.cancelled",
+        "agent.action",
+        "agent.action_rejected",
+        "finding.created",
+        "finding.updated",
+        "approval.requested",
+        "approval.decided",
+        "report.created",
+        "model_configuration.changed"
+      ],
+      "description": "Auditable operations. Every member must be written by exactly one call"
+    },
+    "CreateFindingCommentRequest": {
+      "properties": {
+        "body": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "title": "CreateFindingCommentRequest",
+      "type": "object"
+    },
+    "CreateFindingPayload": {
+      "additionalProperties": false,
+      "description": "Body of a ``create_finding`` action.\n\n``fact`` and ``inference`` are separate and both required: the product must\nnever present a deduction as an observation.",
+      "properties": {
+        "title": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "category": {
+          "$ref": "#/$defs/FindingCategory",
+          "default": "other"
+        },
+        "severity": {
+          "$ref": "#/$defs/FindingSeverity",
+          "default": "informational"
+        },
+        "fact": {
+          "description": "Strictly what the cited evidence shows, with no interpretation.",
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Fact",
+          "type": "string"
+        },
+        "inference": {
+          "default": "",
+          "description": "What the agent concludes from the fact. Presented as a conclusion.",
+          "maxLength": 8000,
+          "title": "Inference",
+          "type": "string"
+        },
+        "suggested_review_action": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Suggested Review Action",
+          "type": "string"
+        },
+        "limitations": {
+          "default": "",
+          "description": "Anything that weakens the finding: partial parse, ambiguity, missing input.",
+          "maxLength": 4000,
+          "title": "Limitations",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        },
+        "dedupe_key": {
+          "default": "",
+          "title": "Dedupe Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "fact"
+      ],
+      "title": "CreateFindingPayload",
+      "type": "object"
+    },
+    "CreateProjectRequest": {
+      "properties": {
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "client_reference": {
+          "default": "",
+          "maxLength": 120,
+          "title": "Client Reference",
+          "type": "string"
+        },
+        "attributes": {
+          "additionalProperties": true,
+          "title": "Attributes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "CreateProjectRequest",
+      "type": "object"
+    },
+    "CreateRecommendationPayload": {
+      "additionalProperties": false,
+      "description": "Body of a ``create_recommendation`` action.\n\nA recommendation is a proposal for a human. The platform never applies one,\nand a safety- or damage-related proposal cannot be marked as not needing\napproval.",
+      "properties": {
+        "title": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "body": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        },
+        "rationale": {
+          "default": "",
+          "maxLength": 8000,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "safety_related": {
+          "default": false,
+          "title": "Safety Related",
+          "type": "boolean"
+        },
+        "equipment_damage_related": {
+          "default": false,
+          "title": "Equipment Damage Related",
+          "type": "boolean"
+        },
+        "effort_estimate": {
+          "default": "",
+          "title": "Effort Estimate",
+          "type": "string"
+        },
+        "finding_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finding Id"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        }
+      },
+      "required": [
+        "title",
+        "body"
+      ],
+      "title": "CreateRecommendationPayload",
+      "type": "object"
+    },
+    "CreateTaskPayload": {
+      "additionalProperties": false,
+      "description": "Body of a ``create_task`` action (Project Manager Agent only).",
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "agent_kind": {
+          "default": "",
+          "title": "Agent Kind",
+          "type": "string"
+        },
+        "depends_on_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Depends On Indices",
+          "type": "array"
+        },
+        "priority": {
+          "default": 100,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "title"
+      ],
+      "title": "CreateTaskPayload",
+      "type": "object"
+    },
+    "CreateUserRequest": {
+      "description": "Administrator-only user provisioning.",
+      "properties": {
+        "email": {
+          "format": "email",
+          "title": "Email",
+          "type": "string"
+        },
+        "display_name": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "password": {
+          "maxLength": 256,
+          "minLength": 12,
+          "title": "Password",
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "$ref": "#/$defs/RoleName"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "email",
+        "display_name",
+        "password"
+      ],
+      "title": "CreateUserRequest",
+      "type": "object"
+    },
+    "CurrentUserResponse": {
+      "properties": {
+        "user": {
+          "$ref": "#/$defs/UserSummary"
+        },
+        "project_roles": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Project Roles",
+          "type": "object"
+        }
+      },
+      "required": [
+        "user"
+      ],
+      "title": "CurrentUserResponse",
+      "type": "object"
+    },
+    "DiscrepancyMatrixRow": {
+      "description": "One row of the Interlock Review Agent's structured comparison.\n\nPublished as part of the contract because the frontend renders it as a\ntable and the reporting plugins consume it.",
+      "properties": {
+        "interlock_id": {
+          "title": "Interlock Id",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "requirement_evidence_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Requirement Evidence Ids",
+          "type": "array"
+        },
+        "logic_evidence_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Logic Evidence Ids",
+          "type": "array"
+        },
+        "comparison_result": {
+          "description": "matched | missing_in_logic | missing_in_documentation | contradictory | naming_mismatch | ambiguous",
+          "title": "Comparison Result",
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/FindingSeverity"
+        },
+        "confidence": {
+          "title": "Confidence",
+          "type": "number"
+        },
+        "suggested_review_action": {
+          "default": "",
+          "title": "Suggested Review Action",
+          "type": "string"
+        },
+        "requires_approval": {
+          "default": false,
+          "title": "Requires Approval",
+          "type": "boolean"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "required": [
+        "interlock_id",
+        "comparison_result",
+        "severity",
+        "confidence"
+      ],
+      "title": "DiscrepancyMatrixRow",
+      "type": "object"
+    },
+    "DocumentRole": {
+      "title": "DocumentRole",
+      "type": "string",
+      "enum": [
+        "control_logic",
+        "interlock_schedule",
+        "io_list",
+        "functional_description",
+        "testing_notes",
+        "hmi_export",
+        "alarm_list",
+        "other",
+        "unclassified"
+      ],
+      "description": "The engineering purpose a file serves, as declared by the uploader or"
+    },
+    "EventType": {
+      "title": "EventType",
+      "type": "string",
+      "enum": [
+        "project.created",
+        "project.updated",
+        "project.completed",
+        "project.failed",
+        "file.uploaded",
+        "file.parsing_started",
+        "file.parsed",
+        "file.parse_failed",
+        "file.deleted",
+        "workflow.started",
+        "workflow.paused",
+        "workflow.resumed",
+        "workflow.cancelled",
+        "task.created",
+        "task.started",
+        "task.completed",
+        "task.failed",
+        "task.blocked",
+        "agent.status_changed",
+        "agent.location_changed",
+        "agent.message_created",
+        "finding.created",
+        "finding.reviewed",
+        "finding.updated",
+        "approval.requested",
+        "approval.decided",
+        "report.created"
+      ],
+      "description": "Event types broadcast over the project WebSocket."
+    },
+    "EvidenceAnchorRead": {
+      "description": "A citation the UI can render and, where possible, deep-link to.",
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "file_id": {
+          "format": "uuid",
+          "title": "File Id",
+          "type": "string"
+        },
+        "artifact_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Id"
+        },
+        "anchor_type": {
+          "$ref": "#/$defs/AnchorType"
+        },
+        "evidence_kind": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "source_label": {
+          "title": "Source Label",
+          "type": "string"
+        },
+        "display_location": {
+          "title": "Display Location",
+          "type": "string"
+        },
+        "structured_location": {
+          "additionalProperties": true,
+          "title": "Structured Location",
+          "type": "object"
+        },
+        "excerpt": {
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "content_hash": {
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "parser_version": {
+          "title": "Parser Version",
+          "type": "string"
+        },
+        "expectation": {
+          "default": "",
+          "description": "On a missing_expected anchor: what was looked for and not found.",
+          "title": "Expectation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "file_id",
+        "anchor_type",
+        "evidence_kind",
+        "source_label",
+        "display_location",
+        "excerpt",
+        "content_hash",
+        "parser_version"
+      ],
+      "title": "EvidenceAnchorRead",
+      "type": "object"
+    },
+    "EvidenceKind": {
+      "title": "EvidenceKind",
+      "type": "string",
+      "enum": [
+        "direct",
+        "inference",
+        "missing_expected",
+        "parser_warning",
+        "unsupported_content"
+      ],
+      "description": "How strongly a piece of evidence supports a claim."
+    },
+    "EvidenceRef": {
+      "additionalProperties": false,
+      "description": "Reference from a payload to an anchor, with the role it plays.",
+      "properties": {
+        "anchor_id": {
+          "format": "uuid",
+          "title": "Anchor Id",
+          "type": "string"
+        },
+        "role": {
+          "default": "context",
+          "enum": [
+            "requirement",
+            "logic",
+            "context"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "anchor_id"
+      ],
+      "title": "EvidenceRef",
+      "type": "object"
+    },
+    "FileDetail": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "original_filename": {
+          "title": "Original Filename",
+          "type": "string"
+        },
+        "file_kind": {
+          "$ref": "#/$defs/FileKind"
+        },
+        "document_role": {
+          "$ref": "#/$defs/DocumentRole"
+        },
+        "role_declared_by_user": {
+          "default": false,
+          "title": "Role Declared By User",
+          "type": "boolean"
+        },
+        "media_type": {
+          "default": "",
+          "title": "Media Type",
+          "type": "string"
+        },
+        "extension": {
+          "default": "",
+          "title": "Extension",
+          "type": "string"
+        },
+        "size_bytes": {
+          "default": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "default": "",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/FileStatus"
+        },
+        "status_detail": {
+          "default": "",
+          "title": "Status Detail",
+          "type": "string"
+        },
+        "uploaded_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uploaded By Id"
+        },
+        "parent_file_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set when this file was extracted from an uploaded archive.",
+          "title": "Parent File Id"
+        },
+        "archive_member_path": {
+          "default": "",
+          "title": "Archive Member Path",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "artifacts": {
+          "items": {
+            "$ref": "#/$defs/ParsedArtifactRead"
+          },
+          "title": "Artifacts",
+          "type": "array"
+        },
+        "anchor_count": {
+          "default": 0,
+          "title": "Anchor Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "original_filename",
+        "file_kind",
+        "document_role",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "FileDetail",
+      "type": "object"
+    },
+    "FileKind": {
+      "title": "FileKind",
+      "type": "string",
+      "enum": [
+        "l5x",
+        "xlsx",
+        "csv",
+        "docx",
+        "pdf",
+        "xml",
+        "zip",
+        "text",
+        "unknown"
+      ],
+      "description": "Classification assigned during intake, driving parser selection."
+    },
+    "FileStatus": {
+      "title": "FileStatus",
+      "type": "string",
+      "enum": [
+        "uploaded",
+        "parsing",
+        "parsed",
+        "parse_failed",
+        "rejected",
+        "deleted"
+      ],
+      "description": ""
+    },
+    "FindingCategory": {
+      "title": "FindingCategory",
+      "type": "string",
+      "enum": [
+        "interlock_discrepancy",
+        "missing_logic",
+        "undocumented_logic",
+        "naming_mismatch",
+        "unresolved_reference",
+        "duplicate_pattern",
+        "fail_safe_unclear",
+        "alarm_coverage",
+        "io_mismatch",
+        "documentation_gap",
+        "parser_limitation",
+        "other"
+      ],
+      "description": "What kind of engineering concern a finding describes."
+    },
+    "FindingCommentRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "finding_id": {
+          "format": "uuid",
+          "title": "Finding Id",
+          "type": "string"
+        },
+        "author_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author Id"
+        },
+        "author_display_name": {
+          "default": "",
+          "title": "Author Display Name",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "finding_id",
+        "body",
+        "created_at"
+      ],
+      "title": "FindingCommentRead",
+      "type": "object"
+    },
+    "FindingDetail": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "category": {
+          "$ref": "#/$defs/FindingCategory"
+        },
+        "severity": {
+          "$ref": "#/$defs/FindingSeverity"
+        },
+        "status": {
+          "$ref": "#/$defs/FindingStatus"
+        },
+        "fact": {
+          "description": "What the evidence literally shows.",
+          "title": "Fact",
+          "type": "string"
+        },
+        "inference": {
+          "description": "What the agent concluded. Always a conclusion, not a fact.",
+          "title": "Inference",
+          "type": "string"
+        },
+        "suggested_review_action": {
+          "default": "",
+          "title": "Suggested Review Action",
+          "type": "string"
+        },
+        "limitations": {
+          "default": "",
+          "title": "Limitations",
+          "type": "string"
+        },
+        "confidence": {
+          "title": "Confidence",
+          "type": "number"
+        },
+        "requires_approval": {
+          "title": "Requires Approval",
+          "type": "boolean"
+        },
+        "is_reviewed": {
+          "title": "Is Reviewed",
+          "type": "boolean"
+        },
+        "created_by_agent_kind": {
+          "default": "",
+          "title": "Created By Agent Kind",
+          "type": "string"
+        },
+        "agent_run_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Run Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "review_verdict": {
+          "default": "",
+          "title": "Review Verdict",
+          "type": "string"
+        },
+        "review_notes": {
+          "default": "",
+          "title": "Review Notes",
+          "type": "string"
+        },
+        "reviewed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed At"
+        },
+        "original_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Confidence"
+        },
+        "original_severity": {
+          "default": "",
+          "title": "Original Severity",
+          "type": "string"
+        },
+        "superseded_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Superseded By Id"
+        },
+        "decided_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decided By Id"
+        },
+        "decided_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decided At"
+        },
+        "decision_notes": {
+          "default": "",
+          "title": "Decision Notes",
+          "type": "string"
+        },
+        "evidence_count": {
+          "default": 0,
+          "title": "Evidence Count",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/FindingEvidenceRead"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        },
+        "warnings": {
+          "items": {},
+          "title": "Warnings",
+          "type": "array"
+        },
+        "recommendations": {
+          "items": {
+            "$ref": "#/$defs/RecommendationRead"
+          },
+          "title": "Recommendations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "title",
+        "category",
+        "severity",
+        "status",
+        "fact",
+        "inference",
+        "confidence",
+        "requires_approval",
+        "is_reviewed",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "FindingDetail",
+      "type": "object"
+    },
+    "FindingEvidenceRead": {
+      "description": "One citation attached to a finding, with the role it plays.",
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "anchor_id": {
+          "format": "uuid",
+          "title": "Anchor Id",
+          "type": "string"
+        },
+        "evidence_kind": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "role": {
+          "default": "context",
+          "description": "requirement | logic | context — which side of a comparison this supports.",
+          "title": "Role",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceAnchorRead"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "anchor_id",
+        "evidence_kind"
+      ],
+      "title": "FindingEvidenceRead",
+      "type": "object"
+    },
+    "FindingRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "category": {
+          "$ref": "#/$defs/FindingCategory"
+        },
+        "severity": {
+          "$ref": "#/$defs/FindingSeverity"
+        },
+        "status": {
+          "$ref": "#/$defs/FindingStatus"
+        },
+        "fact": {
+          "description": "What the evidence literally shows.",
+          "title": "Fact",
+          "type": "string"
+        },
+        "inference": {
+          "description": "What the agent concluded. Always a conclusion, not a fact.",
+          "title": "Inference",
+          "type": "string"
+        },
+        "suggested_review_action": {
+          "default": "",
+          "title": "Suggested Review Action",
+          "type": "string"
+        },
+        "limitations": {
+          "default": "",
+          "title": "Limitations",
+          "type": "string"
+        },
+        "confidence": {
+          "title": "Confidence",
+          "type": "number"
+        },
+        "requires_approval": {
+          "title": "Requires Approval",
+          "type": "boolean"
+        },
+        "is_reviewed": {
+          "title": "Is Reviewed",
+          "type": "boolean"
+        },
+        "created_by_agent_kind": {
+          "default": "",
+          "title": "Created By Agent Kind",
+          "type": "string"
+        },
+        "agent_run_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Run Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "review_verdict": {
+          "default": "",
+          "title": "Review Verdict",
+          "type": "string"
+        },
+        "review_notes": {
+          "default": "",
+          "title": "Review Notes",
+          "type": "string"
+        },
+        "reviewed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed At"
+        },
+        "original_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Original Confidence"
+        },
+        "original_severity": {
+          "default": "",
+          "title": "Original Severity",
+          "type": "string"
+        },
+        "superseded_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Superseded By Id"
+        },
+        "decided_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decided By Id"
+        },
+        "decided_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decided At"
+        },
+        "decision_notes": {
+          "default": "",
+          "title": "Decision Notes",
+          "type": "string"
+        },
+        "evidence_count": {
+          "default": 0,
+          "title": "Evidence Count",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "title",
+        "category",
+        "severity",
+        "status",
+        "fact",
+        "inference",
+        "confidence",
+        "requires_approval",
+        "is_reviewed",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "FindingRead",
+      "type": "object"
+    },
+    "FindingSeverity": {
+      "title": "FindingSeverity",
+      "type": "string",
+      "enum": [
+        "informational",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "description": ""
+    },
+    "FindingStatus": {
+      "title": "FindingStatus",
+      "type": "string",
+      "enum": [
+        "open",
+        "accepted",
+        "rejected",
+        "resolved"
+      ],
+      "description": ""
+    },
+    "LoginRequest": {
+      "properties": {
+        "email": {
+          "format": "email",
+          "title": "Email",
+          "type": "string"
+        },
+        "password": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Password",
+          "type": "string"
+        }
+      },
+      "required": [
+        "email",
+        "password"
+      ],
+      "title": "LoginRequest",
+      "type": "object"
+    },
+    "LoginResponse": {
+      "description": "Returned on success.\n\nThe token is also set as an httpOnly cookie; it is echoed in the body so a\ndesktop shell that cannot use cookies can send it as a bearer token.",
+      "properties": {
+        "access_token": {
+          "title": "Access Token",
+          "type": "string"
+        },
+        "token_type": {
+          "default": "bearer",
+          "title": "Token Type",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "user": {
+          "$ref": "#/$defs/UserSummary"
+        }
+      },
+      "required": [
+        "access_token",
+        "expires_at",
+        "user"
+      ],
+      "title": "LoginResponse",
+      "type": "object"
+    },
+    "MessageRole": {
+      "title": "MessageRole",
+      "type": "string",
+      "enum": [
+        "agent",
+        "system",
+        "human"
+      ],
+      "description": "Author of a persisted, human-readable agent message."
+    },
+    "ModelConfigurationRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Project Id"
+        },
+        "agent_kind": {
+          "default": "",
+          "title": "Agent Kind",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "temperature": {
+          "default": 0.0,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "max_output_tokens": {
+          "default": 4096,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "provider",
+        "model"
+      ],
+      "title": "ModelConfigurationRead",
+      "type": "object"
+    },
+    "ParsedArtifactDetail": {
+      "description": "Includes the normalised document. Can be large; fetched on demand only.",
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "file_id": {
+          "format": "uuid",
+          "title": "File Id",
+          "type": "string"
+        },
+        "artifact_kind": {
+          "title": "Artifact Kind",
+          "type": "string"
+        },
+        "parser_name": {
+          "title": "Parser Name",
+          "type": "string"
+        },
+        "parser_version": {
+          "title": "Parser Version",
+          "type": "string"
+        },
+        "summary": {
+          "additionalProperties": true,
+          "title": "Summary",
+          "type": "object"
+        },
+        "warnings": {
+          "items": {},
+          "title": "Warnings",
+          "type": "array"
+        },
+        "unsupported": {
+          "items": {},
+          "title": "Unsupported",
+          "type": "array"
+        },
+        "duration_ms": {
+          "default": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "content": {
+          "additionalProperties": true,
+          "title": "Content",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "file_id",
+        "artifact_kind",
+        "parser_name",
+        "parser_version",
+        "created_at"
+      ],
+      "title": "ParsedArtifactDetail",
+      "type": "object"
+    },
+    "ParsedArtifactRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "file_id": {
+          "format": "uuid",
+          "title": "File Id",
+          "type": "string"
+        },
+        "artifact_kind": {
+          "title": "Artifact Kind",
+          "type": "string"
+        },
+        "parser_name": {
+          "title": "Parser Name",
+          "type": "string"
+        },
+        "parser_version": {
+          "title": "Parser Version",
+          "type": "string"
+        },
+        "summary": {
+          "additionalProperties": true,
+          "title": "Summary",
+          "type": "object"
+        },
+        "warnings": {
+          "items": {},
+          "title": "Warnings",
+          "type": "array"
+        },
+        "unsupported": {
+          "items": {},
+          "title": "Unsupported",
+          "type": "array"
+        },
+        "duration_ms": {
+          "default": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "file_id",
+        "artifact_kind",
+        "parser_name",
+        "parser_version",
+        "created_at"
+      ],
+      "title": "ParsedArtifactRead",
+      "type": "object"
+    },
+    "ParserWarningRead": {
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "location": {
+          "default": "",
+          "title": "Location",
+          "type": "string"
+        },
+        "severity": {
+          "default": "warning",
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ParserWarningRead",
+      "type": "object"
+    },
+    "PostMessagePayload": {
+      "additionalProperties": false,
+      "description": "Body of a ``post_message`` action: a short note for the activity feed.",
+      "properties": {
+        "body": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        },
+        "context": {
+          "additionalProperties": true,
+          "title": "Context",
+          "type": "object"
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "title": "PostMessagePayload",
+      "type": "object"
+    },
+    "ProjectCounts": {
+      "description": "Cheap roll-ups so the city view does not have to fetch every collection.",
+      "properties": {
+        "files": {
+          "default": 0,
+          "title": "Files",
+          "type": "integer"
+        },
+        "files_parsed": {
+          "default": 0,
+          "title": "Files Parsed",
+          "type": "integer"
+        },
+        "tasks": {
+          "default": 0,
+          "title": "Tasks",
+          "type": "integer"
+        },
+        "tasks_completed": {
+          "default": 0,
+          "title": "Tasks Completed",
+          "type": "integer"
+        },
+        "findings": {
+          "default": 0,
+          "title": "Findings",
+          "type": "integer"
+        },
+        "findings_open": {
+          "default": 0,
+          "title": "Findings Open",
+          "type": "integer"
+        },
+        "approvals_pending": {
+          "default": 0,
+          "title": "Approvals Pending",
+          "type": "integer"
+        },
+        "reports": {
+          "default": 0,
+          "title": "Reports",
+          "type": "integer"
+        }
+      },
+      "title": "ProjectCounts",
+      "type": "object"
+    },
+    "ProjectDetail": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "client_reference": {
+          "title": "Client Reference",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ProjectStatus"
+        },
+        "is_paused": {
+          "title": "Is Paused",
+          "type": "boolean"
+        },
+        "created_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created By Id"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "paused_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paused At"
+        },
+        "archived_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Archived At"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "failure_reason": {
+          "default": "",
+          "title": "Failure Reason",
+          "type": "string"
+        },
+        "event_seq": {
+          "default": 0,
+          "title": "Event Seq",
+          "type": "integer"
+        },
+        "tokens_used": {
+          "default": 0,
+          "title": "Tokens Used",
+          "type": "integer"
+        },
+        "attributes": {
+          "additionalProperties": true,
+          "title": "Attributes",
+          "type": "object"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/$defs/ProjectMemberRead"
+          },
+          "title": "Members",
+          "type": "array"
+        },
+        "counts": {
+          "$ref": "#/$defs/ProjectCounts"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "client_reference",
+        "status",
+        "is_paused",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "ProjectDetail",
+      "type": "object"
+    },
+    "ProjectMemberRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "user_id": {
+          "format": "uuid",
+          "title": "User Id",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/ProjectRole"
+        },
+        "display_name": {
+          "default": "",
+          "title": "Display Name",
+          "type": "string"
+        },
+        "email": {
+          "default": "",
+          "title": "Email",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "user_id",
+        "role"
+      ],
+      "title": "ProjectMemberRead",
+      "type": "object"
+    },
+    "ProjectRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "client_reference": {
+          "title": "Client Reference",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ProjectStatus"
+        },
+        "is_paused": {
+          "title": "Is Paused",
+          "type": "boolean"
+        },
+        "created_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created By Id"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "paused_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paused At"
+        },
+        "archived_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Archived At"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "failure_reason": {
+          "default": "",
+          "title": "Failure Reason",
+          "type": "string"
+        },
+        "event_seq": {
+          "default": 0,
+          "title": "Event Seq",
+          "type": "integer"
+        },
+        "tokens_used": {
+          "default": 0,
+          "title": "Tokens Used",
+          "type": "integer"
+        },
+        "attributes": {
+          "additionalProperties": true,
+          "title": "Attributes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "client_reference",
+        "status",
+        "is_paused",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "ProjectRead",
+      "type": "object"
+    },
+    "ProjectRole": {
+      "title": "ProjectRole",
+      "type": "string",
+      "enum": [
+        "owner",
+        "engineer",
+        "reviewer",
+        "viewer"
+      ],
+      "description": "Per-project membership role."
+    },
+    "ProjectStatus": {
+      "title": "ProjectStatus",
+      "type": "string",
+      "enum": [
+        "draft",
+        "ingesting",
+        "planned",
+        "running",
+        "awaiting_review",
+        "completed",
+        "failed",
+        "archived"
+      ],
+      "description": ""
+    },
+    "ProviderKind": {
+      "title": "ProviderKind",
+      "type": "string",
+      "enum": [
+        "mock",
+        "ollama",
+        "openai",
+        "anthropic"
+      ],
+      "description": ""
+    },
+    "RecommendationRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "finding_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finding Id"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "title": "Body",
+          "type": "string"
+        },
+        "rationale": {
+          "default": "",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/RecommendationStatus"
+        },
+        "safety_related": {
+          "default": false,
+          "title": "Safety Related",
+          "type": "boolean"
+        },
+        "equipment_damage_related": {
+          "default": false,
+          "title": "Equipment Damage Related",
+          "type": "boolean"
+        },
+        "requires_approval": {
+          "default": true,
+          "title": "Requires Approval",
+          "type": "boolean"
+        },
+        "confidence": {
+          "default": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "effort_estimate": {
+          "default": "",
+          "title": "Effort Estimate",
+          "type": "string"
+        },
+        "created_by_agent_kind": {
+          "default": "",
+          "title": "Created By Agent Kind",
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "title",
+        "status",
+        "created_at"
+      ],
+      "title": "RecommendationRead",
+      "type": "object"
+    },
+    "RecommendationStatus": {
+      "title": "RecommendationStatus",
+      "type": "string",
+      "enum": [
+        "proposed",
+        "approved",
+        "rejected",
+        "superseded"
+      ],
+      "description": ""
+    },
+    "ReportBlockerPayload": {
+      "additionalProperties": false,
+      "description": "Body of a ``report_blocker`` action: work cannot proceed, and why.",
+      "properties": {
+        "reason": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "missing_inputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing Inputs",
+          "type": "array"
+        },
+        "resolvable_by_upload": {
+          "default": false,
+          "title": "Resolvable By Upload",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "ReportBlockerPayload",
+      "type": "object"
+    },
+    "ReportNoFindingsPayload": {
+      "additionalProperties": false,
+      "description": "Body of a ``report_no_findings`` action.\n\nExplicit rather than implied: an agent that found nothing must say so, and\nsay what it looked at, so silence is never mistaken for a clean result.",
+      "properties": {
+        "scope_examined": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Scope Examined",
+          "type": "string"
+        },
+        "limitations": {
+          "default": "",
+          "title": "Limitations",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope_examined"
+      ],
+      "title": "ReportNoFindingsPayload",
+      "type": "object"
+    },
+    "ReportRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "report_type": {
+          "title": "Report Type",
+          "type": "string"
+        },
+        "export_format": {
+          "title": "Export Format",
+          "type": "string"
+        },
+        "provider_name": {
+          "default": "",
+          "title": "Provider Name",
+          "type": "string"
+        },
+        "provider_version": {
+          "default": "",
+          "title": "Provider Version",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ReportStatus"
+        },
+        "media_type": {
+          "default": "",
+          "title": "Media Type",
+          "type": "string"
+        },
+        "size_bytes": {
+          "default": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "default": "",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "finding_ids": {
+          "items": {},
+          "title": "Finding Ids",
+          "type": "array"
+        },
+        "summary": {
+          "additionalProperties": true,
+          "title": "Summary",
+          "type": "object"
+        },
+        "error_message": {
+          "default": "",
+          "title": "Error Message",
+          "type": "string"
+        },
+        "generated_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generated By Id"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "download_path": {
+          "default": "",
+          "title": "Download Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "report_type",
+        "export_format",
+        "title",
+        "status",
+        "created_at"
+      ],
+      "title": "ReportRead",
+      "type": "object"
+    },
+    "ReportStatus": {
+      "title": "ReportStatus",
+      "type": "string",
+      "enum": [
+        "draft",
+        "generated",
+        "failed"
+      ],
+      "description": ""
+    },
+    "RequestApprovalPayload": {
+      "additionalProperties": false,
+      "description": "Body of a ``request_approval`` action.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ApprovalKind"
+        },
+        "title": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "question": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "finding_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finding Id"
+        },
+        "recommendation_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recommendation Id"
+        },
+        "context": {
+          "additionalProperties": true,
+          "title": "Context",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "title",
+        "question"
+      ],
+      "title": "RequestApprovalPayload",
+      "type": "object"
+    },
+    "RoleName": {
+      "title": "RoleName",
+      "type": "string",
+      "enum": [
+        "engineer",
+        "reviewer",
+        "administrator"
+      ],
+      "description": "Global (system-wide) role assigned to a :class:`~app.models.user.User`."
+    },
+    "RunRead": {
+      "description": "A workflow run: the task graph created by one ``POST /runs`` call.",
+      "properties": {
+        "run_id": {
+          "format": "uuid",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "task_count": {
+          "title": "Task Count",
+          "type": "integer"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/TaskRead"
+          },
+          "title": "Tasks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run_id",
+        "project_id",
+        "status",
+        "started_at",
+        "task_count"
+      ],
+      "title": "RunRead",
+      "type": "object"
+    },
+    "StartRunRequest": {
+      "description": "Starts a workflow run over the project's current files.",
+      "properties": {
+        "force_reparse": {
+          "default": false,
+          "title": "Force Reparse",
+          "type": "boolean"
+        },
+        "file_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "File Ids",
+          "type": "array"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "title": "StartRunRequest",
+      "type": "object"
+    },
+    "TaskDetail": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "kind": {
+          "$ref": "#/$defs/TaskKind"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "priority": {
+          "default": 100,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "agent_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Kind"
+        },
+        "agent_instance_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Instance Id"
+        },
+        "attempts": {
+          "default": 0,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "max_attempts": {
+          "default": 3,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "available_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Available At"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finished At"
+        },
+        "error_code": {
+          "default": "",
+          "title": "Error Code",
+          "type": "string"
+        },
+        "error_message": {
+          "default": "",
+          "title": "Error Message",
+          "type": "string"
+        },
+        "blocked_reason": {
+          "default": "",
+          "title": "Blocked Reason",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "result": {
+          "additionalProperties": true,
+          "title": "Result",
+          "type": "object"
+        },
+        "depends_on": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "blocks": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Blocks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "kind",
+        "title",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "TaskDetail",
+      "type": "object"
+    },
+    "TaskKind": {
+      "title": "TaskKind",
+      "type": "string",
+      "enum": [
+        "intake",
+        "inventory_files",
+        "parse_file",
+        "build_evidence_graph",
+        "plan_project",
+        "review_plc",
+        "review_interlocks",
+        "senior_review",
+        "request_approvals",
+        "delivery",
+        "finalize_project"
+      ],
+      "description": "Identifies the handler that executes a task."
+    },
+    "TaskRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "kind": {
+          "$ref": "#/$defs/TaskKind"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "priority": {
+          "default": 100,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "agent_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Kind"
+        },
+        "agent_instance_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Instance Id"
+        },
+        "attempts": {
+          "default": 0,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "max_attempts": {
+          "default": 3,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "available_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Available At"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finished At"
+        },
+        "error_code": {
+          "default": "",
+          "title": "Error Code",
+          "type": "string"
+        },
+        "error_message": {
+          "default": "",
+          "title": "Error Message",
+          "type": "string"
+        },
+        "blocked_reason": {
+          "default": "",
+          "title": "Blocked Reason",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "kind",
+        "title",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "TaskRead",
+      "type": "object"
+    },
+    "TaskStatus": {
+      "title": "TaskStatus",
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "blocked",
+        "awaiting_approval",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "description": ""
+    },
+    "UpdateFindingRequest": {
+      "description": "Human disposition of a finding.\n\nOnly ``status`` and reviewer notes are editable. The agent-produced content\n(fact, inference, evidence) is immutable so the record of what the platform\nactually said cannot be rewritten after the fact.",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/FindingStatus"
+        },
+        "decision_notes": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Decision Notes",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "UpdateFindingRequest",
+      "type": "object"
+    },
+    "UpdateFindingReviewPayload": {
+      "additionalProperties": false,
+      "description": "Body of an ``update_finding_review`` action (Senior Review Agent only).\n\nThe senior reviewer may lower confidence, adjust severity and reject\nunsupported claims. It may not delete a finding, and it may not raise\nconfidence above what the originating agent claimed — review can only add\ndoubt, never manufacture certainty.",
+      "properties": {
+        "finding_id": {
+          "format": "uuid",
+          "title": "Finding Id",
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "supported",
+            "unsupported",
+            "duplicate",
+            "needs_more_evidence"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Notes",
+          "type": "string"
+        },
+        "adjusted_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FindingSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "adjusted_confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adjusted Confidence"
+        },
+        "duplicate_of_finding_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duplicate Of Finding Id"
+        },
+        "parser_limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Parser Limitations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "finding_id",
+        "verdict"
+      ],
+      "title": "UpdateFindingReviewPayload",
+      "type": "object"
+    },
+    "UpdateModelConfigurationRequest": {
+      "description": "Administrator-only. The provider must already be enabled in settings.",
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "temperature": {
+          "default": 0.0,
+          "maximum": 2.0,
+          "minimum": 0.0,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "max_output_tokens": {
+          "default": 4096,
+          "maximum": 200000,
+          "minimum": 1,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ],
+      "title": "UpdateModelConfigurationRequest",
+      "type": "object"
+    },
+    "UpdateProjectRequest": {
+      "description": "Partial update. Omitted fields are left unchanged.\n\n``status`` is intentionally absent: project status is owned by the workflow\nengine and cannot be set directly.",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "client_reference": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Reference"
+        },
+        "attributes": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attributes"
+        }
+      },
+      "title": "UpdateProjectRequest",
+      "type": "object"
+    },
+    "UploadResponse": {
+      "properties": {
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "accepted_count": {
+          "title": "Accepted Count",
+          "type": "integer"
+        },
+        "rejected_count": {
+          "title": "Rejected Count",
+          "type": "integer"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/UploadResultItem"
+          },
+          "title": "Results",
+          "type": "array"
+        }
+      },
+      "required": [
+        "project_id",
+        "accepted_count",
+        "rejected_count",
+        "results"
+      ],
+      "title": "UploadResponse",
+      "type": "object"
+    },
+    "UploadResultItem": {
+      "description": "Per-file outcome of a multi-file upload.\n\nA rejected file is reported here with the reason rather than failing the\nwhole request, so uploading nine good files and one executable does not lose\nthe nine.",
+      "properties": {
+        "accepted": {
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "original_filename": {
+          "title": "Original Filename",
+          "type": "string"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UploadedFileRead"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "extracted": {
+          "items": {
+            "$ref": "#/$defs/UploadedFileRead"
+          },
+          "title": "Extracted",
+          "type": "array"
+        },
+        "rejection_code": {
+          "default": "",
+          "title": "Rejection Code",
+          "type": "string"
+        },
+        "rejection_reason": {
+          "default": "",
+          "title": "Rejection Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted",
+        "original_filename"
+      ],
+      "title": "UploadResultItem",
+      "type": "object"
+    },
+    "UploadedFileRead": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "original_filename": {
+          "title": "Original Filename",
+          "type": "string"
+        },
+        "file_kind": {
+          "$ref": "#/$defs/FileKind"
+        },
+        "document_role": {
+          "$ref": "#/$defs/DocumentRole"
+        },
+        "role_declared_by_user": {
+          "default": false,
+          "title": "Role Declared By User",
+          "type": "boolean"
+        },
+        "media_type": {
+          "default": "",
+          "title": "Media Type",
+          "type": "string"
+        },
+        "extension": {
+          "default": "",
+          "title": "Extension",
+          "type": "string"
+        },
+        "size_bytes": {
+          "default": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "default": "",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/FileStatus"
+        },
+        "status_detail": {
+          "default": "",
+          "title": "Status Detail",
+          "type": "string"
+        },
+        "uploaded_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uploaded By Id"
+        },
+        "parent_file_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set when this file was extracted from an uploaded archive.",
+          "title": "Parent File Id"
+        },
+        "archive_member_path": {
+          "default": "",
+          "title": "Archive Member Path",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "original_filename",
+        "file_kind",
+        "document_role",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "UploadedFileRead",
+      "type": "object"
+    },
+    "UserSummary": {
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "email": {
+          "title": "Email",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "is_active": {
+          "title": "Is Active",
+          "type": "boolean"
+        },
+        "roles": {
+          "items": {
+            "$ref": "#/$defs/RoleName"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "email",
+        "display_name",
+        "is_active"
+      ],
+      "title": "UserSummary",
+      "type": "object"
+    },
+    "WorkflowControlRequest": {
+      "properties": {
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "title": "WorkflowControlRequest",
+      "type": "object"
+    },
+    "WorkflowStateResponse": {
+      "properties": {
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "project_status": {
+          "title": "Project Status",
+          "type": "string"
+        },
+        "is_paused": {
+          "title": "Is Paused",
+          "type": "boolean"
+        },
+        "active_run_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active Run Id"
+        },
+        "queued": {
+          "default": 0,
+          "title": "Queued",
+          "type": "integer"
+        },
+        "running": {
+          "default": 0,
+          "title": "Running",
+          "type": "integer"
+        },
+        "blocked": {
+          "default": 0,
+          "title": "Blocked",
+          "type": "integer"
+        },
+        "awaiting_approval": {
+          "default": 0,
+          "title": "Awaiting Approval",
+          "type": "integer"
+        },
+        "completed": {
+          "default": 0,
+          "title": "Completed",
+          "type": "integer"
+        },
+        "failed": {
+          "default": 0,
+          "title": "Failed",
+          "type": "integer"
+        },
+        "cancelled": {
+          "default": 0,
+          "title": "Cancelled",
+          "type": "integer"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "project_status",
+        "is_paused"
+      ],
+      "title": "WorkflowStateResponse",
+      "type": "object"
+    }
+  }
+}

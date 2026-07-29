@@ -1,0 +1,127 @@
+openapi: 3.1.0
+info:
+  title: ESCO Engineering City
+  description: "\nLocal-first, evidence-based engineering review platform for ESCO Group.\n\nThe platform\
+    \ analyses uploaded engineering documents (Studio 5000 L5X exports,\ninterlock schedules, I/O lists,\
+    \ functional descriptions) and produces findings\nthat always cite exact evidence.\n\n**Boundaries\
+    \ this API enforces by design**\n\n* It never connects to an industrial controller and never uploads,\
+    \ downloads or\n  modifies controller programs.\n* It does not parse proprietary `.ACD` files and\
+    \ does not claim to.\n* It never applies a PLC or electrical design change; recommendations are\n\
+    \  proposals for a human engineer.\n* Safety- and equipment-damage-related recommendations cannot\
+    \ be released\n  without a recorded human approval.\n* Model output is never presented as approved\
+    \ engineering, and raw model\n  reasoning is never stored or returned.\n"
+  version: 0.1.0
+  x-contract-version: 1.0.0
+  license:
+    name: ESCO Group internal
+paths:
+  /api/health:
+    get:
+      tags:
+      - system
+      summary: Liveness, contract version and installed capabilities
+      description: 'Report whether the backend is usable, and precisely what it can do.
+
+
+        Returns ``degraded`` rather than failing when the database is unreachable,
+
+        so an operator can still read the diagnosis from a running process.'
+      operationId: health_api_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /api/system/capabilities:
+    get:
+      tags:
+      - system
+      summary: Optional plugin capabilities and why any are unavailable
+      operationId: capabilities_api_system_capabilities_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/CapabilityStatus'
+                type: array
+                title: Response Capabilities Api System Capabilities Get
+components:
+  schemas:
+    CapabilityStatus:
+      properties:
+        name:
+          type: string
+          title: Name
+        available:
+          type: boolean
+          title: Available
+        provider:
+          type: string
+          title: Provider
+          default: ''
+        version:
+          type: string
+          title: Version
+          default: ''
+        detail:
+          type: string
+          title: Detail
+          description: Why the capability is unavailable, when it is.
+          default: ''
+      type: object
+      required:
+      - name
+      - available
+      title: CapabilityStatus
+      description: 'Whether an optional, plugin-provided capability is installed.
+
+
+        Reported rather than crashed on: a missing delivery plugin degrades the
+
+        product, it does not break it.'
+    HealthResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+          description: '``ok`` or ``degraded``.'
+        app_name:
+          type: string
+          title: App Name
+        version:
+          type: string
+          title: Version
+        contract_version:
+          type: string
+          title: Contract Version
+        environment:
+          type: string
+          title: Environment
+        database:
+          type: string
+          title: Database
+          description: '``ok`` or an error summary.'
+        enabled_providers:
+          items:
+            type: string
+          type: array
+          title: Enabled Providers
+        capabilities:
+          items:
+            $ref: '#/components/schemas/CapabilityStatus'
+          type: array
+          title: Capabilities
+      type: object
+      required:
+      - status
+      - app_name
+      - version
+      - contract_version
+      - environment
+      - database
+      title: HealthResponse

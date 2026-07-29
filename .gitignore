@@ -1,0 +1,42 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+.env
+.env.local
+desktop/src-tauri/target/
+*.log
+
+# --- Backend: Python (Claude-owned additions) ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+build/
+*.egg-info/
+.eggs/
+
+# --- Backend: tooling caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Backend: local runtime data (never commit project artifacts) ---
+/data/
+*.sqlite3
+*.sqlite3-journal
+*.db
+
+# --- Secrets: allow only the checked-in example ---
+.env.*
+!.env.example
+
+# --- Logs ---
+logs/
+
