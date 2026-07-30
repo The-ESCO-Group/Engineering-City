@@ -1,16 +1,12 @@
 .city-map-hud {
-  --city-map-hud-ink: #f5f9fc;
-  --city-map-hud-muted: #8598a8;
-  --city-map-hud-line: rgb(76 215 255 / 28%);
-  --city-map-hud-cyan: #4cdbff;
-  --city-map-hud-cyan-soft: rgb(76 219 255 / 13%);
-  --city-map-hud-orange: #ff791a;
-  --city-map-hud-alert: #ff5c6c;
+  --city-map-hud-cyan: #54dff4;
+  --city-map-hud-orange: #ff7a1a;
+  --city-map-hud-alert: #ff6370;
   position: absolute;
   inset: 0;
   z-index: 6;
   overflow: hidden;
-  color: var(--city-map-hud-ink);
+  color: #f4f9fb;
   font-family: Inter, "Segoe UI", sans-serif;
   pointer-events: none;
   container: city-map-hud / inline-size;
@@ -28,73 +24,59 @@
   top: var(--city-map-hud-y);
   width: max-content;
   max-width: 168px;
-  padding: 5px 9px 5px 10px;
-  border: 1px solid rgb(76 219 255 / 16%);
-  border-left-color: rgb(76 219 255 / 48%);
-  border-radius: 2px;
-  background: linear-gradient(120deg, rgb(5 15 29 / 88%), rgb(7 25 42 / 64%));
-  box-shadow:
-    0 7px 18px rgb(0 6 14 / 28%),
-    inset 0 1px rgb(255 255 255 / 3%);
-  backdrop-filter: blur(6px);
+  padding: 3px 6px 3px 9px;
+  border: 0;
+  border-left: 1px solid rgb(84 223 244 / 48%);
+  border-radius: 1px;
+  background: linear-gradient(90deg, rgb(2 12 21 / 55%), transparent 88%);
   color: inherit;
   text-align: left;
   text-transform: uppercase;
+  text-shadow: 0 1px 6px #000;
   transform: translate(-50%, -50%);
   pointer-events: auto;
   touch-action: manipulation;
   cursor: pointer;
   transition:
     border-color 140ms ease,
-    background 140ms ease,
+    background-color 140ms ease,
     transform 140ms ease;
 }
 
 .city-map-hud__district::before {
   position: absolute;
-  top: calc(100% + 1px);
+  top: 100%;
   left: -1px;
   width: 1px;
-  height: 11px;
-  background: linear-gradient(rgb(76 219 255 / 52%), transparent);
+  height: 10px;
+  background: linear-gradient(rgb(84 223 244 / 48%), transparent);
   content: "";
 }
 
 .city-map-hud__district::after {
   position: absolute;
-  top: calc(100% + 10px);
+  top: calc(100% + 8px);
   left: -3px;
   width: 5px;
   height: 5px;
-  border: 1px solid rgb(76 219 255 / 78%);
+  border: 1px solid rgb(84 223 244 / 76%);
   border-radius: 50%;
-  background: #071522;
-  box-shadow:
-    0 0 0 2px rgb(0 5 13 / 52%),
-    0 0 6px rgb(76 219 255 / 30%);
+  background: #061521;
+  box-shadow: 0 0 6px rgb(84 223 244 / 24%);
   content: "";
 }
 
 .city-map-hud__district:hover,
 .city-map-hud__district:focus-visible {
-  border-color: rgb(76 219 255 / 46%);
-  background: linear-gradient(120deg, rgb(7 21 38 / 94%), rgb(8 32 52 / 76%));
-  box-shadow:
-    0 8px 20px rgb(0 6 14 / 36%),
-    0 0 12px rgb(76 219 255 / 10%);
+  border-left-color: var(--city-map-hud-cyan);
+  background: linear-gradient(90deg, rgb(5 23 35 / 84%), rgb(5 23 35 / 28%) 82%, transparent);
+  transform: translate(-50%, -50%) translateY(-1px);
 }
 
 .city-map-hud__district.is-selected {
-  border-color: rgb(255 121 26 / 74%);
   border-left-color: var(--city-map-hud-orange);
-  background: linear-gradient(120deg, rgb(32 18 12 / 94%), rgb(9 21 31 / 82%));
-  box-shadow:
-    0 8px 22px rgb(0 5 12 / 42%),
-    0 0 15px rgb(255 121 26 / 24%);
-}
-
-.city-map-hud__district:hover {
-  transform: translate(-50%, -50%) translateY(-1px);
+  background: linear-gradient(90deg, rgb(42 22 10 / 86%), rgb(7 19 27 / 32%) 84%, transparent);
+  filter: drop-shadow(0 0 8px rgb(255 122 26 / 18%));
 }
 
 .city-map-hud__district.is-selected::before {
@@ -104,9 +86,7 @@
 .city-map-hud__district.is-selected::after {
   border-color: var(--city-map-hud-orange);
   background: var(--city-map-hud-orange);
-  box-shadow:
-    0 0 0 2px rgb(0 0 0 / 72%),
-    0 0 10px rgb(255 121 26 / 56%);
+  box-shadow: 0 0 8px rgb(255 122 26 / 52%);
 }
 
 .city-map-hud__district:focus-visible {
@@ -116,49 +96,45 @@
 
 .city-map-hud__district-name {
   display: block;
+  color: #eff8fa;
+  font-size: 7.5px;
+  font-weight: 800;
+  letter-spacing: 0.065em;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
-.city-map-hud__district-name {
-  color: #f7fbfd;
-  font-size: 8px;
-  font-weight: 750;
-  letter-spacing: 0.62px;
-  line-height: 1.2;
-  text-shadow: 0 1px 5px #000;
-}
-
 .city-map-hud__district.is-selected .city-map-hud__district-name {
-  color: #ff9a52;
+  color: #ffad72;
 }
 
 .city-map-hud__district-detail {
   display: block;
   overflow: hidden;
-  max-width: 154px;
-  max-height: 12px;
-  margin-top: 2px;
+  max-width: 0;
+  max-height: 0;
+  margin-top: 0;
   color: var(--city-map-hud-cyan);
-  font-size: 6.5px;
-  font-weight: 600;
-  letter-spacing: 0.26px;
+  font-size: 6px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
   line-height: 1.25;
-  opacity: 1;
-  transform: translateY(0);
+  opacity: 0;
+  transform: translateY(-2px);
   white-space: nowrap;
   transition:
-    max-width 180ms ease,
-    max-height 180ms ease,
-    margin-top 180ms ease,
+    max-width 160ms ease,
+    max-height 160ms ease,
+    margin-top 160ms ease,
     opacity 120ms ease,
-    transform 180ms ease;
+    transform 160ms ease;
 }
 
 .city-map-hud__district:hover .city-map-hud__district-detail,
 .city-map-hud__district:focus-visible .city-map-hud__district-detail,
 .city-map-hud__district.is-selected .city-map-hud__district-detail {
   max-width: 154px;
-  max-height: 12px;
+  max-height: 11px;
   margin-top: 2px;
   opacity: 1;
   transform: translateY(0);
@@ -166,65 +142,45 @@
 
 .city-map-hud__operations {
   position: absolute;
-  right: 15px;
-  bottom: 18px;
-  width: 178px;
-  padding: 10px 11px;
-  border: 1px solid rgb(76 219 255 / 22%);
-  background:
-    linear-gradient(145deg, rgb(7 20 37 / 90%), rgb(4 12 24 / 84%)),
-    rgb(4 12 24 / 84%);
-  box-shadow:
-    0 16px 34px rgb(0 5 14 / 38%),
-    inset 0 1px rgb(132 230 255 / 5%);
-  backdrop-filter: blur(10px);
+  right: 16px;
+  bottom: 16px;
+  width: 182px;
+  padding: 9px 10px;
+  border: 1px solid rgb(84 223 244 / 20%);
+  border-radius: 4px;
+  background: linear-gradient(145deg, rgb(7 24 38 / 86%), rgb(3 13 22 / 88%));
+  box-shadow: 0 14px 34px rgb(0 5 14 / 34%);
+  -webkit-backdrop-filter: blur(12px) saturate(115%);
+  backdrop-filter: blur(12px) saturate(115%);
   user-select: none;
-}
-
-.city-map-hud__operations::before,
-.city-map-hud__operations::after {
-  position: absolute;
-  left: 0;
-  width: 58%;
-  height: 1px;
-  background: linear-gradient(90deg, rgb(76 219 255 / 56%), transparent);
-  content: "";
-}
-
-.city-map-hud__operations::before {
-  top: 0;
-}
-
-.city-map-hud__operations::after {
-  bottom: 0;
 }
 
 .city-map-hud__operations header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 5px;
-  color: #f5fbff;
-  font-size: 8px;
-  font-weight: 750;
-  letter-spacing: 0.7px;
+  color: #f1fbfd;
+  font-size: 7.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.city-map-hud__operations header i {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--city-map-hud-cyan);
-  box-shadow: 0 0 7px rgb(76 219 255 / 62%);
+.city-map-hud__operations header small {
+  padding: 2px 4px;
+  border: 1px solid rgb(255 122 26 / 42%);
+  border-radius: 2px;
+  color: #ffad72;
+  font-size: 5.5px;
+  letter-spacing: 0.08em;
 }
 
 .city-map-hud__operations > p {
   overflow: hidden;
-  margin: 1px 0 8px;
-  color: #7893a6;
-  font-size: 6px;
-  letter-spacing: 0.32px;
+  margin: 3px 0 7px;
+  color: #698591;
+  font-size: 5.5px;
+  letter-spacing: 0.05em;
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
@@ -232,67 +188,70 @@
 
 .city-map-hud__operations dl {
   display: grid;
-  gap: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
   margin: 0;
 }
 
 .city-map-hud__operations dl > div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  min-width: 0;
+  gap: 1px;
 }
 
 .city-map-hud__operations dt {
-  color: #8ea4b3;
-  font-size: 6px;
-  font-weight: 600;
-  letter-spacing: 0.35px;
+  overflow: hidden;
+  color: #819da7;
+  font-size: 5.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .city-map-hud__operations dd {
   margin: 0;
   color: var(--city-map-hud-cyan);
   font-family: "Roboto Mono", Consolas, monospace;
-  font-size: 7.5px;
-  font-weight: 700;
+  font-size: 8px;
+  font-weight: 750;
 }
 
 .city-map-hud__operations dl > .is-alert dt {
-  color: #c88d97;
+  color: #bd8b94;
 }
 
 .city-map-hud__operations dl > .is-alert dd {
   color: var(--city-map-hud-alert);
-  text-shadow: 0 0 7px rgb(255 92 108 / 34%);
+  text-shadow: 0 0 7px rgb(255 99 112 / 30%);
 }
 
 .city-map-hud__readiness {
   height: 1px;
   margin-top: 7px;
   overflow: hidden;
-  background: rgb(76 219 255 / 11%);
+  background: rgb(84 223 244 / 10%);
 }
 
 .city-map-hud__readiness span {
   display: block;
   height: 100%;
   background: linear-gradient(90deg, #1a91bd, var(--city-map-hud-cyan));
-  box-shadow: 0 0 7px rgb(76 219 255 / 38%);
+  box-shadow: 0 0 7px rgb(84 223 244 / 34%);
 }
 
 .city-map-hud__action {
   width: 100%;
-  height: 25px;
-  margin-top: 8px;
-  border: 1px solid rgb(76 219 255 / 34%);
+  height: 23px;
+  margin-top: 7px;
+  border: 1px solid rgb(84 223 244 / 28%);
   border-radius: 2px;
-  background: var(--city-map-hud-cyan-soft);
-  color: #bdefff;
-  font-size: 6.5px;
-  font-weight: 750;
-  letter-spacing: 0.62px;
+  background: rgb(84 223 244 / 8%);
+  color: #bcecf3;
+  font-size: 6px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   pointer-events: auto;
   touch-action: manipulation;
@@ -300,46 +259,39 @@
   transition:
     border-color 140ms ease,
     background-color 140ms ease,
-    color 140ms ease,
-    box-shadow 140ms ease;
+    color 140ms ease;
 }
 
 .city-map-hud__action:hover {
-  border-color: rgb(76 219 255 / 66%);
-  background: rgb(76 219 255 / 20%);
-  color: #effbff;
-  box-shadow: 0 0 11px rgb(76 219 255 / 12%);
+  border-color: rgb(84 223 244 / 58%);
+  background: rgb(84 223 244 / 15%);
+  color: #f0fdff;
 }
 
 .city-map-hud__action:focus-visible {
-  outline: 1px solid #fff;
+  outline: 2px solid var(--city-map-hud-cyan);
   outline-offset: 2px;
 }
 
 @container city-map-hud (max-width: 760px) {
   .city-map-hud__district {
-    padding: 4px 6px;
+    padding: 3px 5px 3px 7px;
   }
 
   .city-map-hud__district-name {
-    font-size: 7.5px;
+    font-size: 7px;
   }
 
   .city-map-hud__operations {
     right: 10px;
     bottom: 10px;
-    width: 158px;
-    padding: 9px;
+    width: 170px;
   }
 }
 
 @container city-map-hud (max-width: 580px) {
   .city-map-hud__operations > p {
     display: none;
-  }
-
-  .city-map-hud__operations {
-    width: 146px;
   }
 }
 

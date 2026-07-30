@@ -72,6 +72,63 @@ interface AgentRuntime {
   phase: number;
 }
 
+interface LinearMotion {
+  from: Point2;
+  to: Point2;
+  length: number;
+  progress: number;
+  speed: number;
+  direction: 1 | -1;
+  laneOffset: number;
+  surfaceY: number;
+}
+
+interface VehicleRuntime {
+  body: THREE.InstancedMesh;
+  cabin: THREE.InstancedMesh;
+  lamps: THREE.InstancedMesh;
+  motions: LinearMotion[];
+  dummy: THREE.Object3D;
+}
+
+interface PedestrianMotion {
+  center: Point2;
+  radius: number;
+  angle: number;
+  speed: number;
+  phase: number;
+  groundY: number;
+  idle: boolean;
+}
+
+interface PedestrianRuntime {
+  bodies: THREE.InstancedMesh;
+  heads: THREE.InstancedMesh;
+  motions: PedestrianMotion[];
+  dummy: THREE.Object3D;
+}
+
+interface PulseMotion extends LinearMotion {
+  scale: Vec3;
+}
+
+interface PulseRuntime {
+  mesh: THREE.InstancedMesh;
+  motions: PulseMotion[];
+  dummy: THREE.Object3D;
+}
+
+interface SignalSpec {
+  position: Vec3;
+  phase: number;
+}
+
+interface SignalRuntime {
+  mesh: THREE.InstancedMesh;
+  signals: SignalSpec[];
+  dummy: THREE.Object3D;
+}
+
 interface RoadSegment {
   from: Point2;
   to: Point2;
@@ -246,7 +303,7 @@ const ROOT_STYLE: CSSProperties = {
   position: "absolute",
   inset: 0,
   overflow: "hidden",
-  background: "#030817"
+  background: "#173b54"
 };
 
 const CANVAS_MOUNT_STYLE: CSSProperties = {
@@ -376,19 +433,19 @@ const makeGlow = (color: number, opacity: number) =>
 
 function createPalette(): MaterialPalette {
   return {
-    white: makeStandard(0xecf3f3, 0.46, 0.15),
-    light: makeStandard(0xb9c7cb, 0.52, 0.2),
-    concrete: makeStandard(0x667983, 0.78, 0.09),
-    roof: makeStandard(0x788b94, 0.58, 0.32),
+    white: makeStandard(0xf4f6f2, 0.44, 0.13),
+    light: makeStandard(0xcbd7d7, 0.5, 0.18),
+    concrete: makeStandard(0x789098, 0.74, 0.08),
+    roof: makeStandard(0x879ba0, 0.56, 0.28),
     glassCyan: makeGlass(0x06344a, 0x00c8f2, 0.66),
     glassOrange: makeGlass(0x3b1b0d, 0xff5a00, 0.58),
     glassPurple: makeGlass(0x2d1548, 0xa34fff, 0.62),
-    blackSteel: makeStandard(0x13212c, 0.32, 0.74),
-    asphalt: makeStandard(0x172535, 0.86, 0.08),
+    blackSteel: makeStandard(0x1a303c, 0.34, 0.68),
+    asphalt: makeStandard(0x263d49, 0.84, 0.07),
     water: new THREE.MeshPhysicalMaterial({
-      color: 0x062a43,
-      emissive: 0x003e5b,
-      emissiveIntensity: 0.62,
+      color: 0x0b526b,
+      emissive: 0x00637b,
+      emissiveIntensity: 0.5,
       roughness: 0.2,
       metalness: 0.42,
       clearcoat: 1,
@@ -397,14 +454,14 @@ function createPalette(): MaterialPalette {
     contact: new THREE.MeshBasicMaterial({
       color: 0x020405,
       transparent: true,
-      opacity: 0.34,
+      opacity: 0.27,
       depthWrite: false
     }),
-    park: makeEmissive(0x133c2b, 0x07331e),
+    park: makeEmissive(0x1d6841, 0x0b4227),
     foliage: new THREE.MeshStandardMaterial({
-      color: 0x38c76b,
-      emissive: 0x0a6b34,
-      emissiveIntensity: 0.42,
+      color: 0x48d878,
+      emissive: 0x0b6a35,
+      emissiveIntensity: 0.32,
       roughness: 0.82,
       metalness: 0.01
     }),
@@ -527,7 +584,7 @@ function createWorldGround(scene: THREE.Scene, palette: MaterialPalette) {
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(1400, 1400),
     new THREE.MeshStandardMaterial({
-      color: 0x050b18,
+      color: 0x122a38,
       roughness: 0.98,
       metalness: 0.02
     })
@@ -540,7 +597,7 @@ function createWorldGround(scene: THREE.Scene, palette: MaterialPalette) {
   const urbanGround = new THREE.Mesh(
     new THREE.PlaneGeometry(252, 184),
     new THREE.MeshStandardMaterial({
-      color: 0x081522,
+      color: 0x183846,
       roughness: 0.96,
       metalness: 0.035
     })
@@ -614,15 +671,15 @@ function createDistrictPads(scene: THREE.Scene, palette: MaterialPalette) {
     const surfaceMaterial = new THREE.MeshStandardMaterial({
       color:
         accent === "orange"
-          ? 0x151923
+          ? 0x334044
           : accent === "purple"
-            ? 0x121827
+            ? 0x2d3946
             : index % 2 === 0
-              ? 0x0d1b28
-              : 0x101e2a,
-      emissive: accent === "orange" ? 0x160700 : accent === "purple" ? 0x10051c : 0x00151e,
-      emissiveIntensity: 0.1,
-      roughness: 0.94,
+              ? 0x29414c
+              : 0x2c4550,
+      emissive: accent === "orange" ? 0x1a0900 : accent === "purple" ? 0x120821 : 0x001820,
+      emissiveIntensity: 0.08,
+      roughness: 0.92,
       metalness: 0.035
     });
     const districtRoute = makeGlow(accentHex(accent), 0.18);
@@ -785,6 +842,181 @@ function addInstancedBoxes(
   scene.add(mesh);
 }
 
+function addStaticInstances(
+  scene: THREE.Scene,
+  geometry: THREE.BufferGeometry,
+  matrices: THREE.Matrix4[],
+  material: THREE.Material,
+  castShadow = true
+) {
+  if (matrices.length === 0) return;
+  const mesh = new THREE.InstancedMesh(geometry, material, matrices.length);
+  matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
+  mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.castShadow = castShadow;
+  mesh.receiveShadow = true;
+  mesh.computeBoundingSphere();
+  scene.add(mesh);
+}
+
+function createUrbanDetails(scene: THREE.Scene, palette: MaterialPalette) {
+  const streetlightSupports: THREE.Matrix4[] = [];
+  const streetlightHeads: THREE.Matrix4[] = [];
+
+  for (const segment of ROAD_SEGMENTS) {
+    const dx = segment.to[0] - segment.from[0];
+    const dz = segment.to[1] - segment.from[1];
+    const length = Math.hypot(dx, dz);
+    const unitX = dx / length;
+    const unitZ = dz / length;
+    const normalX = -unitZ;
+    const normalZ = unitX;
+    const lightCount = Math.max(1, Math.floor((length - 7) / 9.5));
+
+    for (let index = 0; index <= lightCount; index += 1) {
+      const distance = 3.5 + ((length - 7) * index) / Math.max(1, lightCount);
+      for (const side of [-1, 1]) {
+        const offset = segment.width / 2 + 0.58;
+        const x = segment.from[0] + unitX * distance + normalX * side * offset;
+        const z = segment.from[1] + unitZ * distance + normalZ * side * offset;
+        if (Math.hypot(x - HUB[0], z - HUB[1]) < 13.2) continue;
+
+        streetlightSupports.push(boxMatrix(x, 1.69, z, 0.1, 2.72, 0.1));
+        const inwardX = -normalX * side;
+        const inwardZ = -normalZ * side;
+        const armRotation = -Math.atan2(inwardZ, inwardX);
+        streetlightSupports.push(
+          boxMatrix(
+            x + inwardX * 0.2,
+            3.02,
+            z + inwardZ * 0.2,
+            0.48,
+            0.08,
+            0.08,
+            armRotation
+          )
+        );
+        streetlightHeads.push(
+          boxMatrix(
+            x + inwardX * 0.42,
+            2.97,
+            z + inwardZ * 0.42,
+            0.34,
+            0.16,
+            0.26,
+            armRotation
+          )
+        );
+      }
+    }
+  }
+
+  const crosswalkMatrices: THREE.Matrix4[] = [];
+  const crosswalks: Point2[] = [
+    [-64, -53],
+    [-25, -18],
+    [16, -4],
+    [37, 12],
+    [59, 40],
+    [78, 55],
+    [-45, 40],
+    [-5, 55]
+  ];
+  for (const [x, z] of crosswalks) {
+    for (let stripe = 0; stripe < 6; stripe += 1) {
+      const spread = (stripe - 2.5) * 0.24;
+      crosswalkMatrices.push(boxMatrix(x, 0.17, z - 1.28 + spread, 1.16, 0.025, 0.14));
+      crosswalkMatrices.push(boxMatrix(x + 1.28 + spread, 0.171, z, 0.14, 0.025, 1.16));
+    }
+  }
+
+  const benchMatrices: THREE.Matrix4[] = [];
+  const benchLegMatrices: THREE.Matrix4[] = [];
+  const planterMatrices: THREE.Matrix4[] = [];
+  const planterFoliageMatrices: THREE.Matrix4[] = [];
+
+  const addBenchRing = (center: Point2, radius: number, count: number, phase: number) => {
+    for (let index = 0; index < count; index += 1) {
+      const angle = phase + (index / count) * Math.PI * 2;
+      const radialX = Math.cos(angle);
+      const radialZ = Math.sin(angle);
+      const x = center[0] + radialX * radius;
+      const z = center[1] + radialZ * radius;
+      const tangentX = -radialZ;
+      const tangentZ = radialX;
+      const rotation = -Math.atan2(tangentZ, tangentX);
+      benchMatrices.push(boxMatrix(x, 0.58, z, 1.28, 0.16, 0.4, rotation));
+      benchMatrices.push(
+        boxMatrix(
+          x + radialX * 0.17,
+          0.86,
+          z + radialZ * 0.17,
+          1.28,
+          0.48,
+          0.11,
+          rotation
+        )
+      );
+      for (const legOffset of [-0.42, 0.42]) {
+        benchLegMatrices.push(
+          boxMatrix(
+            x + tangentX * legOffset,
+            0.43,
+            z + tangentZ * legOffset,
+            0.1,
+            0.3,
+            0.24,
+            rotation
+          )
+        );
+      }
+    }
+  };
+
+  const addPlanterRing = (center: Point2, radius: number, count: number, phase: number) => {
+    for (let index = 0; index < count; index += 1) {
+      const angle = phase + (index / count) * Math.PI * 2;
+      const x = center[0] + Math.cos(angle) * radius;
+      const z = center[1] + Math.sin(angle) * radius;
+      planterMatrices.push(boxMatrix(x, 0.57, z, 0.52, 0.5, 0.52, angle));
+      planterFoliageMatrices.push(
+        boxMatrix(x, 1.02, z, 0.7, 0.56 + (index % 3) * 0.08, 0.7, angle)
+      );
+    }
+  };
+
+  addBenchRing(HUB, 6.6, 8, Math.PI / 8);
+  addBenchRing(PARK, 11.9, 10, 0);
+  addPlanterRing(HUB, 7.8, 7, 0);
+  addPlanterRing(PARK, 13.2, 9, Math.PI / 9);
+
+  const unitBox = new THREE.BoxGeometry(1, 1, 1);
+  const crosswalkMaterial = new THREE.MeshBasicMaterial({
+    color: 0xeaf7f5,
+    transparent: true,
+    opacity: 0.82,
+    depthWrite: false
+  });
+  addInstancedBoxes(scene, unitBox, streetlightSupports, palette.blackSteel);
+  addInstancedBoxes(scene, unitBox, streetlightHeads, palette.cyanEmissive, false);
+  addInstancedBoxes(scene, unitBox, crosswalkMatrices, crosswalkMaterial, false);
+  addInstancedBoxes(scene, unitBox, benchMatrices, palette.roof);
+  addInstancedBoxes(scene, unitBox, benchLegMatrices, palette.blackSteel);
+  addStaticInstances(
+    scene,
+    new THREE.CylinderGeometry(1, 1, 1, 12),
+    planterMatrices,
+    palette.concrete
+  );
+  addStaticInstances(
+    scene,
+    new THREE.SphereGeometry(1, 10, 7),
+    planterFoliageMatrices,
+    palette.foliage
+  );
+}
+
 function seededRandom(seed: number) {
   let state = seed >>> 0;
   return () => {
@@ -851,6 +1083,11 @@ function createMetroFabric(scene: THREE.Scene, palette: MaterialPalette) {
     orange: [],
     purple: []
   };
+  const entranceDoors: Record<DistrictAccent, THREE.Matrix4[]> = {
+    cyan: [],
+    orange: [],
+    purple: []
+  };
   const pitch = 5.35;
   for (let x = -107; x <= 107; x += pitch) {
     for (let z = -72; z <= 72; z += pitch) {
@@ -902,6 +1139,19 @@ function createMetroFabric(scene: THREE.Scene, palette: MaterialPalette) {
           rotation
         )
       );
+      const doorWidth = THREE.MathUtils.clamp(width * 0.28, 0.62, 0.88);
+      const frontOffset = depth / 2 + 0.045;
+      entranceDoors[accent].push(
+        boxMatrix(
+          buildingX + Math.sin(rotation) * frontOffset,
+          0.8,
+          buildingZ + Math.cos(rotation) * frontOffset,
+          doorWidth,
+          1.32,
+          0.075,
+          rotation
+        )
+      );
       roofs.push(
         boxMatrix(
           buildingX,
@@ -931,7 +1181,401 @@ function createMetroFabric(scene: THREE.Scene, palette: MaterialPalette) {
   addInstancedBoxes(scene, unitBox, glassBands.cyan, palette.glassCyan, false);
   addInstancedBoxes(scene, unitBox, glassBands.orange, palette.glassOrange, false);
   addInstancedBoxes(scene, unitBox, glassBands.purple, palette.glassPurple, false);
+  addInstancedBoxes(scene, unitBox, entranceDoors.cyan, palette.glassCyan, false);
+  addInstancedBoxes(scene, unitBox, entranceDoors.orange, palette.glassOrange, false);
+  addInstancedBoxes(scene, unitBox, entranceDoors.purple, palette.glassPurple, false);
   addInstancedBoxes(scene, unitBox, roofs, palette.roof);
+}
+
+function setInstanceTransform(
+  mesh: THREE.InstancedMesh,
+  index: number,
+  dummy: THREE.Object3D,
+  position: Vec3,
+  scale: Vec3,
+  rotationY = 0
+) {
+  dummy.position.set(...position);
+  dummy.scale.set(...scale);
+  dummy.rotation.set(0, rotationY, 0);
+  dummy.updateMatrix();
+  mesh.setMatrixAt(index, dummy.matrix);
+}
+
+function createVehicleLife(scene: THREE.Scene, palette: MaterialPalette): VehicleRuntime {
+  const pathDefinitions: Array<RoadSegment & { surfaceY: number }> = [
+    ...ROAD_SEGMENTS.map((segment) => ({ ...segment, surfaceY: 0.52 })),
+    ...METRO_VERTICAL_STREETS.map((x) => ({
+      from: [x, -74] as Point2,
+      to: [x, 74] as Point2,
+      width: 1.4,
+      surfaceY: 0.36
+    })),
+    ...METRO_HORIZONTAL_STREETS.map((z) => ({
+      from: [-109, z] as Point2,
+      to: [109, z] as Point2,
+      width: 1.4,
+      surfaceY: 0.36
+    }))
+  ];
+  const random = seededRandom(81731);
+  const motions: LinearMotion[] = [];
+  pathDefinitions.forEach((path, pathIndex) => {
+    for (const direction of [1, -1] as const) {
+      const length = Math.hypot(path.to[0] - path.from[0], path.to[1] - path.from[1]);
+      motions.push({
+        from: path.from,
+        to: path.to,
+        length,
+        progress: (random() + pathIndex * 0.173 + (direction === 1 ? 0 : 0.43)) % 1,
+        speed: 3.1 + random() * 3.4,
+        direction,
+        laneOffset:
+          direction * THREE.MathUtils.clamp(path.width * 0.2, 0.23, 0.72),
+        surfaceY: path.surfaceY
+      });
+    }
+  });
+
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.42,
+    metalness: 0.28
+  });
+  const body = new THREE.InstancedMesh(geometry, bodyMaterial, motions.length);
+  const cabin = new THREE.InstancedMesh(geometry, palette.glassCyan, motions.length);
+  const lamps = new THREE.InstancedMesh(geometry, palette.orangeGlow, motions.length);
+  const vehicleColors = [
+    0xf4f6f2,
+    0x00cfee,
+    0xff6528,
+    0xac56ff,
+    0x39df78,
+    0xffc43d
+  ];
+  motions.forEach((_, index) => {
+    body.setColorAt(index, new THREE.Color(vehicleColors[index % vehicleColors.length]));
+  });
+  if (body.instanceColor) body.instanceColor.needsUpdate = true;
+  for (const mesh of [body, cabin, lamps]) {
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+  }
+  body.castShadow = true;
+  body.receiveShadow = true;
+  cabin.castShadow = false;
+  lamps.castShadow = false;
+
+  const runtime = { body, cabin, lamps, motions, dummy: new THREE.Object3D() };
+  updateVehicleLife(runtime, 0);
+  return runtime;
+}
+
+function updateVehicleLife(runtime: VehicleRuntime, delta: number) {
+  runtime.motions.forEach((motion, index) => {
+    motion.progress =
+      (motion.progress + (delta * motion.speed * motion.direction) / motion.length + 1) % 1;
+    const dx = motion.to[0] - motion.from[0];
+    const dz = motion.to[1] - motion.from[1];
+    const unitX = dx / motion.length;
+    const unitZ = dz / motion.length;
+    const normalX = -unitZ;
+    const normalZ = unitX;
+    const x = motion.from[0] + dx * motion.progress + normalX * motion.laneOffset;
+    const z = motion.from[1] + dz * motion.progress + normalZ * motion.laneOffset;
+    const forwardX = unitX * motion.direction;
+    const forwardZ = unitZ * motion.direction;
+    const rotation = -Math.atan2(forwardZ, forwardX);
+    const bodyLength = 1.18 + (index % 4) * 0.12;
+    const bodyWidth = 0.5 + (index % 3) * 0.05;
+    setInstanceTransform(
+      runtime.body,
+      index,
+      runtime.dummy,
+      [x, motion.surfaceY, z],
+      [bodyLength, 0.34, bodyWidth],
+      rotation
+    );
+    setInstanceTransform(
+      runtime.cabin,
+      index,
+      runtime.dummy,
+      [x - forwardX * 0.08, motion.surfaceY + 0.27, z - forwardZ * 0.08],
+      [bodyLength * 0.5, 0.24, bodyWidth * 0.84],
+      rotation
+    );
+    setInstanceTransform(
+      runtime.lamps,
+      index,
+      runtime.dummy,
+      [
+        x + forwardX * bodyLength * 0.52,
+        motion.surfaceY + 0.03,
+        z + forwardZ * bodyLength * 0.52
+      ],
+      [0.08, 0.1, bodyWidth * 0.72],
+      rotation
+    );
+  });
+  runtime.body.instanceMatrix.needsUpdate = true;
+  runtime.cabin.instanceMatrix.needsUpdate = true;
+  runtime.lamps.instanceMatrix.needsUpdate = true;
+}
+
+function createPedestrianLife(scene: THREE.Scene): PedestrianRuntime {
+  const random = seededRandom(32291);
+  const motions: PedestrianMotion[] = [];
+  for (let index = 0; index < 84; index += 1) {
+    let center: Point2;
+    let radius: number;
+    let groundY: number;
+    if (index < 30) {
+      center = HUB;
+      radius = 2.4 + random() * 7.4;
+      groundY = 0.34;
+    } else if (index < 66) {
+      center = PARK;
+      radius = 2.2 + random() * 11.2;
+      groundY = 0.3;
+    } else {
+      const anchor = ANCHOR_SPECS[(index - 66) % ANCHOR_SPECS.length];
+      center = [
+        anchor.position[0] + (random() - 0.5) * anchor.lot[0] * 0.74,
+        anchor.position[1] + anchor.lot[1] * 0.56
+      ];
+      radius = 0.25 + random() * 1.2;
+      groundY = 0.32;
+    }
+    motions.push({
+      center,
+      radius,
+      angle: random() * Math.PI * 2,
+      speed: 0.11 + random() * 0.22,
+      phase: random() * Math.PI * 2,
+      groundY,
+      idle: index % 7 === 0
+    });
+  }
+
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.68,
+    metalness: 0.03
+  });
+  const headMaterial = new THREE.MeshStandardMaterial({
+    color: 0xf0c7a5,
+    roughness: 0.8,
+    metalness: 0
+  });
+  const bodies = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(0.115, 0.15, 0.62, 8),
+    bodyMaterial,
+    motions.length
+  );
+  const heads = new THREE.InstancedMesh(
+    new THREE.SphereGeometry(0.155, 8, 6),
+    headMaterial,
+    motions.length
+  );
+  const pedestrianColors = [0x00d7f4, 0xff6b2d, 0xb657ff, 0x36e77b, 0xffd43b];
+  motions.forEach((_, index) => {
+    bodies.setColorAt(index, new THREE.Color(pedestrianColors[index % pedestrianColors.length]));
+  });
+  if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true;
+  for (const mesh of [bodies, heads]) {
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    mesh.castShadow = true;
+    scene.add(mesh);
+  }
+  const runtime = { bodies, heads, motions, dummy: new THREE.Object3D() };
+  updatePedestrianLife(runtime, 0, 0);
+  return runtime;
+}
+
+function updatePedestrianLife(runtime: PedestrianRuntime, delta: number, elapsed: number) {
+  runtime.motions.forEach((motion, index) => {
+    if (!motion.idle) motion.angle += delta * motion.speed;
+    const sway = motion.idle ? Math.sin(elapsed * 1.35 + motion.phase) * 0.08 : 0;
+    const x = motion.center[0] + Math.cos(motion.angle) * motion.radius + sway;
+    const z = motion.center[1] + Math.sin(motion.angle) * motion.radius;
+    const rotation = -motion.angle + Math.PI / 2;
+    const bob = Math.max(0, Math.sin(elapsed * 5 + motion.phase)) * 0.035;
+    setInstanceTransform(
+      runtime.bodies,
+      index,
+      runtime.dummy,
+      [x, motion.groundY + 0.34 + bob, z],
+      [1, 1, 1],
+      rotation
+    );
+    setInstanceTransform(
+      runtime.heads,
+      index,
+      runtime.dummy,
+      [x, motion.groundY + 0.79 + bob, z],
+      [1, 1, 1]
+    );
+  });
+  runtime.bodies.instanceMatrix.needsUpdate = true;
+  runtime.heads.instanceMatrix.needsUpdate = true;
+}
+
+function createPulseRuntime(
+  scene: THREE.Scene,
+  material: THREE.Material,
+  motions: PulseMotion[]
+): PulseRuntime {
+  const mesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    material,
+    motions.length
+  );
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  const runtime = { mesh, motions, dummy: new THREE.Object3D() };
+  updatePulseRuntime(runtime, 0);
+  return runtime;
+}
+
+function updatePulseRuntime(runtime: PulseRuntime, delta: number) {
+  runtime.motions.forEach((motion, index) => {
+    motion.progress =
+      (motion.progress + (delta * motion.speed * motion.direction) / motion.length + 1) % 1;
+    const dx = motion.to[0] - motion.from[0];
+    const dz = motion.to[1] - motion.from[1];
+    const x = motion.from[0] + dx * motion.progress;
+    const z = motion.from[1] + dz * motion.progress;
+    setInstanceTransform(
+      runtime.mesh,
+      index,
+      runtime.dummy,
+      [x, motion.surfaceY, z],
+      motion.scale,
+      -Math.atan2(dz * motion.direction, dx * motion.direction)
+    );
+  });
+  runtime.mesh.instanceMatrix.needsUpdate = true;
+}
+
+function createWaterPulses(scene: THREE.Scene, palette: MaterialPalette): PulseRuntime {
+  const paths: Array<{ from: Point2; to: Point2 }> = [
+    { from: [-108, -33], to: [108, -33] },
+    { from: [-108, 27.5], to: [108, 27.5] },
+    { from: [49, -28], to: [49, 24] }
+  ];
+  const random = seededRandom(90817);
+  const motions: PulseMotion[] = [];
+  paths.forEach((path, pathIndex) => {
+    for (let index = 0; index < 12; index += 1) {
+      const length = Math.hypot(path.to[0] - path.from[0], path.to[1] - path.from[1]);
+      motions.push({
+        from: path.from,
+        to: path.to,
+        length,
+        progress: (index / 12 + random() * 0.05) % 1,
+        speed: 2.2 + random() * 2,
+        direction: (index + pathIndex) % 2 === 0 ? 1 : -1,
+        laneOffset: 0,
+        surfaceY: 0.105,
+        scale: [1.8, 0.025, 0.18]
+      });
+    }
+  });
+  return createPulseRuntime(scene, palette.cyanGlow, motions);
+}
+
+function createRoutePulses(scene: THREE.Scene, palette: MaterialPalette): PulseRuntime {
+  const random = seededRandom(71603);
+  const motions: PulseMotion[] = [];
+  ROAD_SEGMENTS.forEach((path, pathIndex) => {
+    for (const direction of [1, -1] as const) {
+      const length = Math.hypot(path.to[0] - path.from[0], path.to[1] - path.from[1]);
+      motions.push({
+        from: path.from,
+        to: path.to,
+        length,
+        progress: (random() + pathIndex * 0.137) % 1,
+        speed: 4.5 + random() * 3,
+        direction,
+        laneOffset: 0,
+        surfaceY: 0.43,
+        scale: [0.62, 0.08, 0.14]
+      });
+    }
+  });
+  return createPulseRuntime(scene, palette.mobilityGlow, motions);
+}
+
+function createRooftopSignals(scene: THREE.Scene): SignalRuntime {
+  const roofHeights: Record<BuildingId, number> = {
+    intake: 4.15,
+    automation: 14.25,
+    hmi: 9.7,
+    electrical: 5.2,
+    qa: 6.25,
+    documentation: 13.45,
+    approval: 5.3,
+    release: 7.55
+  };
+  const signals: SignalSpec[] = [];
+  ANCHOR_SPECS.forEach((anchor, index) => {
+    for (const offset of [-0.65, 0.65]) {
+      signals.push({
+        position: [
+          anchor.position[0] + offset,
+          roofHeights[anchor.id],
+          anchor.position[1]
+        ],
+        phase: index * 0.91 + (offset > 0 ? 0.7 : 0)
+      });
+    }
+  });
+  signals.push({ position: [LANDMARK[0], 41, LANDMARK[1]], phase: 2.4 });
+  const material = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.9,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false
+  });
+  const mesh = new THREE.InstancedMesh(
+    new THREE.SphereGeometry(0.16, 8, 6),
+    material,
+    signals.length
+  );
+  signals.forEach((_, index) => {
+    const anchor =
+      index >= ANCHOR_SPECS.length * 2
+        ? "cyan"
+        : anchorAccentFor(ANCHOR_SPECS[Math.floor(index / 2)].id);
+    mesh.setColorAt(index, new THREE.Color(accentHex(anchor)));
+  });
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  const runtime = { mesh, signals, dummy: new THREE.Object3D() };
+  updateRooftopSignals(runtime, 0);
+  return runtime;
+}
+
+function updateRooftopSignals(runtime: SignalRuntime, elapsed: number) {
+  runtime.signals.forEach((signal, index) => {
+    const pulse = 0.78 + (Math.sin(elapsed * 2.3 + signal.phase) + 1) * 0.32;
+    setInstanceTransform(
+      runtime.mesh,
+      index,
+      runtime.dummy,
+      signal.position,
+      [pulse, pulse, pulse]
+    );
+  });
+  runtime.mesh.instanceMatrix.needsUpdate = true;
 }
 
 function isReserved(x: number, z: number) {
@@ -961,6 +1605,11 @@ function createProceduralBuildings(scene: THREE.Scene, palette: MaterialPalette)
   const concretePodiums: THREE.Matrix4[] = [];
   const contactShadows: THREE.Matrix4[] = [];
   const glassBands: Record<DistrictAccent, THREE.Matrix4[]> = {
+    cyan: [],
+    orange: [],
+    purple: []
+  };
+  const entranceDoors: Record<DistrictAccent, THREE.Matrix4[]> = {
     cyan: [],
     orange: [],
     purple: []
@@ -1033,6 +1682,20 @@ function createProceduralBuildings(scene: THREE.Scene, palette: MaterialPalette)
           rotation
         );
         (random() > 0.42 ? whiteBodies : lightBodies).push(bodyMatrix);
+
+        const doorWidth = THREE.MathUtils.clamp(width * 0.3, 0.68, 0.96);
+        const frontOffset = depth / 2 + (height > 9 ? 0.39 : 0.05);
+        entranceDoors[districtAccent].push(
+          boxMatrix(
+            x + Math.sin(rotation) * frontOffset,
+            0.96,
+            z + Math.cos(rotation) * frontOffset,
+            doorWidth,
+            1.48,
+            0.085,
+            rotation
+          )
+        );
 
         const bandCount = height > 13 ? 6 : height > 7 ? 4 : 2;
         for (let band = 1; band <= bandCount; band += 1) {
@@ -1109,6 +1772,9 @@ function createProceduralBuildings(scene: THREE.Scene, palette: MaterialPalette)
   addInstancedBoxes(scene, unitBox, glassBands.cyan, palette.glassCyan, false);
   addInstancedBoxes(scene, unitBox, glassBands.orange, palette.glassOrange, false);
   addInstancedBoxes(scene, unitBox, glassBands.purple, palette.glassPurple, false);
+  addInstancedBoxes(scene, unitBox, entranceDoors.cyan, palette.glassCyan, false);
+  addInstancedBoxes(scene, unitBox, entranceDoors.orange, palette.glassOrange, false);
+  addInstancedBoxes(scene, unitBox, entranceDoors.purple, palette.glassPurple, false);
   addInstancedBoxes(scene, unitBox, roofCaps, palette.roof);
   addInstancedBoxes(scene, unitBox, rooftopUnits, palette.blackSteel);
   addInstancedBoxes(scene, unitBox, rooftopAccents.cyan, palette.cyanGlow, false);
@@ -1256,7 +1922,7 @@ function createDigitalPark(scene: THREE.Scene, palette: MaterialPalette) {
 
   const random = seededRandom(45451);
   const trunkMatrices: THREE.Matrix4[] = [];
-  const canopyMatrices: THREE.Matrix4[] = [];
+  const canopyMatrices: THREE.Matrix4[][] = [[], [], []];
   for (let index = 0; index < 90; index += 1) {
     const angle = random() * Math.PI * 2;
     const radius = 1.8 + Math.sqrt(random()) * 11.7;
@@ -1264,11 +1930,27 @@ function createDigitalPark(scene: THREE.Scene, palette: MaterialPalette) {
     const z = PARK[1] + Math.sin(angle) * radius;
     const height = 0.9 + random() * 0.7;
     trunkMatrices.push(boxMatrix(x, 0.25 + height / 2, z, 0.12, height, 0.12));
-    canopyMatrices.push(boxMatrix(x, 1 + height, z, 0.75, 1.15, 0.75, angle));
+    canopyMatrices[index % canopyMatrices.length].push(
+      boxMatrix(x, 1 + height, z, 0.75, 1.15, 0.75, angle)
+    );
   }
   const box = new THREE.BoxGeometry(1, 1, 1);
+  const foliageLight = new THREE.MeshStandardMaterial({
+    color: 0x87df62,
+    emissive: 0x235b1a,
+    emissiveIntensity: 0.24,
+    roughness: 0.86
+  });
+  const foliageTeal = new THREE.MeshStandardMaterial({
+    color: 0x39bfa2,
+    emissive: 0x0b4e40,
+    emissiveIntensity: 0.24,
+    roughness: 0.84
+  });
   addInstancedBoxes(scene, box, trunkMatrices, palette.blackSteel);
-  addInstancedBoxes(scene, box, canopyMatrices, palette.foliage);
+  addInstancedBoxes(scene, box, canopyMatrices[0], palette.foliage);
+  addInstancedBoxes(scene, box, canopyMatrices[1], foliageLight);
+  addInstancedBoxes(scene, box, canopyMatrices[2], foliageTeal);
   addCylinder(scene, 0.45, 2.2, [PARK[0], 1.35, PARK[1]], palette.greenGlow, 18);
 }
 
@@ -1375,6 +2057,39 @@ function buildAnchorArchitecture(
       addFacadeBands(group, 3.15, 3.65, 6.8, 4, windows, -3.8, -1.6);
       break;
   }
+
+  const entranceByBuilding: Record<
+    BuildingId,
+    { position: Vec3; width: number; height: number }
+  > = {
+    intake: { position: [0, 1.16, 2.96], width: 1.16, height: 1.55 },
+    automation: { position: [0, 0.94, 3.81], width: 1.08, height: 1.15 },
+    hmi: { position: [0, 1.18, 2.96], width: 1.14, height: 1.55 },
+    electrical: { position: [-1.5, 1.18, 3.06], width: 1.16, height: 1.55 },
+    qa: { position: [0, 1.18, 3.46], width: 1.18, height: 1.55 },
+    documentation: { position: [0, 0.86, 3.36], width: 1.08, height: 1.08 },
+    approval: { position: [0, 1.18, 2.56], width: 1.16, height: 1.55 },
+    release: { position: [4.4, 1.2, 4.1], width: 1.24, height: 1.62 }
+  };
+  const entrance = entranceByBuilding[id];
+  addBox(
+    group,
+    [entrance.width, entrance.height, 0.13],
+    entrance.position,
+    windows,
+    false
+  );
+  addBox(
+    group,
+    [entrance.width + 0.45, 0.12, 0.64],
+    [
+      entrance.position[0],
+      entrance.position[1] + entrance.height / 2 + 0.16,
+      entrance.position[2] + 0.25
+    ],
+    accent,
+    false
+  );
 }
 
 function createAnchorBuilding(
@@ -1452,10 +2167,10 @@ function createAgentMarkers(scene: THREE.Scene, palette: MaterialPalette): Agent
 }
 
 function createLights(scene: THREE.Scene) {
-  scene.add(new THREE.HemisphereLight(0xdaf0ff, 0x020617, 1.22));
-  scene.add(new THREE.AmbientLight(0x8bb6cc, 0.34));
+  scene.add(new THREE.HemisphereLight(0xf4fbff, 0x24475a, 1.62));
+  scene.add(new THREE.AmbientLight(0xb8d7df, 0.5));
 
-  const key = new THREE.DirectionalLight(0xf0f7ff, 4.15);
+  const key = new THREE.DirectionalLight(0xfffbed, 4.4);
   key.position.set(-75, 125, 70);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
@@ -1620,8 +2335,8 @@ export function ThreeCity({
     try {
       setRenderError(null);
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x030817);
-      scene.fog = new THREE.Fog(0x030817, 150, 370);
+      scene.background = new THREE.Color(0x173b54);
+      scene.fog = new THREE.Fog(0x173b54, 185, 430);
 
       renderer = new THREE.WebGLRenderer({
         antialias: true,
@@ -1633,7 +2348,7 @@ export function ThreeCity({
       renderer.shadowMap.type = THREE.PCFShadowMap;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.22;
+      renderer.toneMappingExposure = 1.08;
       renderer.domElement.className = "three-city-canvas pixi-city-canvas";
       renderer.domElement.setAttribute("aria-hidden", "true");
       renderer.domElement.tabIndex = -1;
@@ -1687,6 +2402,7 @@ export function ThreeCity({
       createIndustrialUtilities(scene, palette);
       createLogisticsDetails(scene, palette);
       createDigitalPark(scene, palette);
+      createUrbanDetails(scene, palette);
 
       const runtimes = new Map<BuildingId, BuildingRuntime>();
       for (const spec of ANCHOR_SPECS) {
@@ -1695,6 +2411,11 @@ export function ThreeCity({
       runtimesRef.current = runtimes;
       setSelected(runtimes, selectedRef.current);
       const agentMarkers = createAgentMarkers(scene, palette);
+      const vehicleLife = createVehicleLife(scene, palette);
+      const pedestrianLife = createPedestrianLife(scene);
+      const waterPulses = createWaterPulses(scene, palette);
+      const routePulses = createRoutePulses(scene, palette);
+      const rooftopSignals = createRooftopSignals(scene);
       createLights(scene);
 
       const updatePointer = (event: PointerEvent) => {
@@ -1915,7 +2636,19 @@ export function ThreeCity({
           }
         }
         if (!state.paused && !state.reducedMotion) {
-          animationElapsed += delta * Math.max(0.1, state.speed);
+          const lifeDelta = delta * Math.max(0.1, state.speed);
+          animationElapsed += lifeDelta;
+          updateVehicleLife(vehicleLife, lifeDelta);
+          updatePedestrianLife(pedestrianLife, lifeDelta, animationElapsed);
+          updatePulseRuntime(waterPulses, lifeDelta);
+          updatePulseRuntime(routePulses, lifeDelta);
+          updateRooftopSignals(rooftopSignals, animationElapsed);
+          palette.glassCyan.emissiveIntensity =
+            0.64 + Math.sin(animationElapsed * 0.72) * 0.055;
+          palette.glassOrange.emissiveIntensity =
+            0.56 + Math.sin(animationElapsed * 0.61 + 1.7) * 0.05;
+          palette.glassPurple.emissiveIntensity =
+            0.6 + Math.sin(animationElapsed * 0.67 + 3.1) * 0.05;
           agentMarkers.forEach((marker) => {
             const wave = Math.sin(animationElapsed * 2.1 + marker.phase);
             marker.root.position.y = marker.baseY + wave * 0.075;
@@ -1924,6 +2657,9 @@ export function ThreeCity({
             marker.halo.material.opacity = 0.35 + (wave + 1) * 0.2;
           });
         } else {
+          palette.glassCyan.emissiveIntensity = 0.64;
+          palette.glassOrange.emissiveIntensity = 0.56;
+          palette.glassPurple.emissiveIntensity = 0.6;
           agentMarkers.forEach((marker) => {
             marker.root.position.y = marker.baseY;
             marker.halo.scale.setScalar(1);

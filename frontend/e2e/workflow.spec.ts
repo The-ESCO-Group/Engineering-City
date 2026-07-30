@@ -6,7 +6,8 @@ test("synthetic engineering review workflow is operable", async ({ page }) => {
   await page.getByRole("button", { name: "Pause timeline" }).click();
   await expect(page.getByRole("heading", { name: "Line 4 operations city" })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Engineering city minimap" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Map view", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("region", { name: "Synthetic demo workflow activity" })).toContainText("PLC Review");
+  await expect(page.getByRole("button", { name: "Map", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Overview layer" })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Mobility layer" }).click();
   await expect(page.getByRole("button", { name: "Mobility layer" })).toHaveAttribute("aria-pressed", "true");
@@ -16,7 +17,7 @@ test("synthetic engineering review workflow is operable", async ({ page }) => {
   await expect(page.locator("canvas.three-city-canvas")).toBeVisible();
   await expect(page.locator(".workspace")).toHaveCount(0);
   await expect(page.locator(".activity-panel")).toHaveCount(0);
-  await page.getByRole("button", { name: "Walk city", exact: true }).click();
+  await page.getByRole("button", { name: "Walk", exact: true }).click();
   await expect(page.getByRole("region", { name: "Engineering city workflow visualization" })).toHaveClass(/is-first-person/);
   await expect(page.getByRole("status")).toContainText("CLICK CITY TO LOOK");
   await expect(page.getByRole("button", { name: "Exit walk Map view", exact: true })).toBeVisible();
@@ -26,7 +27,7 @@ test("synthetic engineering review workflow is operable", async ({ page }) => {
   await page.waitForTimeout(120);
   await page.keyboard.up("w");
   await page.getByRole("button", { name: "Exit walk Map view", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Map view", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Map", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("complementary", { name: "Engineering city minimap" })).toBeVisible();
   await page.getByRole("button", { name: "Automation Core: Logic review · 1 active" }).click();
   await expect(page.getByRole("button", { name: "Automation Engineering, 1 active agent" })).toHaveAttribute("aria-pressed", "true");

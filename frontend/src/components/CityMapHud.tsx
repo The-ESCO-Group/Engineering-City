@@ -83,7 +83,7 @@ export function CityMapHud({
       <aside className="city-map-hud__operations" aria-label="City operations summary">
         <header>
           <span>City overview</span>
-          <i aria-hidden="true" />
+          <small>Demo</small>
         </header>
         <p title={projectLabel}>{projectLabel}</p>
         <dl>
@@ -117,7 +117,7 @@ export function CityMapHud({
           onClick={() => selectBuilding("qa")}
           aria-label="View active alerts in QA Campus"
         >
-          View active alerts
+          Review alerts
         </button>
       </aside>
     </div>

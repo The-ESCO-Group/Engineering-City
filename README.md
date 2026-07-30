@@ -6,7 +6,7 @@ Local-only engineering operations software for ESCO Group. The product shows pro
 
 ## Product surfaces
 
-- Engineering City — an immersive, edge-to-edge digital-twin home with a connected Three.js metro, a stable isometric map view, and a street-level first-person walk mode
+- Engineering City — an immersive, edge-to-edge digital-twin home with a connected Three.js metro, moving traffic and pedestrians, a live synthetic workflow feed, a stable isometric map, and a street-level first-person walk mode
 - Projects and Tasks — progress, blockers, dependencies, and approval state
 - Findings & Evidence — exact source locations, confidence, risk, and comparison
 - Approvals — explanation-gated human decisions

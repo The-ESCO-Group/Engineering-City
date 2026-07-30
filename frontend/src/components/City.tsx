@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pause, Play, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { Footprints, Map, Pause, Play, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { useUI } from "../store";
 import { CityHomeChrome, type CityHomeLayer, type CityViewMode } from "./CityHomeChrome";
 import { CityMapHud } from "./CityMapHud";
@@ -28,9 +28,41 @@ export function City() {
       aria-label="Engineering city workflow visualization"
     >
       <div className="city-toolbar">
-        <div>
-          <span className="eyebrow">{isWalking ? "WALK MODE · DIGITAL CITY" : "ENGINEERING OPERATIONS · DIGITAL CITY"}</span>
+        <div className="city-command-identity">
+          <span className="eyebrow">PRJ-0241 · ENGINEERING WORLD</span>
           <h2>Line 4 operations city</h2>
+        </div>
+        {isWalking ? (
+          <button className="city-walk-exit" type="button" onClick={() => changeViewMode("overview")}>
+            <Map aria-hidden="true" />
+            <span>Exit walk</span>
+            <small>Map view</small>
+          </button>
+        ) : (
+          <div className="city-view-switch" role="group" aria-label="City view mode">
+            <button
+              type="button"
+              className="is-active"
+              aria-pressed="true"
+              onClick={() => changeViewMode("overview")}
+            >
+              <Map aria-hidden="true" />
+              <span>Map</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed="false"
+              onClick={() => changeViewMode("first-person")}
+            >
+              <Footprints aria-hidden="true" />
+              <span>Walk</span>
+            </button>
+          </div>
+        )}
+        <div className="city-command-demo" aria-label="Synthetic demonstration status">
+          <span>Demo</span>
+          <i aria-hidden="true" />
+          <b>{paused ? "Workflow paused" : "3 reviews active"}</b>
         </div>
         <div className="tool-row">
           <button className="icon-button" onClick={togglePause} aria-label={paused ? "Play timeline" : "Pause timeline"}>{paused ? <Play /> : <Pause />}</button>
@@ -80,9 +112,8 @@ export function City() {
           onZoomOut={() => setZoom(Math.max(0.82, zoom - 0.1))}
           onLocate={resetCityView}
           viewMode={viewMode}
-          onViewModeChange={changeViewMode}
+          paused={paused}
         />
-        {!isWalking && <div className="map-legend"><span><i className="dot active" /> Active</span><span><i className="dot waiting" /> Waiting</span><span><i className="dot fault" /> Warning</span></div>}
       </div>
       <div className="timeline">
         <button className="play-label" onClick={togglePause}>{paused ? <Play /> : <Pause />} {paused ? "Resume" : "Live"}</button>

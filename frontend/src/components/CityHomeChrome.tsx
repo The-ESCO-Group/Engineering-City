@@ -1,17 +1,16 @@
 import {
   Building2,
   CarFront,
-  Footprints,
   LayoutGrid,
   Leaf,
   LocateFixed,
-  Map,
   Minus,
   Plus,
   ShieldCheck,
   Zap,
   type LucideIcon
 } from "lucide-react";
+import { agents } from "../domain";
 import "./CityHomeChrome.css";
 
 const LAYERS = [
@@ -38,7 +37,7 @@ export interface CityHomeChromeProps {
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   viewMode?: CityViewMode;
-  onViewModeChange?: (viewMode: CityViewMode) => void;
+  paused?: boolean;
 }
 
 interface MapControlProps {
@@ -124,6 +123,34 @@ function CityMinimap({
   );
 }
 
+function CityActivityTicker({ paused = false }: { paused?: boolean }) {
+  const activeAgents = agents.filter((agent) => agent.state === "active");
+
+  return (
+    <section className="city-home-chrome__activity" aria-label="Synthetic demo workflow activity">
+      <header>
+        <span className="city-home-chrome__demo-tag">Demo</span>
+        <span className={`city-home-chrome__activity-state${paused ? " is-paused" : ""}`}>
+          <i aria-hidden="true" />
+          {paused ? "Paused" : "Live activity"}
+        </span>
+        <b>{activeAgents.length} active</b>
+      </header>
+      <div className="city-home-chrome__activity-stream" role="list">
+        {activeAgents.slice(0, 3).map((agent) => (
+          <article key={agent.id} role="listitem">
+            <i aria-hidden="true" />
+            <div>
+              <strong>{agent.name}</strong>
+              <span>{agent.task}</span>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function CityHomeChrome({
   activeLayer = "overview",
   className,
@@ -132,65 +159,38 @@ export function CityHomeChrome({
   onZoomIn,
   onZoomOut,
   viewMode = "overview",
-  onViewModeChange
+  paused = false
 }: CityHomeChromeProps) {
   const isWalking = viewMode === "first-person";
   const rootClassName = ["city-home-chrome", isWalking && "is-walking", className].filter(Boolean).join(" ");
 
   return (
     <div className={rootClassName}>
-      <div className="city-home-chrome__view-switch" role="group" aria-label="City view mode">
-        <button
-          type="button"
-          className={viewMode === "overview" ? "is-active" : ""}
-          aria-pressed={viewMode === "overview"}
-          onClick={() => onViewModeChange?.("overview")}
-        >
-          <Map aria-hidden="true" strokeWidth={1.8} />
-          <span>Map view</span>
-        </button>
-        <button
-          type="button"
-          className={isWalking ? "is-active" : ""}
-          aria-pressed={isWalking}
-          onClick={() => onViewModeChange?.("first-person")}
-        >
-          <Footprints aria-hidden="true" strokeWidth={1.8} />
-          <span>Walk city</span>
-        </button>
-      </div>
-
-      {isWalking && (
-        <aside className="city-home-chrome__walk-command" aria-label="Walk mode controls">
-          <button type="button" onClick={() => onViewModeChange?.("overview")}>
-            <Map aria-hidden="true" strokeWidth={1.8} />
-            <span>Exit walk</span>
-            <small>Map view</small>
-          </button>
-        </aside>
+      {!isWalking && (
+        <div className="city-home-chrome__bottom-console">
+          <CityMinimap onLocate={onLocate} onZoomIn={onZoomIn} onZoomOut={onZoomOut} />
+          <CityActivityTicker paused={paused} />
+          <nav className="city-home-chrome__layer-dock" aria-label="Engineering city map layers">
+            {LAYERS.map(({ id, label, icon: Icon }) => {
+              const selected = id === activeLayer;
+              return (
+                <button
+                  className={`city-home-chrome__layer${selected ? " is-active" : ""}`}
+                  type="button"
+                  key={id}
+                  aria-label={`${label} layer`}
+                  aria-pressed={selected}
+                  title={label}
+                  onClick={() => onLayerChange?.(id)}
+                >
+                  <Icon aria-hidden="true" strokeWidth={1.65} />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
       )}
-
-      <CityMinimap onLocate={onLocate} onZoomIn={onZoomIn} onZoomOut={onZoomOut} />
-
-      <nav className="city-home-chrome__layer-dock" aria-label="Engineering city map layers">
-        {LAYERS.map(({ id, label, icon: Icon }) => {
-          const selected = id === activeLayer;
-          return (
-            <button
-              className={`city-home-chrome__layer${selected ? " is-active" : ""}`}
-              type="button"
-              key={id}
-              aria-label={`${label} layer`}
-              aria-pressed={selected}
-              title={label}
-              onClick={() => onLayerChange?.(id)}
-            >
-              <Icon aria-hidden="true" strokeWidth={1.65} />
-              <span>{label}</span>
-            </button>
-          );
-        })}
-      </nav>
     </div>
   );
 }

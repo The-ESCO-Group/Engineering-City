@@ -63,3 +63,75 @@
 .city-home .city-panel.is-first-person .tool-row .icon-button:nth-child(3){display:none}
 .city-home .city-panel.is-first-person .three-city-building-controls{display:none}
 .city-home .city-panel.is-first-person .three-city-first-person-hud{top:86px!important}
+
+/* City home spectator shell: one command bar, a subordinate route rail, and the world. */
+.app.city-home{grid-template:0 minmax(0,1fr)/62px minmax(0,1fr) 0}
+.city-home .topbar{height:70px;padding:0 18px;background:linear-gradient(180deg,#020b15f0 0,#020b15a8 62%,transparent 100%)}
+.city-home .brand-mark{width:34px;height:34px}
+.city-home .brand strong{font-size:18px}
+.city-home .connection{font-size:8px}
+.city-home .connection b{font-size:9px}
+
+.city-home .sidebar{width:62px;padding:140px 0 14px}
+.city-home .sidebar nav{width:48px;margin-left:10px;padding:4px;border-color:#139bd544;border-radius:8px;background:linear-gradient(180deg,#041423c9,#03101db5);box-shadow:0 14px 38px #0007;backdrop-filter:blur(13px)}
+.city-home .sidebar a{position:relative;width:38px;height:38px;padding:0;justify-content:center;border-radius:5px}
+.city-home .sidebar a svg{width:16px;height:16px}
+.city-home .sidebar a span{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.city-home .sidebar em{position:absolute;top:2px;right:1px;display:grid;width:13px;height:13px;margin:0;padding:0;place-items:center;border-radius:50%;font-size:6px;line-height:1}
+.city-home .sidebar a::after{position:absolute;left:calc(100% + 10px);width:max-content;max-width:150px;padding:5px 7px;border:1px solid #64dbe833;border-radius:3px;background:#04131feb;color:#d9edf1;font-size:7px;font-weight:750;letter-spacing:.06em;text-transform:uppercase;content:attr(title);transform:translateX(-3px);opacity:0;pointer-events:none;transition:opacity 120ms ease,transform 120ms ease}
+.city-home .sidebar a:hover::after,
+.city-home .sidebar a:focus-visible::after{transform:none;opacity:1}
+.city-home .sidebar a:focus-visible{outline:2px solid #61e3ee;outline-offset:2px}
+.city-home .sidebar a:hover{background:#0a52724f}
+.city-home .sidebar a.active{border-radius:5px;background:#0d58779c;box-shadow:inset 0 0 0 1px #27bce366,inset 2px 0 #23d8ff}
+
+.city-home .city-toolbar{position:absolute;z-index:24;top:80px;right:18px;left:76px;display:grid;width:auto;height:48px;padding:4px 5px;grid-template-columns:minmax(230px,1fr) auto auto auto;align-items:center;gap:8px;border:1px solid #27bce32e;border-radius:7px;background:linear-gradient(90deg,#041421db,#061a28c7 52%,#04131fd9);box-shadow:0 14px 38px #0006,inset 0 1px #ffffff09;backdrop-filter:blur(15px) saturate(115%);pointer-events:auto}
+.city-home .city-toolbar>div:first-child{padding:0 10px;border:0;background:transparent;box-shadow:none;backdrop-filter:none}
+.city-home .city-command-identity{display:grid;min-width:0;gap:1px}
+.city-home .city-command-identity .eyebrow{overflow:hidden;color:#50dff2;font-size:7px;letter-spacing:.12em;text-overflow:ellipsis;white-space:nowrap}
+.city-home .city-command-identity h2{overflow:hidden;margin:0;color:#eff9fb;font-size:12px;letter-spacing:.025em;text-overflow:ellipsis;white-space:nowrap}
+
+.city-home .city-view-switch{display:grid;width:142px;height:34px;grid-template-columns:1fr 1fr;padding:3px;border:1px solid #64dbe82e;border-radius:4px;background:#020d16a8}
+.city-home .city-view-switch button{display:flex;min-width:0;padding:0 8px;align-items:center;justify-content:center;gap:5px;border:0;border-radius:3px;background:transparent;color:#76979f;font-size:7px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;cursor:pointer}
+.city-home .city-view-switch button+button{border-left:1px solid #64dbe81f}
+.city-home .city-view-switch svg{width:13px;height:13px}
+.city-home .city-view-switch button:hover{background:#1853674d;color:#d9f8fb}
+.city-home .city-view-switch button.is-active{background:linear-gradient(180deg,#2d71804d,#0a2c3838);color:#f1fdff;box-shadow:inset 0 -2px #61e3ee}
+.city-home .city-view-switch button.is-active svg{color:#61e3ee}
+
+.city-home .city-command-demo{display:flex;height:28px;padding:0 8px;align-items:center;gap:6px;border-left:1px solid #64dbe824;color:#7f9ca3;font-size:6.5px;letter-spacing:.07em;text-transform:uppercase}
+.city-home .city-command-demo span{padding:2px 4px;border:1px solid #ff7a1a66;border-radius:2px;color:#ffad72;font-weight:800}
+.city-home .city-command-demo i{width:4px;height:4px;border-radius:50%;background:#61e3ee;box-shadow:0 0 6px #61e3ee99}
+.city-home .city-command-demo b{color:#a9c0c5;font-size:6.5px;white-space:nowrap}
+
+.city-home .tool-row{gap:3px}
+.city-home .tool-row button{width:30px;height:30px;border:1px solid #64dbe828;border-radius:4px;background:#03111bbd;box-shadow:none;backdrop-filter:none}
+.city-home .tool-row button:hover{border-color:#61e3ee88;color:#61e3ee;background:#0d3a4a8c}
+.city-home .tool-row button:disabled{opacity:.28}
+.city-home .tool-row svg{width:14px;height:14px}
+.city-home .city-walk-exit{display:grid;min-width:116px;height:34px;grid-template-columns:20px 1fr;grid-template-rows:1fr 1fr;padding:4px 9px;align-items:center;border:1px solid #ff7a1a99;border-radius:4px;background:linear-gradient(110deg,#472310eb,#051720e8);color:#fff3ea;text-align:left;cursor:pointer;box-shadow:0 0 14px #ff7a1a14}
+.city-home .city-walk-exit svg{grid-row:1/3;width:15px;height:15px;color:#ff7a1a}
+.city-home .city-walk-exit span{align-self:end;font-size:7.5px;font-weight:850;letter-spacing:.07em;text-transform:uppercase}
+.city-home .city-walk-exit small{align-self:start;color:#aac0c4;font-size:5.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+
+.city-home .city-view-switch button:focus-visible,
+.city-home .city-walk-exit:focus-visible{outline:2px solid #61e3ee;outline-offset:2px}
+.city-home .timeline,.city-home .map-legend{display:none}
+.city-home .city-map-hud__operations{right:16px;bottom:16px}
+
+.city-home .city-panel.is-first-person .city-toolbar{top:82px;right:18px;left:auto;display:grid;width:auto;height:42px;padding:4px;grid-template-columns:auto auto;gap:4px;transform:none}
+.city-home .city-panel.is-first-person .city-command-identity,
+.city-home .city-panel.is-first-person .city-command-demo{display:none}
+.city-home .city-panel.is-first-person .tool-row .icon-button:nth-child(2),
+.city-home .city-panel.is-first-person .tool-row .icon-button:nth-child(3){display:none}
+.city-home .city-panel.is-first-person .three-city-first-person-hud{top:86px!important}
+
+@media(max-width:1280px){
+  .city-home .city-toolbar{left:70px;grid-template-columns:minmax(190px,1fr) auto auto auto}
+  .city-home .city-command-demo b{display:none}
+}
+
+@media(max-width:980px){
+  .city-home .city-command-identity{display:none}
+  .city-home .city-toolbar{grid-template-columns:1fr auto auto}
+}
