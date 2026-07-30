@@ -1,11 +1,11 @@
 # Product guide
 
-ESCO Engineering City is a local engineering-operations workspace. Its campus explains workflow state; findings and source evidence remain the center of the experience.
+ESCO Engineering City is a local engineering-operations workspace. Its multi-district city explains workflow state; findings and source evidence remain the center of the experience.
 
 ## Principles
 
 - Agent positions derive from semantic workflow state, never random movement.
-- The campus uses original procedural Three.js WebGL geometry: real 3D industrial buildings, service roads, yards, roof equipment, lighting, and state overlays on a flat black world with layered white grid lines.
+- The city uses original procedural Three.js WebGL geometry: a central skyline, eight workflow districts, hundreds of deterministic instanced buildings, roads, bridges, dark channels, industrial and logistics infrastructure, lighting, and state overlays on an expansive black world with layered white grid lines.
 - Demo records are always marked `DEMO DATA`.
 - AI recommendations are advisory and never imply approval.
 - Critical decisions require an authorized reviewer and recorded rationale.
@@ -15,7 +15,7 @@ ESCO Engineering City is a local engineering-operations workspace. Its campus ex
 ## Demonstration
 
 1. Run `scripts/product/run-demo.ps1` and open `http://127.0.0.1:4173`.
-2. Orbit the 3D campus, select buildings, and inspect deterministic agent placement.
+2. Orbit the 3D city, select district labels or anchor buildings, and inspect deterministic agent placement.
 3. Open Findings, select `F-107`, and compare evidence.
 4. Open Approvals; submit remains disabled until a decision is selected.
 5. Open Reports and generate a synthetic, clearly marked export.

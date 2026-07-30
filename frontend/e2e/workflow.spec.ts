@@ -2,11 +2,13 @@ import { expect, test } from "@playwright/test";
 test("synthetic engineering review workflow is operable", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("DEMO DATA")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Line 4 engineering campus" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Line 4 operations city" })).toBeVisible();
   await page.getByRole("button", { name: "Zoom in" }).click();
   await page.getByRole("button", { name: "Reset city view" }).click();
   await expect(page.getByRole("button", { name: "Automation Engineering, 1 active agent" })).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator("canvas.three-city-canvas")).toBeVisible();
+  await page.getByRole("button", { name: "Automation Core: Logic review · 1 active" }).click();
+  await expect(page.getByRole("button", { name: "Automation Engineering, 1 active agent" })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("link", { name: /Findings/ }).click();
   await page.getByText("F-107 · Photoeye PE-402").click();
   await expect(page.getByText(/field wiring/)).toBeVisible();

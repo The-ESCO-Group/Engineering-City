@@ -6,3 +6,13 @@
 .city-render-error{position:absolute;z-index:6;inset:50% auto auto 50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;gap:6px;width:min(420px,80%);padding:16px;border:1px solid #7a4630;background:#1d1714;color:#cbd1d6;font-size:10px}.city-render-error strong{color:#ff9c61;font-size:13px}.city-toolbar .icon-button:disabled{opacity:.35;cursor:not-allowed}
 .three-city-host{position:absolute;inset:0;overflow:hidden;background:#020203}.three-city-canvas{position:absolute;inset:0;display:block;width:100%;height:100%;touch-action:none}.three-city-hint{position:absolute;z-index:4;right:14px;bottom:12px;display:flex;align-items:center;gap:8px;padding:6px 9px;border:1px solid #ffffff29;background:#050506d9;color:#aeb5bb;font-size:8px;letter-spacing:.7px;text-transform:uppercase;pointer-events:none}.three-city-hint:before{content:"";width:6px;height:6px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px #ffffff17}.three-city-host .city-accessibility{z-index:5}
 .startup-error{min-height:100vh;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;max-width:620px;margin:auto;padding:40px;background:#070709}.startup-error h1{margin:12px 0 8px;color:#f1f2f3;font-size:28px}.startup-error p{line-height:1.55;color:#aeb5bd}.startup-error .brand-mark{flex:none}.startup-error .startup-help{padding:14px;border:1px solid #4b3a2e;background:#211a16}.startup-error code{color:#ffad70}.startup-error button{border:1px solid #ff9142;background:#ff791a;color:#15100c;font-weight:700;padding:10px 14px;cursor:pointer}
+
+/* Immersive city overview: the 3D world owns the first viewport; workspaces continue below it. */
+.app{grid-template-columns:180px minmax(720px,1fr) 260px}
+.city-panel{height:calc(100vh - 56px);min-height:620px;flex:none;background:#020203}
+.city-toolbar{height:58px;flex:0 0 58px;padding:0 17px;background:linear-gradient(180deg,#090a0df2,#090a0db8 72%,transparent);border-bottom:1px solid #ffffff0b}
+.city-toolbar h2{font-size:15px;letter-spacing:.15px}
+.city-map{min-height:0;background:#020203}
+.workspace{height:240px;min-height:240px;flex:none}
+.map-legend{left:15px;bottom:13px;padding:5px 7px;border:1px solid #ffffff17;background:#050506c9;letter-spacing:.3px}
+.activity-panel{background:#0d0e11}

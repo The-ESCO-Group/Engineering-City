@@ -1,0 +1,287 @@
+.city-map-hud {
+  --city-map-hud-ink: #f4f5f6;
+  --city-map-hud-muted: #969da4;
+  --city-map-hud-line: rgb(255 255 255 / 24%);
+  --city-map-hud-orange: #ff791a;
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  overflow: hidden;
+  color: var(--city-map-hud-ink);
+  font-family: Inter, "Segoe UI", sans-serif;
+  pointer-events: none;
+  container: city-map-hud / inline-size;
+}
+
+.city-map-hud__districts {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.city-map-hud__district {
+  position: absolute;
+  left: var(--city-map-hud-x);
+  top: var(--city-map-hud-y);
+  width: max-content;
+  max-width: 156px;
+  min-width: 112px;
+  padding: 5px 8px 5px 9px;
+  border: 0;
+  border-left: 1px solid var(--city-map-hud-line);
+  border-radius: 0;
+  background: linear-gradient(90deg, rgb(3 4 5 / 86%), rgb(3 4 5 / 44%) 72%, transparent);
+  box-shadow: none;
+  color: inherit;
+  text-align: left;
+  text-transform: uppercase;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  touch-action: manipulation;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    transform 140ms ease;
+}
+
+.city-map-hud__district::before {
+  position: absolute;
+  top: calc(100% + 1px);
+  left: -1px;
+  width: 1px;
+  height: 13px;
+  background: linear-gradient(var(--city-map-hud-line), transparent);
+  content: "";
+}
+
+.city-map-hud__district::after {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: -3px;
+  width: 5px;
+  height: 5px;
+  border: 1px solid rgb(255 255 255 / 64%);
+  border-radius: 50%;
+  background: #050506;
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 48%);
+  content: "";
+}
+
+.city-map-hud__district:hover,
+.city-map-hud__district.is-selected {
+  border-left-color: var(--city-map-hud-orange);
+  background: linear-gradient(90deg, rgb(28 15 7 / 92%), rgb(5 5 6 / 62%) 72%, transparent);
+}
+
+.city-map-hud__district:hover {
+  transform: translate(-50%, -50%) translateY(-1px);
+}
+
+.city-map-hud__district.is-selected::before {
+  background: linear-gradient(var(--city-map-hud-orange), transparent);
+}
+
+.city-map-hud__district.is-selected::after {
+  border-color: var(--city-map-hud-orange);
+  background: var(--city-map-hud-orange);
+  box-shadow:
+    0 0 0 2px rgb(0 0 0 / 72%),
+    0 0 10px rgb(255 121 26 / 56%);
+}
+
+.city-map-hud__district:focus-visible {
+  outline: 1px solid #fff;
+  outline-offset: 3px;
+}
+
+.city-map-hud__district-name,
+.city-map-hud__district-detail {
+  display: block;
+  white-space: nowrap;
+}
+
+.city-map-hud__district-name {
+  color: var(--city-map-hud-ink);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.55px;
+  line-height: 1.2;
+}
+
+.city-map-hud__district.is-selected .city-map-hud__district-name {
+  color: #ff9d59;
+}
+
+.city-map-hud__core-label {
+  position: absolute;
+  top: 36%;
+  left: 51%;
+  display: grid;
+  gap: 2px;
+  padding: 5px 9px;
+  border: 1px solid rgb(255 255 255 / 22%);
+  background: rgb(3 4 5 / 78%);
+  text-align: center;
+  text-transform: uppercase;
+  transform: translate(-50%, -50%);
+}
+
+.city-map-hud__core-label span {
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .65px;
+}
+
+.city-map-hud__core-label small {
+  color: var(--city-map-hud-muted);
+  font-size: 6px;
+  font-weight: 600;
+  letter-spacing: .28px;
+}
+
+.city-map-hud__district-detail {
+  margin-top: 2px;
+  color: var(--city-map-hud-muted);
+  font-size: 6.5px;
+  font-weight: 600;
+  letter-spacing: 0.26px;
+  line-height: 1.25;
+}
+
+.city-map-hud__operations {
+  position: absolute;
+  right: 15px;
+  bottom: 18px;
+  width: 174px;
+  padding: 11px;
+  border: 1px solid var(--city-map-hud-line);
+  background:
+    linear-gradient(145deg, rgb(22 23 25 / 95%), rgb(5 6 7 / 94%)),
+    #08090a;
+  box-shadow:
+    0 16px 32px rgb(0 0 0 / 34%),
+    inset 0 1px rgb(255 255 255 / 4%);
+  user-select: none;
+}
+
+.city-map-hud__operations header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgb(255 255 255 / 12%);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.75px;
+  text-transform: uppercase;
+}
+
+.city-map-hud__operations header i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--city-map-hud-orange);
+  box-shadow: 0 0 7px rgb(255 121 26 / 62%);
+}
+
+.city-map-hud__operations > p {
+  overflow: hidden;
+  margin: 7px 0 9px;
+  color: var(--city-map-hud-muted);
+  font-size: 6.5px;
+  letter-spacing: 0.35px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.city-map-hud__operations dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.city-map-hud__operations dl > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.city-map-hud__operations dt {
+  color: #a8aeb4;
+  font-size: 6.5px;
+  font-weight: 600;
+  letter-spacing: 0.35px;
+  text-transform: uppercase;
+}
+
+.city-map-hud__operations dd {
+  margin: 0;
+  color: #f8f9fa;
+  font-family: "Roboto Mono", Consolas, monospace;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.city-map-hud__readiness {
+  height: 2px;
+  margin-top: 9px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 11%);
+}
+
+.city-map-hud__readiness span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #d85b08, var(--city-map-hud-orange));
+  box-shadow: 0 0 8px rgb(255 121 26 / 48%);
+}
+
+@container city-map-hud (max-width: 760px) {
+  .city-map-hud__district {
+    min-width: 0;
+    max-width: 120px;
+    padding: 4px 6px;
+  }
+
+  .city-map-hud__district-name {
+    font-size: 7.5px;
+  }
+
+  .city-map-hud__district-detail {
+    display: none;
+  }
+
+  .city-map-hud__operations {
+    right: 10px;
+    bottom: 10px;
+    width: 148px;
+    padding: 9px;
+  }
+}
+
+@container city-map-hud (max-width: 580px) {
+  .city-map-hud__district {
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+
+  .city-map-hud__district:hover {
+    transform: translate(-50%, -50%) translateY(-1px) scale(0.9);
+  }
+
+  .city-map-hud__operations dl > div:nth-child(2),
+  .city-map-hud__operations dl > div:nth-child(3),
+  .city-map-hud__operations > p {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .city-map-hud__district {
+    transition: none;
+  }
+}

@@ -1,21 +1,24 @@
+import { useState } from "react";
 import { Pause, Play, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { useUI } from "../store";
+import { CityMapHud } from "./CityMapHud";
 import { ThreeCity } from "./ThreeCity";
 
 export function City() {
+  const [viewResetKey, setViewResetKey] = useState(0);
   const { selectedBuilding, selectBuilding, paused, togglePause, reducedMotion, setReducedMotion, speed, setSpeed, zoom, setZoom } = useUI();
   return (
     <section className="city-panel" aria-label="Engineering city workflow visualization">
       <div className="city-toolbar">
         <div>
-          <span className="eyebrow">LIVE WORKFLOW · REAL 3D WORLD</span>
-          <h2>Line 4 engineering campus</h2>
+          <span className="eyebrow">ENGINEERING OPERATIONS · DIGITAL CITY</span>
+          <h2>Line 4 operations city</h2>
         </div>
         <div className="tool-row">
           <button className="icon-button" onClick={togglePause} aria-label={paused ? "Play timeline" : "Pause timeline"}>{paused ? <Play /> : <Pause />}</button>
           <button className="icon-button" onClick={() => setZoom(Math.max(0.82, zoom - 0.1))} disabled={zoom <= 0.82} aria-label="Zoom out"><ZoomOut /></button>
           <button className="icon-button" onClick={() => setZoom(Math.min(1.28, zoom + 0.1))} disabled={zoom >= 1.28} aria-label="Zoom in"><ZoomIn /></button>
-          <button className="icon-button" onClick={() => { setZoom(1); selectBuilding(null); }} aria-label="Reset city view"><RotateCcw /></button>
+          <button className="icon-button" onClick={() => { setZoom(1); selectBuilding(null); setViewResetKey((key) => key + 1); }} aria-label="Reset city view"><RotateCcw /></button>
         </div>
       </div>
       <div className={`city-map ${paused || reducedMotion ? "is-paused" : ""}`}>
@@ -26,6 +29,12 @@ export function City() {
           reducedMotion={reducedMotion}
           speed={speed}
           zoom={zoom}
+          resetKey={viewResetKey}
+        />
+        <CityMapHud
+          selectedBuilding={selectedBuilding}
+          selectBuilding={selectBuilding}
+          projectLabel="PRJ-0241 · Line 4 Cartoner Upgrade"
         />
         <div className="map-legend"><span><i className="dot active" /> Active</span><span><i className="dot waiting" /> Waiting</span><span><i className="dot fault" /> Warning</span></div>
       </div>

@@ -7,7 +7,7 @@ Work began against bootstrap commit `2f47487`. Backend foundation commit `08c3cf
 ## Completed
 
 - Strict React/Vite foundation with Router, Query, Zustand, Vitest, and Playwright.
-- Original Three.js WebGL industrial campus with eight distinct real-3D buildings, semantic agent mapping, deterministic occupancy, constrained orbit controls, raycast selection, timeline, and reduced motion.
+- Original Three.js WebGL operations city with a central landmark skyline, eight workflow districts, hundreds of deterministic instanced buildings, road and bridge infrastructure, semantic agent mapping, constrained orbit controls, raycast selection, timeline, and reduced motion.
 - Project portfolio, task board, findings, evidence comparison, approvals, reports, activity, and workspace tabs.
 - Clearly labeled offline demo data and real synthetic JSON browser export.
 - Tauri 2 Windows shell with local-only backend URL validation, Windows application resources, and a verified non-blank WebView render.
@@ -41,7 +41,7 @@ Delivery agents under `backend/app/agents/delivery/**` and report providers unde
 
 ## Known limitations
 
-- The campus is a procedural Three.js scene built from real meshes, materials, lights, and shadows on a flat black world with layered white grid lines. It does not use copied OpenClaw City artwork or externally hosted runtime assets.
+- The city is a procedural Three.js scene built from real meshes, instancing, materials, lights, and shadows on an expansive black world with layered white grid lines. It uses the supplied reference only for composition and does not copy its branding, artwork, or external runtime assets.
 - Desktop backend process coordination awaits a documented backend executable command.
 - Backend report formats await provider interfaces; demo downloads are real JSON artifacts.
 

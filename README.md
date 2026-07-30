@@ -1,12 +1,12 @@
 # ESCO Engineering City
 
-Local-only engineering operations software for ESCO Group. The product shows project workflow and engineering review agents in an original, interactive 3D industrial campus while keeping evidence, findings, and human decisions central.
+Local-only engineering operations software for ESCO Group. The product shows project workflow and engineering review agents in an original, interactive multi-district 3D operations city while keeping evidence, findings, and human decisions central.
 
 > The current product runs with clearly labeled synthetic demo data. Real API integration awaits the backend contract package.
 
 ## Product surfaces
 
-- Engineering City — deterministic workflow position and activity in a real Three.js world
+- Engineering City — deterministic workflow activity across a dense Three.js skyline, district network, and industrial grid
 - Projects and Tasks — progress, blockers, dependencies, and approval state
 - Findings & Evidence — exact source locations, confidence, risk, and comparison
 - Approvals — explanation-gated human decisions
