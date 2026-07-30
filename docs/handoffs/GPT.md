@@ -50,3 +50,4 @@ Delivery agents under `backend/app/agents/delivery/**` and report providers unde
 - `d5560d39f654ae136692f1478efbab29a9d1db49` — verified product demo slice, desktop shell, scripts, tests, and documentation.
 - `46f8fba4f3005826030432ec01ad2d936410f22b` — realistic PixiJS industrial campus, startup diagnostics, verified Tauri render, and Windows resources.
 - `5034f1820d5fa66bf4f09138ba5ec6e685361002` — replaced the 2.5D renderer with a true Three.js WebGL campus on a black world and layered white grid.
+- `97ae786ecd115d4ca85587787ddd7c15041d91a9` — expanded the renderer into a dense, reference-driven multi-district operations city with instanced geometry, infrastructure, and an accessible map HUD.
