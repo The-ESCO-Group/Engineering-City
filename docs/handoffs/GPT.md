@@ -7,7 +7,7 @@ Work began against bootstrap commit `2f47487`. Backend foundation commit `08c3cf
 ## Completed
 
 - Strict React/Vite foundation with Router, Query, Zustand, Vitest, and Playwright.
-- Immersive full-viewport Three.js WebGL operations city with a central landmark skyline, eight workflow districts, hundreds of deterministic instanced buildings, connected metropolitan blocks, a stable isometric overview, first-person walking with pointer-lock mouse look, semantic agent mapping, raycast selection, and reduced motion.
+- Immersive full-viewport Three.js WebGL operations city with a central landmark skyline, eight workflow districts, hundreds of deterministic instanced buildings, connected metropolitan blocks, an isometric starting view with free 360° orbit and zoom, first-person walking with pointer-lock mouse look, semantic agent mapping, raycast selection, and reduced motion.
 - Deterministic city-life simulation with bidirectional traffic, pedestrian movement and idling, water and route packets, rooftop beacons, and phase-varied window lighting; all ambient motion honors pause, speed, and reduced-motion state.
 - City-first spectator chrome with a compact icon rail, unified command bar, lightweight spatial labels, functional minimap controls, clearly labeled synthetic activity strip, compact six-layer dock, and operational summary.
 - Project portfolio, task board, findings, evidence comparison, approvals, reports, activity, and workspace tabs.
@@ -57,3 +57,4 @@ Delivery agents under `backend/app/agents/delivery/**` and report providers unde
 - `21e562809f9cd117ee0f0769a86114f547dc1cda` — rebuilt the home as a colorful full-viewport digital twin with emissive districts, polished façade detail, functional minimap/layer chrome, and a no-grid developed world.
 - `d69072c9a2e301a2d31d7278e9f82748e74fcbea` — expanded the city into a connected edge-to-edge metro and added first-person walking, pointer-lock mouse look, and verified map/walk controls.
 - `a5b31b83076e77131ca3b20c71093370165ea40d` — brought the city to life with moving traffic and pedestrians, animated infrastructure, street-level detail, cleaner spectator chrome, and updated visual regression previews.
+- `52e67f18acfcb0cf43229441638000e8c5e6786a` — preserved the composed city homepage while adding unrestricted horizontal Map orbit, wheel/pinch zoom, grab affordances, reset behavior, and end-to-end interaction coverage.
