@@ -6,19 +6,21 @@ interface UIState {
   paused: boolean;
   reducedMotion: boolean;
   speed: number;
+  zoom: number;
   selectedFinding: string | null;
   selectBuilding: (id: BuildingId | null) => void;
   togglePause: () => void;
   setReducedMotion: (value: boolean) => void;
   setSpeed: (value: number) => void;
+  setZoom: (value: number) => void;
   selectFinding: (id: string | null) => void;
 }
 export const useUI = create<UIState>((set) => ({
-  selectedBuilding: null, paused: false, reducedMotion: false, speed: 1, selectedFinding: "F-104",
+  selectedBuilding: null, paused: false, reducedMotion: false, speed: 1, zoom: 1, selectedFinding: "F-104",
   selectBuilding: (id) => set({ selectedBuilding: id }),
   togglePause: () => set((state) => ({ paused: !state.paused })),
   setReducedMotion: (reducedMotion) => set({ reducedMotion }),
   setSpeed: (speed) => set({ speed }),
+  setZoom: (zoom) => set({ zoom }),
   selectFinding: (selectedFinding) => set({ selectedFinding })
 }));
-

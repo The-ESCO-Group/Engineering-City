@@ -5,10 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#070709" />
     <title>ESCO Engineering City</title>
+    <style>
+      html,body,#root{height:100%;margin:0;background:#070709;color:#cad1d8}
+      .boot-status{min-height:100%;display:grid;place-content:center;text-align:center;font:13px "Segoe UI",sans-serif}
+      .boot-status b{color:#ff791a;letter-spacing:.12em}.boot-status p{color:#8a929c}
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot-status" role="status">
+        <b>ESCO ENGINEERING CITY</b>
+        <p>Starting local frontend…</p>
+      </div>
+    </div>
+    <noscript>JavaScript is required to run ESCO Engineering City.</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

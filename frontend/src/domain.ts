@@ -17,14 +17,14 @@ export interface Project {
 }
 
 export const buildings: Array<{ id: BuildingId; name: string; x: number; y: number; short: string }> = [
-  { id: "intake", name: "Project Intake", x: 14, y: 17, short: "INTAKE" },
-  { id: "automation", name: "Automation Engineering", x: 38, y: 9, short: "PLC" },
-  { id: "hmi", name: "HMI Development", x: 65, y: 14, short: "HMI" },
-  { id: "electrical", name: "Electrical Engineering", x: 78, y: 39, short: "ELEC" },
-  { id: "qa", name: "QA and Testing", x: 60, y: 61, short: "QA" },
-  { id: "documentation", name: "Documentation", x: 35, y: 67, short: "DOCS" },
-  { id: "approval", name: "Approval Office", x: 12, y: 54, short: "APPROVAL" },
-  { id: "release", name: "Release Center", x: 83, y: 71, short: "RELEASE" }
+  { id: "intake", name: "Project Intake", x: 15, y: 38, short: "INTAKE" },
+  { id: "automation", name: "Automation Engineering", x: 39, y: 32, short: "PLC" },
+  { id: "hmi", name: "HMI Development", x: 65, y: 36, short: "HMI" },
+  { id: "electrical", name: "Electrical Engineering", x: 84, y: 61, short: "ELEC" },
+  { id: "qa", name: "QA and Testing", x: 65, y: 78, short: "QA" },
+  { id: "documentation", name: "Documentation", x: 39, y: 82, short: "DOCS" },
+  { id: "approval", name: "Approval Office", x: 15, y: 70, short: "APPROVAL" },
+  { id: "release", name: "Release Center", x: 85, y: 87, short: "RELEASE" }
 ];
 
 export const projects: Project[] = [
@@ -57,4 +57,3 @@ export const tasks: Array<{ name: string; owner: string; state: TaskState; progr
   { name: "Approve corrective action plan", owner: "N. Modha", state: "Awaiting approval", progress: 0 },
   { name: "Generate release package", owner: "Documentation", state: "Queued", progress: 0 }
 ];
-

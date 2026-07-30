@@ -5,6 +5,7 @@ ESCO Engineering City is a local engineering-operations workspace. Its campus ex
 ## Principles
 
 - Agent positions derive from semantic workflow state, never random movement.
+- The campus uses original procedural PixiJS geometry: dimensional industrial buildings, service roads, yards, roof equipment, landscape, lighting, and state overlays.
 - Demo records are always marked `DEMO DATA`.
 - AI recommendations are advisory and never imply approval.
 - Critical decisions require an authorized reviewer and recorded rationale.
@@ -20,4 +21,3 @@ ESCO Engineering City is a local engineering-operations workspace. Its campus ex
 5. Open Reports and generate a synthetic, clearly marked export.
 
 The visualization uses named native controls. System reduced-motion preferences and the explicit reduced-motion option stop animation.
-

@@ -2,20 +2,20 @@
 
 ## Status
 
-Work began against bootstrap commit `2f47487`. No `contracts/**`, backend app, or `docs/handoffs/CLAUDE.md` existed.
+Work began against bootstrap commit `2f47487`. Backend foundation commit `08c3cfb` subsequently published contract version `1.0.0`; Claude-owned Milestone 1 work is currently active in the shared worktree.
 
 ## Completed
 
 - Strict React/Vite foundation with Router, Query, Zustand, Vitest, and Playwright.
-- Original isometric campus with eight stable building IDs, semantic agent mapping, timeline, and reduced motion.
+- Original PixiJS isometric industrial campus with eight distinct 3D-style buildings, semantic agent mapping, deterministic occupancy, camera controls, timeline, and reduced motion.
 - Project portfolio, task board, findings, evidence comparison, approvals, reports, activity, and workspace tabs.
 - Clearly labeled offline demo data and real synthetic JSON browser export.
-- Tauri 2 Windows shell with local-only backend URL validation.
+- Tauri 2 Windows shell with local-only backend URL validation, Windows application resources, and a verified non-blank WebView render.
 - Product PowerShell scripts, synthetic fixture boundary, and product docs.
 
 ## Contract version
 
-Blocked: `contracts/**` does not exist. No conflicting client API models were created.
+Observed: contract version `1.0.0` in `contracts/openapi.yaml`, `contracts/domain.schema.json`, and `contracts/events.schema.json`. No conflicting handwritten API models were created. Generated-client integration remains pending until the actively changing backend endpoint surface is committed.
 
 ## Exact backend change requests
 
@@ -41,7 +41,7 @@ Delivery agents under `backend/app/agents/delivery/**` and report providers unde
 
 ## Known limitations
 
-- The campus is currently DOM/CSS-rendered; PixiJS is installed for migration once event schemas arrive.
+- The campus is rendered by PixiJS as an original procedural 2.5D scene. It does not use copied OpenClaw City artwork or externally hosted runtime assets.
 - Desktop backend process coordination awaits a documented backend executable command.
 - Backend report formats await provider interfaces; demo downloads are real JSON artifacts.
 
