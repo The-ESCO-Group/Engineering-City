@@ -4,7 +4,7 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 `backend/app/agents/{base,review}`, `backend/tests`, `contracts`, `infra/backend`,
 `scripts/backend`, `docs/backend`.
 
-**Last updated:** Milestone 5
+**Last updated:** Milestone 6 — Claude-owned scope complete
 **Contract version:** `1.0.0`
 **Tests:** 994 passing · ruff, mypy clean · 72/72 live-process smoke checks
 
@@ -20,7 +20,7 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 | 3 | Workflow engine and WebSockets | ✅ complete |
 | 4 | Four review agents and provider adapters | ✅ complete |
 | 5 | Full API and backend integration tests | ✅ complete |
-| 6 | Security review, documentation, handoff | ⏳ |
+| 6 | Security review, documentation, handoff | ✅ complete |
 
 ### Commits
 
@@ -30,7 +30,8 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 | 1 | `c74b812` | `persistence: authentication, audit, storage and safe intake` |
 | 2 | `751ba54` | `parsers: seven file parsers and the cross-file evidence graph` |
 | 3+4 | `1303c08` | `workflow: persisted queue, live events and the four review agents` |
-| 5 | _(this commit)_ | `api: findings, approvals, agents and reports` |
+| 5 | `4869889` | `api: findings, approvals, agents and reports` |
+| 6 | _(this commit)_ | `security: review, documentation and handoff` |
 
 ---
 
@@ -300,6 +301,43 @@ is outstanding.
   Review Agent simply had nothing to cite and produced no discrepancies at all.
   There is now a test asserting that *every* citation the graph emits resolves to
   a real anchor, for every file type.
+
+---
+
+## Definition of done
+
+Every item verified, most of them against a live process rather than only in
+tests.
+
+| Requirement | Verified by |
+| --- | --- |
+| The backend starts locally | `scripts/backend/smoke.py` boots uvicorn on a fresh database |
+| A user can authenticate | 72/72 smoke checks; `test_auth_api.py` |
+| A project can be created | smoke + `test_projects_api.py` |
+| Multiple files can be uploaded | 9 fixtures in one request, partial acceptance |
+| Files are safely stored and parsed | 7 parsers, sealed read-only originals, SHA-256 |
+| Evidence anchors are produced | ~500 anchors over the fixture set, every citation resolves |
+| A workflow can start, pause, resume, fail and recover | `test_engine.py`, `test_worker.py` |
+| Claude-owned agents run on the MockProvider | 4 agents, no network, deterministic |
+| Findings contain exact evidence | every finding cites an anchor with a followable location |
+| Findings reach human approval | the high-severity interlock halts the project at `awaiting_review` |
+| Events persist and broadcast over WebSockets | gap-free `seq`, replay, live frames |
+| The backend works after a restart | killed mid-run; a fresh process finished the review |
+| All backend tests pass | 994 passing, ruff and mypy clean |
+| Contracts complete enough for the frontend | 39 endpoints, 27 event types, generated and drift-checked |
+| No external model or cloud service required | MockProvider is the default; cloud providers cannot be constructed unless enabled |
+
+### The demonstration, in one command
+
+```bash
+python scripts/backend/smoke.py
+```
+
+Boots a real server on a throwaway database, signs in, creates a project,
+uploads the nine synthetic documents, checks that a disguised executable and an
+`.ACD` are refused with reasons, runs the full review, reads the findings and
+their citations, approves the one that needs a human, and confirms the project
+only reports itself complete afterwards. 72 assertions, no network.
 
 ---
 
