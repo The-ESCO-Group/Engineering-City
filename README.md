@@ -1,12 +1,12 @@
 # ESCO Engineering City
 
-Local-only engineering operations software for ESCO Group. The product shows project workflow and engineering review agents in an original isometric campus while keeping evidence, findings, and human decisions central.
+Local-only engineering operations software for ESCO Group. The product shows project workflow and engineering review agents in an original, interactive 3D industrial campus while keeping evidence, findings, and human decisions central.
 
 > The current product runs with clearly labeled synthetic demo data. Real API integration awaits the backend contract package.
 
 ## Product surfaces
 
-- Engineering City — deterministic workflow position and activity
+- Engineering City — deterministic workflow position and activity in a real Three.js world
 - Projects and Tasks — progress, blockers, dependencies, and approval state
 - Findings & Evidence — exact source locations, confidence, risk, and comparison
 - Approvals — explanation-gated human decisions
@@ -59,4 +59,3 @@ Install Rust and Tauri CLI before `.\scripts\product\build-desktop.ps1`.
 Intended normalized evidence includes L5X, XML, CSV, XLSX, DOCX, and PDF. Parser support is backend-defined and not yet connected. FactoryTalk runtime validation, physical-behavior simulation, controller control, and automatic engineering approval are unsupported.
 
 See [product guide](docs/product/PRODUCT.md) and [GPT handoff](docs/handoffs/GPT.md).
-

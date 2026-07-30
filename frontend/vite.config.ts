@@ -7,10 +7,11 @@ export default defineConfig({
   server: { host: "127.0.0.1", port: 4173, strictPort: true },
   preview: { host: "127.0.0.1", port: 4173 },
   build: {
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks: {
-          pixi: ["pixi.js"],
+          three: ["three"],
           react: ["react", "react-dom", "react-router-dom"]
         }
       }

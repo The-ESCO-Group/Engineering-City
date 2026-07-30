@@ -1,6 +1,6 @@
 import { Pause, Play, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { useUI } from "../store";
-import { PixiCity } from "./PixiCity";
+import { ThreeCity } from "./ThreeCity";
 
 export function City() {
   const { selectedBuilding, selectBuilding, paused, togglePause, reducedMotion, setReducedMotion, speed, setSpeed, zoom, setZoom } = useUI();
@@ -8,7 +8,7 @@ export function City() {
     <section className="city-panel" aria-label="Engineering city workflow visualization">
       <div className="city-toolbar">
         <div>
-          <span className="eyebrow">LIVE WORKFLOW</span>
+          <span className="eyebrow">LIVE WORKFLOW · REAL 3D WORLD</span>
           <h2>Line 4 engineering campus</h2>
         </div>
         <div className="tool-row">
@@ -19,7 +19,7 @@ export function City() {
         </div>
       </div>
       <div className={`city-map ${paused || reducedMotion ? "is-paused" : ""}`}>
-        <PixiCity
+        <ThreeCity
           selectedBuilding={selectedBuilding}
           selectBuilding={selectBuilding}
           paused={paused}
