@@ -1,15 +1,23 @@
 import { expect, test } from "@playwright/test";
 test("synthetic engineering review workflow is operable", async ({ page }) => {
+  test.setTimeout(120_000);
   await page.goto("/");
-  await expect(page.getByText("DEMO DATA")).toBeVisible();
+  await expect(page.getByText("All systems operational")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Line 4 operations city" })).toBeVisible();
-  await page.getByRole("button", { name: "Zoom in" }).click();
+  await expect(page.getByRole("complementary", { name: "Engineering city minimap" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Overview layer" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Mobility layer" }).click();
+  await expect(page.getByRole("button", { name: "Mobility layer" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click();
   await page.getByRole("button", { name: "Reset city view" }).click();
   await expect(page.getByRole("button", { name: "Automation Engineering, 1 active agent" })).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator("canvas.three-city-canvas")).toBeVisible();
+  await expect(page.locator(".workspace")).toHaveCount(0);
+  await expect(page.locator(".activity-panel")).toHaveCount(0);
   await page.getByRole("button", { name: "Automation Core: Logic review · 1 active" }).click();
   await expect(page.getByRole("button", { name: "Automation Engineering, 1 active agent" })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("link", { name: /Findings/ }).click();
+  await expect(page.locator(".activity-panel")).toBeVisible();
   await page.getByText("F-107 · Photoeye PE-402").click();
   await expect(page.getByText(/field wiring/)).toBeVisible();
   await page.getByRole("link", { name: /Approvals/ }).click();

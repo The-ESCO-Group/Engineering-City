@@ -5,7 +5,9 @@ ESCO Engineering City is a local engineering-operations workspace. Its multi-dis
 ## Principles
 
 - Agent positions derive from semantic workflow state, never random movement.
-- The city uses original procedural Three.js WebGL geometry: a central skyline, eight workflow districts, hundreds of deterministic instanced buildings, roads, bridges, dark channels, industrial and logistics infrastructure, lighting, and state overlays on an expansive black world with layered white grid lines.
+- The home is an immersive Three.js WebGL digital-twin world with a central skyline, eight workflow districts, hundreds of deterministic instanced buildings, roads, bridges, waterways, industrial and logistics infrastructure, and layered system overlays.
+- Its visual language uses a deep-navy environment, luminous cyan infrastructure and water, orange mobility routes, purple district accents, and a vivid green park. Developed terrain stays free of a global black grid so streets, districts, and building footprints provide the spatial structure.
+- The viewport chrome mirrors an operations command center: translucent labeled navigation, city callouts, a lower-left minimap, a bottom layer dock, and a live overview panel sit over the world instead of shrinking it into a dashboard card.
 - Demo records are always marked `DEMO DATA`.
 - AI recommendations are advisory and never imply approval.
 - Critical decisions require an authorized reviewer and recorded rationale.

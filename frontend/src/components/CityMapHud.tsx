@@ -26,14 +26,14 @@ export interface CityMapHudProps {
 }
 
 const districts: DistrictLabel[] = [
-  { id: "intake", label: "North Review", detail: "Project intake · 1 queued", x: "14%", y: "24%" },
+  { id: "intake", label: "North Review", detail: "Project intake · 1 queued", x: "18%", y: "24%" },
   { id: "automation", label: "Automation Core", detail: "Logic review · 1 active", x: "37%", y: "18%" },
   { id: "hmi", label: "HMI District", detail: "Tag review · 1 active", x: "68%", y: "25%" },
   { id: "electrical", label: "Electrical Works", detail: "I/O review · 1 active", x: "84%", y: "48%" },
   { id: "qa", label: "QA Campus", detail: "Validation · 1 waiting", x: "67%", y: "68%" },
   { id: "documentation", label: "Documentation Quarter", detail: "Reports · package ready", x: "39%", y: "76%" },
-  { id: "approval", label: "Approval Plaza", detail: "Human gate · 2 pending", x: "15%", y: "61%" },
-  { id: "release", label: "Release Logistics", detail: "Delivery · gated", x: "84%", y: "78%" },
+  { id: "approval", label: "Approval Plaza", detail: "Human gate · 2 pending", x: "18%", y: "61%" },
+  { id: "release", label: "Release Logistics", detail: "Delivery · gated", x: "80%", y: "78%" },
 ];
 
 const defaultSummary: CityOperationsSummary = {
@@ -80,14 +80,9 @@ export function CityMapHud({
         })}
       </nav>
 
-      <div className="city-map-hud__core-label" aria-hidden="true">
-        <span>Central operations</span>
-        <small>Project control · 68% ready</small>
-      </div>
-
       <aside className="city-map-hud__operations" aria-label="City operations summary">
         <header>
-          <span>City operations</span>
+          <span>City overview</span>
           <i aria-hidden="true" />
         </header>
         <p title={projectLabel}>{projectLabel}</p>
@@ -96,7 +91,7 @@ export function CityMapHud({
             <dt>Active reviews</dt>
             <dd>{operations.activeReviews}</dd>
           </div>
-          <div>
+          <div className="is-alert">
             <dt>Open findings</dt>
             <dd>{operations.openFindings}</dd>
           </div>
@@ -116,6 +111,14 @@ export function CityMapHud({
         >
           <span style={{ width: `${Math.max(0, Math.min(100, operations.releaseReadiness))}%` }} />
         </div>
+        <button
+          type="button"
+          className="city-map-hud__action"
+          onClick={() => selectBuilding("qa")}
+          aria-label="View active alerts in QA Campus"
+        >
+          View active alerts
+        </button>
       </aside>
     </div>
   );

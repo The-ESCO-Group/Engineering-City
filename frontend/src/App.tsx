@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
-import { Activity, AlertTriangle, Archive, Bell, Bot, Building2, CheckCircle2, ChevronDown, ClipboardCheck, Clock3, FileText, Filter, FolderKanban, LayoutDashboard, ListChecks, LogOut, Menu, Plus, Search, Settings, ShieldAlert, Upload, Users, Wifi } from "lucide-react";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Activity, AlertTriangle, Archive, Bell, Bot, Building2, ChevronDown, ClipboardCheck, Clock3, FileText, Filter, FolderKanban, ListChecks, LogOut, Menu, Plus, Search, Settings, ShieldAlert, Wifi } from "lucide-react";
 import { City } from "./components/City";
 import { agents, findings, projects, tasks } from "./domain";
 import { useUI } from "./store";
@@ -10,28 +10,27 @@ const nav = [
   ["Findings", "/findings", ShieldAlert], ["Approvals", "/approvals", ClipboardCheck], ["Reports", "/reports", FileText],
   ["Agents", "/agents", Bot], ["Audit Trail", "/audit", Archive], ["Settings", "/settings", Settings]
 ] as const;
-const tabs = ["Overview", "Files", "Tasks", "Findings", "Evidence", "Agent Messages", "Approvals", "Reports", "Audit"];
-
 function Shell() {
-  const [activeTab, setActiveTab] = useState("Overview");
-  return <div className="app">
+  const location = useLocation();
+  const isCityHome = location.pathname === "/";
+  return <div className={`app${isCityHome ? " city-home" : ""}`}>
     <header className="topbar">
       <button className="menu"><Menu /></button>
       <div className="brand-mark">E</div><div className="brand"><strong>ESCO</strong><span>ENGINEERING CITY</span></div>
       <div className="project-switch"><span>Current project</span><b>PRJ-0241 · Line 4 Cartoner Upgrade</b><ChevronDown /></div>
       <div className="top-spacer" />
       <span className="demo-badge">DEMO DATA</span>
-      <span className="connection"><Wifi /> Local backend <b>Mock mode</b></span>
+      <span className="connection"><Wifi /> {isCityHome ? "System status" : "Local backend"} <b>{isCityHome ? "All systems operational" : "Mock mode"}</b></span>
       <button className="icon-button"><Bell /><i className="notification" /></button>
       <button className="user">NM</button>
     </header>
     <aside className="sidebar">
-      <nav aria-label="Primary navigation">{nav.map(([label, to, Icon]) => <NavLink key={label} to={to} end={to === "/"}><Icon /><span>{label}</span>{label === "Findings" && <em>12</em>}{label === "Approvals" && <em>2</em>}</NavLink>)}</nav>
+      <nav aria-label="Primary navigation">{nav.map(([label, to, Icon]) => <NavLink key={label} to={to} end={to === "/"} aria-label={isCityHome ? label : undefined} title={isCityHome ? label : undefined}><Icon /><span>{label}</span>{label === "Findings" && <em>12</em>}{label === "Approvals" && <em>2</em>}</NavLink>)}</nav>
       <div className="sidebar-foot"><div className="avatar">NM</div><div><b>N. Modha</b><span>Engineering reviewer</span></div><LogOut /></div>
     </aside>
     <main>
       <Routes>
-        <Route path="/" element={<><City /><BottomTabs active={activeTab} setActive={setActiveTab} /></>} />
+        <Route path="/" element={<City />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/findings" element={<Findings />} />
@@ -40,19 +39,8 @@ function Shell() {
         <Route path="*" element={<SimplePage />} />
       </Routes>
     </main>
-    <ActivityPanel />
+    {!isCityHome && <ActivityPanel />}
   </div>;
-}
-
-function BottomTabs({ active, setActive }: { active: string; setActive: (value: string) => void }) {
-  return <section className="workspace">
-    <div className="tabs">{tabs.map((tab) => <button key={tab} className={active === tab ? "active" : ""} onClick={() => setActive(tab)}>{tab}{tab === "Findings" && <em>12</em>}</button>)}</div>
-    <div className="overview-grid">
-      <div><span className="eyebrow">PROJECT HEALTH</span><div className="health"><strong>68%</strong><div><b>Engineering review in progress</b><span>3 of 5 discipline reviews active</span></div></div><div className="progress"><i style={{ width: "68%" }} /></div></div>
-      <div><span className="eyebrow">OPEN FINDINGS</span><div className="metric-line"><strong>12</strong><span className="critical">1 critical</span><span className="high">3 high</span><span>8 medium / low</span></div></div>
-      <div><span className="eyebrow">NEXT GATE</span><div className="gate"><Clock3 /><div><b>Senior engineering review</b><span>Blocked by 2 incomplete tasks</span></div></div></div>
-    </div>
-  </section>;
 }
 
 function PageHeader({ eyebrow, title, action }: { eyebrow: string; title: string; action?: string }) {

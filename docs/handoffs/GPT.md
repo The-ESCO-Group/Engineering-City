@@ -7,7 +7,8 @@ Work began against bootstrap commit `2f47487`. Backend foundation commit `08c3cf
 ## Completed
 
 - Strict React/Vite foundation with Router, Query, Zustand, Vitest, and Playwright.
-- Original Three.js WebGL operations city with a central landmark skyline, eight workflow districts, hundreds of deterministic instanced buildings, road and bridge infrastructure, semantic agent mapping, constrained orbit controls, raycast selection, timeline, and reduced motion.
+- Immersive full-viewport Three.js WebGL operations city with a central landmark skyline, eight workflow districts, hundreds of deterministic instanced buildings, luminous road and bridge infrastructure, semantic agent mapping, constrained orbit controls, raycast selection, and reduced motion.
+- Reference-aligned command-center chrome with translucent labeled navigation, always-visible cyan district metrics, a functional minimap control stack, selectable six-layer dock, system status, and lower-right city overview.
 - Project portfolio, task board, findings, evidence comparison, approvals, reports, activity, and workspace tabs.
 - Clearly labeled offline demo data and real synthetic JSON browser export.
 - Tauri 2 Windows shell with local-only backend URL validation, Windows application resources, and a verified non-blank WebView render.
@@ -36,12 +37,13 @@ Delivery agents under `backend/app/agents/delivery/**` and report providers unde
 - Setup: `.\scripts\product\setup.ps1`
 - Demo: `.\scripts\product\run-demo.ps1`
 - Checks: `.\scripts\product\test.ps1`
+- Lint: `npm --prefix frontend run lint`
 - E2E: `npm --prefix frontend run test:e2e`
 - Desktop: `.\scripts\product\build-desktop.ps1`
 
 ## Known limitations
 
-- The city is a procedural Three.js scene built from real meshes, instancing, materials, lights, and shadows on an expansive black world with layered white grid lines. It uses the supplied reference only for composition and does not copy its branding, artwork, or external runtime assets.
+- The city is a procedural Three.js scene built from real meshes, instancing, materials, lights, and shadows. Its digital-twin palette combines deep navy terrain, cyan infrastructure and water, orange mobility paths, purple district accents, and a vivid green park. The former global grid remains removed from developed terrain. The supplied reference guides composition and visual language; the implementation retains ESCO branding and uses no external runtime artwork.
 - Desktop backend process coordination awaits a documented backend executable command.
 - Backend report formats await provider interfaces; demo downloads are real JSON artifacts.
 

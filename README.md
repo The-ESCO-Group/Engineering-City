@@ -6,7 +6,7 @@ Local-only engineering operations software for ESCO Group. The product shows pro
 
 ## Product surfaces
 
-- Engineering City — deterministic workflow activity across a dense Three.js skyline, district network, and industrial grid
+- Engineering City — an immersive, full-viewport digital-twin home with a dense Three.js skyline, luminous district systems, and deterministic workflow activity
 - Projects and Tasks — progress, blockers, dependencies, and approval state
 - Findings & Evidence — exact source locations, confidence, risk, and comparison
 - Approvals — explanation-gated human decisions
