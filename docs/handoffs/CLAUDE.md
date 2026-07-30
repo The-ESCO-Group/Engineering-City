@@ -4,9 +4,9 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 `backend/app/agents/{base,review}`, `backend/tests`, `contracts`, `infra/backend`,
 `scripts/backend`, `docs/backend`.
 
-**Last updated:** Milestone 4
+**Last updated:** Milestone 5
 **Contract version:** `1.0.0`
-**Tests:** 994 passing · ruff, mypy clean · 49/49 live-process smoke checks
+**Tests:** 994 passing · ruff, mypy clean · 72/72 live-process smoke checks
 
 ---
 
@@ -19,7 +19,7 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 | 2 | Parsers and normalised evidence graph | ✅ complete |
 | 3 | Workflow engine and WebSockets | ✅ complete |
 | 4 | Four review agents and provider adapters | ✅ complete |
-| 5 | Full API and backend integration tests | 🔶 mostly done (findings/approvals/reports endpoints outstanding) |
+| 5 | Full API and backend integration tests | ✅ complete |
 | 6 | Security review, documentation, handoff | ⏳ |
 
 ### Commits
@@ -29,7 +29,8 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 | 0 | `08c3cfb` | `foundation: establish backend and contracts v1` |
 | 1 | `c74b812` | `persistence: authentication, audit, storage and safe intake` |
 | 2 | `751ba54` | `parsers: seven file parsers and the cross-file evidence graph` |
-| 3+4 | _(this commit)_ | `workflow: persisted queue, live events and the four review agents` |
+| 3+4 | `1303c08` | `workflow: persisted queue, live events and the four review agents` |
+| 5 | _(this commit)_ | `api: findings, approvals, agents and reports` |
 
 ---
 
@@ -405,6 +406,34 @@ by `scripts/backend/smoke.py`. Nothing is listed here until it works.
 | `GET` | `/api/files/{file_id}` | File metadata, artifacts, anchor count |
 | `GET` | `/api/files/{file_id}/content` | Download the stored original |
 | `DELETE` | `/api/files/{file_id}` | Delete a file (row retained as a tombstone) |
+| `GET` | `/api/agents` | Every registered agent, and why any is unavailable |
+| `GET` | `/api/projects/{project_id}/agents` | Agent presence for the city view |
+| `GET` | `/api/projects/{project_id}/agent-runs` | Agent runs for a project |
+| `GET` | `/api/agent-runs/{run_id}` | One run, including the actions the backend **refused** |
+| `GET` | `/api/projects/{project_id}/messages` | The project activity feed |
+| `GET` | `/api/projects/{project_id}/findings` | List findings (paginated, filterable) |
+| `GET` | `/api/findings/{finding_id}` | Finding detail with every citation resolved |
+| `PATCH` | `/api/findings/{finding_id}` | Record a human disposition (reviewer role) |
+| `POST` | `/api/findings/{finding_id}/comment` | Add a reviewer note |
+| `GET` | `/api/findings/{finding_id}/comments` | Reviewer notes |
+| `GET` | `/api/projects/{project_id}/recommendations` | Proposed engineering changes |
+| `GET` | `/api/projects/{project_id}/approvals` | Decisions waiting on a human |
+| `GET` | `/api/approvals/{approval_id}` | One approval with its evidence snapshot |
+| `POST` | `/api/approvals/{approval_id}/decision` | **Record an engineering decision** |
+| `GET` | `/api/projects/{project_id}/reports` | Reports generated for a project |
+| `GET` | `/api/reports/{report_id}` | Report metadata |
+| `GET` | `/api/reports/{report_id}/content` | Download a generated report |
+| `POST` | `/api/projects/{project_id}/runs` | Start a review run |
+| `POST` | `/api/projects/{project_id}/pause` | Pause the run |
+| `POST` | `/api/projects/{project_id}/resume` | Resume a paused run |
+| `POST` | `/api/projects/{project_id}/cancel` | Cancel the run |
+| `POST` | `/api/projects/{project_id}/recover` | Requeue tasks abandoned by a stopped worker |
+| `GET` | `/api/projects/{project_id}/workflow` | Workflow state and task counts |
+| `GET` | `/api/projects/{project_id}/tasks` | List tasks |
+| `GET` | `/api/tasks/{task_id}` | Task detail with dependency edges |
+| `GET` | `/api/projects/{project_id}/parsers` | Which file kinds this install can parse |
+| `GET` | `/api/projects/{project_id}/events` | Replay the event history |
+| `WS` | `/ws/projects/{project_id}` | Live event stream |
 
 **Auth transport** — send `Authorization: Bearer <token>` *or* rely on the
 `esco_session` httpOnly cookie that login sets. Both work; the browser frontend
@@ -418,8 +447,16 @@ files and one executable keeps the nine. An uploaded ZIP is expanded and each
 usable member appears in `extracted` as a file in its own right, with
 `parent_file_id` and `archive_member_path` set.
 
-Workflow, agents, findings, approvals, reports and the WebSocket land in
-Milestones 3–5.
+**The approval gate.** `POST /api/approvals/{id}/decision` is the only way a
+finding is released. It requires the global `reviewer` role *and* a reviewing
+role on the project, so an engineer cannot sign off their own project's safety
+findings. `approved` has no default — approving is always an explicit act. Once
+every approval is decided the gated tasks return to the queue and the run
+continues on its own.
+
+**Reports** are produced by GPT-owned providers under `app.reporting`. With none
+installed the list is legitimately empty and `/api/system/capabilities` says why;
+the endpoints are not broken, the capability is absent.
 
 ---
 

@@ -261,6 +261,97 @@ def run_checks(base_url: str, admin_email: str, admin_password: str) -> None:
             check("a finding was created", "finding.created" in types, str(sorted(types)))
             check("an approval was requested", "approval.requested" in types)
 
+        findings = client.get(f"/api/projects/{project_id}/findings", headers=auth)
+        check("findings are listed", findings.status_code == 200, findings.text)
+        if findings.status_code == 200:
+            rows = findings.json()["items"]
+            check("findings were produced", len(rows) > 0)
+            check(
+                "every finding cites evidence",
+                all(row["evidence_count"] > 0 for row in rows),
+                str([(r["title"], r["evidence_count"]) for r in rows]),
+            )
+            check(
+                "every finding went through senior review",
+                all(row["is_reviewed"] for row in rows),
+            )
+            if rows:
+                detail = client.get(f"/api/findings/{rows[0]['id']}", headers=auth)
+                check("finding detail resolves its anchors", detail.status_code == 200)
+                if detail.status_code == 200:
+                    evidence = detail.json()["evidence"]
+                    check(
+                        "each citation carries a followable location",
+                        all(e["anchor"] and e["anchor"]["display_location"] for e in evidence),
+                    )
+
+        print("\n[approval]")
+        approvals = client.get(f"/api/projects/{project_id}/approvals", headers=auth)
+        check("approvals are listed", approvals.status_code == 200, approvals.text)
+        pending = (
+            [a for a in approvals.json() if a["status"] == "pending"]
+            if approvals.status_code == 200
+            else []
+        )
+        check("a decision is waiting on a human", len(pending) >= 1)
+
+        if pending:
+            approval_id = pending[0]["id"]
+            # The seeded administrator holds the reviewer role; an engineer-only
+            # account is refused, which is the separation the gate exists for.
+            decided = client.post(
+                f"/api/approvals/{approval_id}/decision",
+                headers=auth,
+                json={"approved": True, "notes": "Confirmed against the panel drawing."},
+            )
+            check("the approval can be decided", decided.status_code == 200, decided.text)
+            if decided.status_code == 200:
+                check("the decision is recorded", decided.json()["status"] == "approved")
+                check("the decider is named", bool(decided.json()["decided_by_display_name"]))
+            repeat = client.post(
+                f"/api/approvals/{approval_id}/decision",
+                headers=auth,
+                json={"approved": False},
+            )
+            check("an already-decided approval cannot be re-decided", repeat.status_code == 409)
+
+            final = _wait_for_review(client, project_id, auth)
+            check(
+                "the run finishes once the decision is made",
+                final.get("awaiting_approval", 0) == 0,
+                str(final),
+            )
+            project_after = client.get(f"/api/projects/{project_id}", headers=auth).json()
+            check(
+                "the project completes only after the approval",
+                project_after["status"] == "completed",
+                project_after["status"],
+            )
+
+        print("\n[agents]")
+        agents = client.get("/api/agents", headers=auth)
+        check("the agent catalogue lists the four review agents", agents.status_code == 200)
+        if agents.status_code == 200:
+            kinds = {row["kind"] for row in agents.json()}
+            for kind in ("project_manager", "plc_review", "interlock_review", "senior_review"):
+                check(f"agent {kind} is registered", kind in kinds, str(sorted(kinds)))
+
+        runs = client.get(f"/api/projects/{project_id}/agent-runs", headers=auth)
+        check("agent runs are listed", runs.status_code == 200)
+        if runs.status_code == 200 and runs.json():
+            run_detail = client.get(f"/api/agent-runs/{runs.json()[0]['id']}", headers=auth)
+            check("an agent run is inspectable", run_detail.status_code == 200)
+            if run_detail.status_code == 200:
+                body = run_detail.json()
+                check(
+                    "no reasoning trace is exposed",
+                    not any(k in body for k in ("thinking", "reasoning", "chain_of_thought")),
+                    str(sorted(body)),
+                )
+
+        reports = client.get(f"/api/projects/{project_id}/reports", headers=auth)
+        check("reports endpoint responds with no provider installed", reports.status_code == 200)
+
     print("\n[archive]")
     archived = client.post(f"/api/projects/{project_id}/archive", headers=auth)
     check("project archives", archived.status_code == 200, archived.text)

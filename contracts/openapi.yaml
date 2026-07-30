@@ -944,6 +944,638 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/agents:
+    get:
+      tags:
+      - agents
+      summary: Every registered agent, and why any is unavailable
+      description: 'The agent catalogue.
+
+
+        Includes agents contributed by plugins, and reports one as unavailable with a
+
+        reason rather than omitting it — a missing agent that simply is not listed
+
+        looks identical to one that never existed.'
+      operationId: list_agents_api_agents_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/AgentDefinitionRead'
+                type: array
+                title: Response List Agents Api Agents Get
+  /api/projects/{project_id}/agents:
+    get:
+      tags:
+      - agents
+      summary: Agent presence for the city view
+      operationId: list_project_agents_api_projects__project_id__agents_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentInstanceRead'
+                title: Response List Project Agents Api Projects  Project Id  Agents Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/agent-runs:
+    get:
+      tags:
+      - agents
+      summary: Agent runs for a project
+      operationId: list_runs_api_projects__project_id__agent_runs_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      - name: agent_kind
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Kind
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentRunRead'
+                title: Response List Runs Api Projects  Project Id  Agent Runs Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/agent-runs/{run_id}:
+    get:
+      tags:
+      - agents
+      summary: One agent run, including the actions the backend refused
+      description: 'Everything persisted about one run.
+
+
+        Contains no chain-of-thought by construction: ``rationale`` is a concise,
+
+        human-facing justification, and there is no field for a reasoning trace.
+
+
+        ``rejected_actions`` lists what the backend refused and why. Those are kept
+
+        deliberately — what a model *tried* to do is part of the record an engineer
+
+        may need to see.'
+      operationId: get_run_api_agent_runs__run_id__get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/messages:
+    get:
+      tags:
+      - agents
+      summary: The project activity feed
+      description: 'Short, human-readable statements from the agents.
+
+
+        A communication surface, not a log of model internals.'
+      operationId: list_messages_api_projects__project_id__messages_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 200
+          title: Limit
+      - name: since
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Since
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentMessageRead'
+                title: Response List Messages Api Projects  Project Id  Messages Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/findings:
+    get:
+      tags:
+      - findings
+      summary: List a project's findings
+      operationId: list_findings_api_projects__project_id__findings_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/FindingStatus'
+          - type: 'null'
+          title: Status
+      - name: severity
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/FindingSeverity'
+          - type: 'null'
+          title: Severity
+      - name: reviewed_only
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Reviewed Only
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_FindingRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/findings/{finding_id}:
+    get:
+      tags:
+      - findings
+      summary: Finding detail with every citation
+      operationId: get_finding_api_findings__finding_id__get
+      parameters:
+      - name: finding_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Finding Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - findings
+      summary: Record a human decision on a finding
+      description: 'Accept, reject or resolve a finding.
+
+
+        Only the disposition is editable. The agent-produced content — fact,
+
+        inference, evidence — is immutable, so the record of what the platform
+
+        actually said cannot be rewritten after the fact.
+
+
+        Requires the reviewer role: accepting a finding is an engineering judgement,
+
+        not a bookkeeping action.'
+      operationId: update_finding_api_findings__finding_id__patch
+      parameters:
+      - name: finding_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Finding Id
+      - name: User-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User-Agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFindingRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/findings/{finding_id}/comment:
+    post:
+      tags:
+      - findings
+      summary: Add a reviewer note to a finding
+      operationId: comment_on_finding_api_findings__finding_id__comment_post
+      parameters:
+      - name: finding_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Finding Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFindingCommentRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingCommentRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/findings/{finding_id}/comments:
+    get:
+      tags:
+      - findings
+      summary: Reviewer notes on a finding
+      operationId: list_comments_api_findings__finding_id__comments_get
+      parameters:
+      - name: finding_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Finding Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FindingCommentRead'
+                title: Response List Comments Api Findings  Finding Id  Comments Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/recommendations:
+    get:
+      tags:
+      - findings
+      summary: Proposed engineering changes
+      description: 'Proposals for a human engineer.
+
+
+        The platform never applies one; an approved recommendation is a recorded
+
+        decision, not an executed change.'
+      operationId: list_recommendations_api_projects__project_id__recommendations_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RecommendationRead'
+                title: Response List Recommendations Api Projects  Project Id  Recommendations Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/approvals:
+    get:
+      tags:
+      - approvals
+      summary: Decisions waiting on a human, and those already made
+      operationId: list_approvals_api_projects__project_id__approvals_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/ApprovalStatus'
+          - type: 'null'
+          title: Status
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalRead'
+                title: Response List Approvals Api Projects  Project Id  Approvals Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/approvals/{approval_id}:
+    get:
+      tags:
+      - approvals
+      summary: One approval, with the evidence snapshot taken when it was raised
+      operationId: get_approval_api_approvals__approval_id__get
+      parameters:
+      - name: approval_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Approval Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/approvals/{approval_id}/decision:
+    post:
+      tags:
+      - approvals
+      summary: Record an engineering decision
+      description: "Approve or reject.\n\nThree things this enforces, none of which can be left to convention:\n\
+        \n* only a human decides — the caller is an authenticated user, and no agent\n  action can reach\
+        \ this endpoint;\n* the decider needs the reviewer role *and* a reviewing role on the project,\n\
+        \  so an engineer cannot sign off their own project's safety findings;\n* ``approved`` has no\
+        \ default. Approving is always an explicit act, never the\n  result of an omitted field.\n\nOnce\
+        \ every approval on a project is decided, the tasks waiting on the gate\nreturn to the queue and\
+        \ the run continues."
+      operationId: decide_api_approvals__approval_id__decision_post
+      parameters:
+      - name: approval_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Approval Id
+      - name: User-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User-Agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalDecisionRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/reports:
+    get:
+      tags:
+      - reports
+      summary: Reports generated for a project
+      operationId: list_reports_api_projects__project_id__reports_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReportRead'
+                title: Response List Reports Api Projects  Project Id  Reports Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/reports/{report_id}:
+    get:
+      tags:
+      - reports
+      summary: Report metadata and the findings it covers
+      operationId: get_report_api_reports__report_id__get
+      parameters:
+      - name: report_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Report Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/reports/{report_id}/content:
+    get:
+      tags:
+      - reports
+      summary: Download a generated report
+      operationId: download_report_api_reports__report_id__content_get
+      parameters:
+      - name: report_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Report Id
+      responses:
+        '200':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/projects/{project_id}/events:
     get:
       tags:
@@ -1033,6 +1665,589 @@ components:
       required:
       - user_id
       title: AddProjectMemberRequest
+    AgentActionRead:
+      properties:
+        action_type:
+          type: string
+          title: Action Type
+        summary:
+          type: string
+          title: Summary
+        target_type:
+          type: string
+          title: Target Type
+          default: ''
+        target_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Id
+        evidence_anchor_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Evidence Anchor Ids
+        confidence:
+          type: number
+          title: Confidence
+          default: 0.0
+        requires_approval:
+          type: boolean
+          title: Requires Approval
+          default: false
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+        accepted:
+          type: boolean
+          title: Accepted
+          default: true
+        rejection_reason:
+          type: string
+          title: Rejection Reason
+          default: ''
+      type: object
+      required:
+      - action_type
+      - summary
+      title: AgentActionRead
+      description: 'A model-proposed action, as recorded on the run.
+
+
+        ``accepted`` is false for actions the backend refused; ``rejection_reason``
+
+        says why. Refusals are kept rather than discarded — they are part of the
+
+        record of what the model tried to do.'
+    AgentDefinitionRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        kind:
+          type: string
+          title: Kind
+        display_name:
+          type: string
+          title: Display Name
+        description:
+          type: string
+          title: Description
+          default: ''
+        building:
+          type: string
+          title: Building
+          default: ''
+        handles_task_kinds:
+          items: {}
+          type: array
+          title: Handles Task Kinds
+        is_plugin:
+          type: boolean
+          title: Is Plugin
+          default: false
+        is_available:
+          type: boolean
+          title: Is Available
+          default: true
+        unavailable_reason:
+          type: string
+          title: Unavailable Reason
+          description: Why the agent cannot run — e.g. its plugin is not installed.
+          default: ''
+      type: object
+      required:
+      - id
+      - kind
+      - display_name
+      title: AgentDefinitionRead
+    AgentInstanceRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        definition_id:
+          type: string
+          format: uuid
+          title: Definition Id
+        kind:
+          type: string
+          title: Kind
+        display_name:
+          type: string
+          title: Display Name
+        status:
+          $ref: '#/components/schemas/AgentStatus'
+        location:
+          type: string
+          title: Location
+          default: ''
+        current_activity:
+          type: string
+          title: Current Activity
+          default: ''
+        current_task_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Current Task Id
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - project_id
+      - definition_id
+      - kind
+      - display_name
+      - status
+      - updated_at
+      title: AgentInstanceRead
+    AgentMessageRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        agent_instance_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Instance Id
+        agent_run_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Run Id
+        task_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Task Id
+        author_user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Author User Id
+        role:
+          $ref: '#/components/schemas/MessageRole'
+        agent_kind:
+          type: string
+          title: Agent Kind
+          default: ''
+        body:
+          type: string
+          title: Body
+        context:
+          additionalProperties: true
+          type: object
+          title: Context
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - project_id
+      - role
+      - body
+      - created_at
+      title: AgentMessageRead
+    AgentRunDetail:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        agent_instance_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Instance Id
+        task_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Task Id
+        agent_kind:
+          type: string
+          title: Agent Kind
+        status:
+          $ref: '#/components/schemas/AgentRunStatus'
+        provider:
+          type: string
+          title: Provider
+          default: ''
+        model:
+          type: string
+          title: Model
+          default: ''
+        started_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Started At
+        finished_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Finished At
+        duration_ms:
+          type: integer
+          title: Duration Ms
+          default: 0
+        rationale:
+          type: string
+          title: Rationale
+          default: ''
+        iterations:
+          type: integer
+          title: Iterations
+          default: 0
+        prompt_tokens:
+          type: integer
+          title: Prompt Tokens
+          default: 0
+        completion_tokens:
+          type: integer
+          title: Completion Tokens
+          default: 0
+        error_code:
+          type: string
+          title: Error Code
+          default: ''
+        error_message:
+          type: string
+          title: Error Message
+          default: ''
+        actions:
+          items:
+            $ref: '#/components/schemas/AgentActionRead'
+          type: array
+          title: Actions
+        rejected_actions:
+          items:
+            $ref: '#/components/schemas/AgentActionRead'
+          type: array
+          title: Rejected Actions
+        warnings:
+          items: {}
+          type: array
+          title: Warnings
+        tool_results:
+          items: {}
+          type: array
+          title: Tool Results
+      type: object
+      required:
+      - id
+      - project_id
+      - agent_kind
+      - status
+      title: AgentRunDetail
+    AgentRunRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        agent_instance_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Instance Id
+        task_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Task Id
+        agent_kind:
+          type: string
+          title: Agent Kind
+        status:
+          $ref: '#/components/schemas/AgentRunStatus'
+        provider:
+          type: string
+          title: Provider
+          default: ''
+        model:
+          type: string
+          title: Model
+          default: ''
+        started_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Started At
+        finished_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Finished At
+        duration_ms:
+          type: integer
+          title: Duration Ms
+          default: 0
+        rationale:
+          type: string
+          title: Rationale
+          default: ''
+        iterations:
+          type: integer
+          title: Iterations
+          default: 0
+        prompt_tokens:
+          type: integer
+          title: Prompt Tokens
+          default: 0
+        completion_tokens:
+          type: integer
+          title: Completion Tokens
+          default: 0
+        error_code:
+          type: string
+          title: Error Code
+          default: ''
+        error_message:
+          type: string
+          title: Error Message
+          default: ''
+      type: object
+      required:
+      - id
+      - project_id
+      - agent_kind
+      - status
+      title: AgentRunRead
+      description: 'Everything persisted about one agent execution.
+
+
+        Contains no chain-of-thought by construction: ``rationale`` is a concise
+
+        human-facing justification the agent is required to produce.'
+    AgentRunStatus:
+      type: string
+      enum:
+      - running
+      - completed
+      - failed
+      - timed_out
+      - cancelled
+      - budget_exceeded
+      title: AgentRunStatus
+    AgentStatus:
+      type: string
+      enum:
+      - idle
+      - walking
+      - working
+      - waiting
+      - blocked
+      - offline
+      title: AgentStatus
+      description: 'Presence state of an agent instance.
+
+
+        ``WALKING`` exists purely for the city visualisation layer; the backend
+
+        never gates behaviour on it.'
+    AnchorType:
+      type: string
+      enum:
+      - l5x_controller
+      - l5x_program
+      - l5x_routine
+      - l5x_rung
+      - l5x_instruction
+      - l5x_tag
+      - l5x_module
+      - l5x_addon_instruction
+      - xlsx_workbook
+      - xlsx_worksheet
+      - xlsx_cell
+      - xlsx_range
+      - csv_row
+      - csv_cell
+      - docx_heading
+      - docx_paragraph
+      - docx_table_cell
+      - pdf_page
+      - pdf_text_range
+      - xml_element
+      - file_line
+      - file_section
+      - file_whole
+      title: AnchorType
+      description: The addressing scheme used by an :class:`~app.models.evidence.EvidenceAnchor`.
+    ApprovalDecisionRequest:
+      properties:
+        approved:
+          type: boolean
+          title: Approved
+        notes:
+          type: string
+          maxLength: 4000
+          title: Notes
+          default: ''
+      type: object
+      required:
+      - approved
+      title: ApprovalDecisionRequest
+      description: 'A human decision.
+
+
+        ``approved`` is required and has no default: approving must always be an
+
+        explicit act, never the result of an omitted field.'
+    ApprovalKind:
+      type: string
+      enum:
+      - safety_recommendation
+      - equipment_damage_recommendation
+      - design_recommendation
+      - finding_release
+      - report_release
+      title: ApprovalKind
+      description: Why a human decision is required.
+    ApprovalRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        task_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Task Id
+        finding_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Finding Id
+        recommendation_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Recommendation Id
+        report_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Report Id
+        kind:
+          $ref: '#/components/schemas/ApprovalKind'
+        status:
+          $ref: '#/components/schemas/ApprovalStatus'
+        title:
+          type: string
+          title: Title
+        question:
+          type: string
+          title: Question
+          description: Plain-language statement of what the human is accepting responsibility for.
+        context:
+          additionalProperties: true
+          type: object
+          title: Context
+          description: Snapshot of evidence and severity at request time; not re-read later.
+        requested_by_agent_kind:
+          type: string
+          title: Requested By Agent Kind
+          default: ''
+        requested_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Requested At
+        decided_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Decided By Id
+        decided_by_display_name:
+          type: string
+          title: Decided By Display Name
+          default: ''
+        decided_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Decided At
+        decision_notes:
+          type: string
+          title: Decision Notes
+          default: ''
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - project_id
+      - kind
+      - status
+      - title
+      - question
+      - created_at
+      title: ApprovalRead
+    ApprovalStatus:
+      type: string
+      enum:
+      - pending
+      - approved
+      - rejected
+      - cancelled
+      title: ApprovalStatus
     Body_upload_files_api_projects__project_id__files_post:
       properties:
         files:
@@ -1083,6 +2298,17 @@ components:
         Reported rather than crashed on: a missing delivery plugin degrades the
 
         product, it does not break it.'
+    CreateFindingCommentRequest:
+      properties:
+        body:
+          type: string
+          maxLength: 8000
+          minLength: 1
+          title: Body
+      type: object
+      required:
+      - body
+      title: CreateFindingCommentRequest
     CreateProjectRequest:
       properties:
         name:
@@ -1258,6 +2484,78 @@ components:
 
 
         Persisted before broadcast; see ``contracts/events.schema.json``.'
+    EvidenceAnchorRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        file_id:
+          type: string
+          format: uuid
+          title: File Id
+        artifact_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Artifact Id
+        anchor_type:
+          $ref: '#/components/schemas/AnchorType'
+        evidence_kind:
+          $ref: '#/components/schemas/EvidenceKind'
+        source_label:
+          type: string
+          title: Source Label
+        display_location:
+          type: string
+          title: Display Location
+        structured_location:
+          additionalProperties: true
+          type: object
+          title: Structured Location
+        excerpt:
+          type: string
+          title: Excerpt
+        content_hash:
+          type: string
+          title: Content Hash
+        parser_version:
+          type: string
+          title: Parser Version
+        expectation:
+          type: string
+          title: Expectation
+          description: 'On a missing_expected anchor: what was looked for and not found.'
+          default: ''
+      type: object
+      required:
+      - id
+      - file_id
+      - anchor_type
+      - evidence_kind
+      - source_label
+      - display_location
+      - excerpt
+      - content_hash
+      - parser_version
+      title: EvidenceAnchorRead
+      description: A citation the UI can render and, where possible, deep-link to.
+    EvidenceKind:
+      type: string
+      enum:
+      - direct
+      - inference
+      - missing_expected
+      - parser_warning
+      - unsupported_content
+      title: EvidenceKind
+      description: 'How strongly a piece of evidence supports a claim.
+
+
+        The product must never blur these together: an inference drawn from partial
+
+        data is not the same as a direct quotation from a source file.'
     FileDetail:
       properties:
         id:
@@ -1370,6 +2668,390 @@ components:
       - rejected
       - deleted
       title: FileStatus
+    FindingCategory:
+      type: string
+      enum:
+      - interlock_discrepancy
+      - missing_logic
+      - undocumented_logic
+      - naming_mismatch
+      - unresolved_reference
+      - duplicate_pattern
+      - fail_safe_unclear
+      - alarm_coverage
+      - io_mismatch
+      - documentation_gap
+      - parser_limitation
+      - other
+      title: FindingCategory
+      description: What kind of engineering concern a finding describes.
+    FindingCommentRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        finding_id:
+          type: string
+          format: uuid
+          title: Finding Id
+        author_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Author Id
+        author_display_name:
+          type: string
+          title: Author Display Name
+          default: ''
+        body:
+          type: string
+          title: Body
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - finding_id
+      - body
+      - created_at
+      title: FindingCommentRead
+    FindingDetail:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        title:
+          type: string
+          title: Title
+        category:
+          $ref: '#/components/schemas/FindingCategory'
+        severity:
+          $ref: '#/components/schemas/FindingSeverity'
+        status:
+          $ref: '#/components/schemas/FindingStatus'
+        fact:
+          type: string
+          title: Fact
+          description: What the evidence literally shows.
+        inference:
+          type: string
+          title: Inference
+          description: What the agent concluded. Always a conclusion, not a fact.
+        suggested_review_action:
+          type: string
+          title: Suggested Review Action
+          default: ''
+        limitations:
+          type: string
+          title: Limitations
+          default: ''
+        confidence:
+          type: number
+          title: Confidence
+        requires_approval:
+          type: boolean
+          title: Requires Approval
+        is_reviewed:
+          type: boolean
+          title: Is Reviewed
+        created_by_agent_kind:
+          type: string
+          title: Created By Agent Kind
+          default: ''
+        agent_run_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Run Id
+        task_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Task Id
+        review_verdict:
+          type: string
+          title: Review Verdict
+          default: ''
+        review_notes:
+          type: string
+          title: Review Notes
+          default: ''
+        reviewed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Reviewed At
+        original_confidence:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Original Confidence
+        original_severity:
+          type: string
+          title: Original Severity
+          default: ''
+        superseded_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Superseded By Id
+        decided_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Decided By Id
+        decided_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Decided At
+        decision_notes:
+          type: string
+          title: Decision Notes
+          default: ''
+        evidence_count:
+          type: integer
+          title: Evidence Count
+          default: 0
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        evidence:
+          items:
+            $ref: '#/components/schemas/FindingEvidenceRead'
+          type: array
+          title: Evidence
+        details:
+          additionalProperties: true
+          type: object
+          title: Details
+        warnings:
+          items: {}
+          type: array
+          title: Warnings
+        recommendations:
+          items:
+            $ref: '#/components/schemas/RecommendationRead'
+          type: array
+          title: Recommendations
+      type: object
+      required:
+      - id
+      - project_id
+      - title
+      - category
+      - severity
+      - status
+      - fact
+      - inference
+      - confidence
+      - requires_approval
+      - is_reviewed
+      - created_at
+      - updated_at
+      title: FindingDetail
+    FindingEvidenceRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        anchor_id:
+          type: string
+          format: uuid
+          title: Anchor Id
+        evidence_kind:
+          $ref: '#/components/schemas/EvidenceKind'
+        role:
+          type: string
+          title: Role
+          description: requirement | logic | context — which side of a comparison this supports.
+          default: context
+        note:
+          type: string
+          title: Note
+          default: ''
+        anchor:
+          anyOf:
+          - $ref: '#/components/schemas/EvidenceAnchorRead'
+          - type: 'null'
+      type: object
+      required:
+      - id
+      - anchor_id
+      - evidence_kind
+      title: FindingEvidenceRead
+      description: One citation attached to a finding, with the role it plays.
+    FindingRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        title:
+          type: string
+          title: Title
+        category:
+          $ref: '#/components/schemas/FindingCategory'
+        severity:
+          $ref: '#/components/schemas/FindingSeverity'
+        status:
+          $ref: '#/components/schemas/FindingStatus'
+        fact:
+          type: string
+          title: Fact
+          description: What the evidence literally shows.
+        inference:
+          type: string
+          title: Inference
+          description: What the agent concluded. Always a conclusion, not a fact.
+        suggested_review_action:
+          type: string
+          title: Suggested Review Action
+          default: ''
+        limitations:
+          type: string
+          title: Limitations
+          default: ''
+        confidence:
+          type: number
+          title: Confidence
+        requires_approval:
+          type: boolean
+          title: Requires Approval
+        is_reviewed:
+          type: boolean
+          title: Is Reviewed
+        created_by_agent_kind:
+          type: string
+          title: Created By Agent Kind
+          default: ''
+        agent_run_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Run Id
+        task_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Task Id
+        review_verdict:
+          type: string
+          title: Review Verdict
+          default: ''
+        review_notes:
+          type: string
+          title: Review Notes
+          default: ''
+        reviewed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Reviewed At
+        original_confidence:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Original Confidence
+        original_severity:
+          type: string
+          title: Original Severity
+          default: ''
+        superseded_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Superseded By Id
+        decided_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Decided By Id
+        decided_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Decided At
+        decision_notes:
+          type: string
+          title: Decision Notes
+          default: ''
+        evidence_count:
+          type: integer
+          title: Evidence Count
+          default: 0
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - project_id
+      - title
+      - category
+      - severity
+      - status
+      - fact
+      - inference
+      - confidence
+      - requires_approval
+      - is_reviewed
+      - created_at
+      - updated_at
+      title: FindingRead
+    FindingSeverity:
+      type: string
+      enum:
+      - informational
+      - low
+      - medium
+      - high
+      - critical
+      title: FindingSeverity
+    FindingStatus:
+      type: string
+      enum:
+      - open
+      - accepted
+      - rejected
+      - resolved
+      title: FindingStatus
     HTTPValidationError:
       properties:
         detail:
@@ -1463,6 +3145,19 @@ components:
         The token is also set as an httpOnly cookie; it is echoed in the body so a
 
         desktop shell that cannot use cookies can send it as a bearer token.'
+    MessageRole:
+      type: string
+      enum:
+      - agent
+      - system
+      - human
+      title: MessageRole
+      description: 'Author of a persisted, human-readable agent message.
+
+
+        Note: this is *not* a transcript of model reasoning. Only concise,
+
+        reviewable statements are stored.'
     OkResponse:
       properties:
         ok:
@@ -1476,6 +3171,30 @@ components:
       type: object
       title: OkResponse
       description: Acknowledgement for operations with no meaningful body.
+    Page_FindingRead_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/FindingRead'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+          description: Total matching rows, ignoring limit/offset.
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: Page[FindingRead]
     Page_ProjectRead_:
       properties:
         items:
@@ -1802,6 +3521,173 @@ components:
       - failed
       - archived
       title: ProjectStatus
+    RecommendationRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        finding_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Finding Id
+        title:
+          type: string
+          title: Title
+        body:
+          type: string
+          title: Body
+          default: ''
+        rationale:
+          type: string
+          title: Rationale
+          default: ''
+        status:
+          $ref: '#/components/schemas/RecommendationStatus'
+        safety_related:
+          type: boolean
+          title: Safety Related
+          default: false
+        equipment_damage_related:
+          type: boolean
+          title: Equipment Damage Related
+          default: false
+        requires_approval:
+          type: boolean
+          title: Requires Approval
+          default: true
+        confidence:
+          type: number
+          title: Confidence
+          default: 0.0
+        effort_estimate:
+          type: string
+          title: Effort Estimate
+          default: ''
+        created_by_agent_kind:
+          type: string
+          title: Created By Agent Kind
+          default: ''
+        details:
+          additionalProperties: true
+          type: object
+          title: Details
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - project_id
+      - title
+      - status
+      - created_at
+      title: RecommendationRead
+    RecommendationStatus:
+      type: string
+      enum:
+      - proposed
+      - approved
+      - rejected
+      - superseded
+      title: RecommendationStatus
+    ReportRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        task_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Task Id
+        report_type:
+          type: string
+          title: Report Type
+        export_format:
+          type: string
+          title: Export Format
+        provider_name:
+          type: string
+          title: Provider Name
+          default: ''
+        provider_version:
+          type: string
+          title: Provider Version
+          default: ''
+        title:
+          type: string
+          title: Title
+        status:
+          $ref: '#/components/schemas/ReportStatus'
+        media_type:
+          type: string
+          title: Media Type
+          default: ''
+        size_bytes:
+          type: integer
+          title: Size Bytes
+          default: 0
+        sha256:
+          type: string
+          title: Sha256
+          default: ''
+        finding_ids:
+          items: {}
+          type: array
+          title: Finding Ids
+        summary:
+          additionalProperties: true
+          type: object
+          title: Summary
+        error_message:
+          type: string
+          title: Error Message
+          default: ''
+        generated_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Generated By Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        download_path:
+          type: string
+          title: Download Path
+          default: ''
+      type: object
+      required:
+      - id
+      - project_id
+      - report_type
+      - export_format
+      - title
+      - status
+      - created_at
+      title: ReportRead
+    ReportStatus:
+      type: string
+      enum:
+      - draft
+      - generated
+      - failed
+      title: ReportStatus
     RoleName:
       type: string
       enum:
@@ -2106,6 +3992,27 @@ components:
       - failed
       - cancelled
       title: TaskStatus
+    UpdateFindingRequest:
+      properties:
+        status:
+          $ref: '#/components/schemas/FindingStatus'
+        decision_notes:
+          type: string
+          maxLength: 4000
+          title: Decision Notes
+          default: ''
+      type: object
+      required:
+      - status
+      title: UpdateFindingRequest
+      description: 'Human disposition of a finding.
+
+
+        Only ``status`` and reviewer notes are editable. The agent-produced content
+
+        (fact, inference, evidence) is immutable so the record of what the platform
+
+        actually said cannot be rewritten after the fact.'
     UpdateProjectRequest:
       properties:
         name:

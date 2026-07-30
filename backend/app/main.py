@@ -21,11 +21,15 @@ from app import CONTRACT_VERSION, __version__
 from app.agents.base.plugins import get_plugin_registry
 from app.api.errors import install_exception_handlers
 from app.api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
+from app.api.routes import agents as agent_routes
+from app.api.routes import approvals as approval_routes
 from app.api.routes import auth as auth_routes
 from app.api.routes import events as event_routes
 from app.api.routes import files as file_routes
+from app.api.routes import findings as finding_routes
 from app.api.routes import health as health_routes
 from app.api.routes import projects as project_routes
+from app.api.routes import reports as report_routes
 from app.api.routes import workflow as workflow_routes
 from app.core.bootstrap import bootstrap
 from app.core.config import Settings, get_settings
@@ -140,6 +144,10 @@ def create_app(
     app.include_router(project_routes.router, prefix=prefix)
     app.include_router(file_routes.router, prefix=prefix)
     app.include_router(workflow_routes.router, prefix=prefix)
+    app.include_router(agent_routes.router, prefix=prefix)
+    app.include_router(finding_routes.router, prefix=prefix)
+    app.include_router(approval_routes.router, prefix=prefix)
+    app.include_router(report_routes.router, prefix=prefix)
     app.include_router(event_routes.router, prefix=prefix)
     # The WebSocket lives at /ws/projects/{id}, outside the /api prefix.
     app.include_router(event_routes.ws_router)
