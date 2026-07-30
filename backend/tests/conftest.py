@@ -212,6 +212,30 @@ def outsider_client(client: TestClient, seeded: dict[str, User]) -> AuthedClient
     return _authed(client, seeded["outsider"])
 
 
+#: The synthetic demonstration set, with the engineering purpose an uploader
+#: would declare. Ground truth for these is documented in fixtures/README.md.
+DEMO_FIXTURES: tuple[tuple[str, str], ...] = (
+    ("Conveyor_Line3.L5X", "control_logic"),
+    ("Interlock_Schedule.xlsx", "interlock_schedule"),
+    ("IO_List.csv", "io_list"),
+    ("Alarm_List.csv", "alarm_list"),
+    ("Functional_Description.docx", "functional_description"),
+    ("Testing_Notes.pdf", "testing_notes"),
+    ("Scanned_Drawing.pdf", "other"),
+    ("HMI_Alarm_Export.xml", "hmi_export"),
+    ("Site_Notes_Ambiguous.txt", "other"),
+)
+
+FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "demo_project"
+
+
+@pytest.fixture
+def fixtures_dir() -> Path:
+    if not FIXTURES_DIR.is_dir():  # pragma: no cover - developer aid
+        pytest.fail(f"{FIXTURES_DIR} is missing. Run: python scripts/backend/make_fixtures.py")
+    return FIXTURES_DIR
+
+
 @pytest.fixture
 def project(db: Session, seeded: dict[str, User], settings: Settings) -> Project:
     """A draft project owned by the engineer, with the reviewer as a reviewer."""
@@ -236,3 +260,46 @@ def project(db: Session, seeded: dict[str, User], settings: Settings) -> Project
     db.commit()
     db.refresh(created)
     return created
+
+
+@pytest.fixture
+def ingested_project(
+    db: Session,
+    project: Project,
+    seeded: dict[str, User],
+    settings: Settings,
+    fixtures_dir: Path,
+) -> Project:
+    """The demo project with every synthetic fixture uploaded and parsed.
+
+    The starting point for anything that needs a realistic, fully-populated
+    project: the evidence graph, the workflow, and the review agents.
+    """
+    import io
+
+    from app.core.enums import DocumentRole
+    from app.core.services import files as file_service
+    from app.core.services import parsing
+
+    for filename, role in DEMO_FIXTURES:
+        data = (fixtures_dir / filename).read_bytes()
+        outcome = file_service.ingest_upload(
+            db,
+            project=project,
+            filename=filename,
+            stream=io.BytesIO(data),
+            size_bytes=len(data),
+            declared_role=DocumentRole(role),
+            uploader=seeded["engineer"],
+            settings=settings,
+        )
+        assert outcome.accepted, f"{filename} was rejected: {outcome.rejection_reason}"
+    db.commit()
+
+    for record in parsing.parseable_files(db, project.id):
+        outcome = parsing.parse_file(db, record, settings)
+        assert outcome.succeeded, (
+            f"{record.original_filename} failed to parse: {outcome.error_message}"
+        )
+    db.commit()
+    return project

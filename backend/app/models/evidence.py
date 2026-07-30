@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ForeignKey, Index, String, Text
+from sqlalchemy import ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import AnchorType, EvidenceKind
@@ -42,6 +42,7 @@ class EvidenceAnchor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_evidence_anchors_project_id_anchor_type", "project_id", "anchor_type"),
         Index("ix_evidence_anchors_file_id_anchor_type", "file_id", "anchor_type"),
+        UniqueConstraint("file_id", "anchor_key", name="uq_evidence_anchors_file_id_anchor_key"),
     )
 
     project_id: Mapped[uuid.UUID] = mapped_column(
@@ -53,6 +54,13 @@ class EvidenceAnchor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     artifact_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("parsed_artifacts.id", ondelete="SET NULL"), nullable=True
     )
+
+    #: Parser-assigned, deterministic identifier within its file, e.g.
+    #: ``rung:MainProgram/Conveyor_Interlocks/0``. Two things depend on it:
+    #: re-parsing the same bytes updates the existing row instead of creating a
+    #: duplicate, and an agent can resolve a citation it knows by name into an
+    #: anchor id without scanning.
+    anchor_key: Mapped[str] = mapped_column(String(400), default="", nullable=False, index=True)
 
     anchor_type: Mapped[AnchorType] = mapped_column(nullable=False)
     evidence_kind: Mapped[EvidenceKind] = mapped_column(

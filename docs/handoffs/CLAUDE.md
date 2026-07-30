@@ -4,9 +4,9 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 `backend/app/agents/{base,review}`, `backend/tests`, `contracts`, `infra/backend`,
 `scripts/backend`, `docs/backend`.
 
-**Last updated:** Milestone 1
+**Last updated:** Milestone 2
 **Contract version:** `1.0.0`
-**Tests:** 401 passing · ruff, mypy clean · 42/42 live-process smoke checks
+**Tests:** 789 passing · ruff, mypy clean · 42/42 live-process smoke checks
 
 ---
 
@@ -16,7 +16,7 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 | --- | --- | --- |
 | 0 | Foundation, core schemas, contracts, health endpoint | ✅ complete |
 | 1 | Persistence, authentication, audit, storage | ✅ complete |
-| 2 | Parsers and normalised evidence graph | ⏳ next |
+| 2 | Parsers and normalised evidence graph | ✅ complete |
 | 3 | Workflow engine and WebSockets | ⏳ |
 | 4 | Four review agents and provider adapters | ⏳ |
 | 5 | Full API and backend integration tests | ⏳ |
@@ -27,7 +27,8 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 | Milestone | Commit | Message |
 | --- | --- | --- |
 | 0 | `08c3cfb` | `foundation: establish backend and contracts v1` |
-| 1 | _(this commit)_ | `persistence: authentication, audit, storage and safe intake` |
+| 1 | `c74b812` | `persistence: authentication, audit, storage and safe intake` |
+| 2 | _(this commit)_ | `parsers: seven file parsers and the cross-file evidence graph` |
 
 ---
 
@@ -136,6 +137,73 @@ Worth recording because all of them passed a fully green test suite first:
 * Archive fixes: integrity check ran before the zip-bomb limits; a traversing
   member left already-written files behind; over-nesting was reported as a
   traversal attempt.
+
+---
+
+## Milestone 2 — what exists now
+
+**Seven parsers** under `backend/app/parsers/`: L5X, XLSX, CSV, DOCX, PDF, XML and
+plain text. Each turns one file into a normalised document plus evidence anchors,
+under three rules that are product requirements rather than style guidance:
+
+1. **Never guess silently.** Unreadable content becomes a warning or an
+   unsupported item, never an omission. A review that reports nothing because the
+   parser gave up is indistinguishable from a clean result.
+2. **Never claim more than the format supports.** `GRT(AIR_PRESS_PSI, 40.0)` is a
+   mnemonic and two operands — not "trips below 40 psi", and not "contradicts the
+   documented 60".
+3. **Be deterministic.** Same bytes, same content, same anchors, same order.
+
+The PDF parser carries the sharpest version of rule 1: it never silently uses OCR
+and never returns a quietly empty page. A scanned drawing produces a
+`no_text_layer` warning, an unsupported item, and a page anchor marked
+`unsupported_content` whose expectation says manual review is required — so "we
+could not read this" survives into the report as a citable fact.
+
+**The evidence graph** (`app/core/services/evidence_graph.py`) joins every parsed
+artifact into one cross-file structure: tags, documented interlocks, rungs, I/O
+points, alarms, narrative statements, and the limitations carried forward from
+each parser. A discrepancy only exists *between* documents, so this is where the
+product's value actually is.
+
+It assembles facts and never draws conclusions. An interlock whose trip tag
+matches nothing gets `matched_tag=None` plus ranked `candidate_tags`; a threshold
+disagreement is recorded as both values verbatim. Whether those constitute a
+finding is an agent's judgement, with evidence and a confidence, for a human to
+approve.
+
+**Anchors** are keyed `(file_id, anchor_key)` with a deterministic parser-assigned
+key, so re-parsing updates rows in place and the findings that cite them keep
+working across a parser upgrade. `content_hash` fixes the excerpt at creation
+time, so a re-upload that changed the underlying file is detectable rather than
+silently re-pointing an old finding at new text.
+
+See `docs/backend/parsers.md` and `docs/backend/evidence.md`.
+
+### What an adversarial review of this milestone found
+
+Each parser was implemented, then independently attacked. 53 problems were
+confirmed; the 40 at medium severity and above were fixed with a regression test
+each, and 14 were declined with reasoning. The pattern worth recording is that
+almost every one was a *silent* failure — content dropped with no warning, or a
+claim the code could not support:
+
+* an L5X alias tag's target was discarded, so the binding between an interlock
+  symbol and its physical I/O point vanished without trace;
+* only the first `<Tags>` container was read, so a declared tag was reported as
+  undeclared — a false finding, not a missed one;
+* tracked changes inside DOCX table cells dropped text, and the mutilated string
+  was then published as a *direct* anchor excerpt an agent would quote verbatim;
+* pages pypdf silently dropped were never noticed, so a partially-read document
+  reported as fully examined;
+* XML mixed content lost child text and fabricated separators inside identifiers;
+* a spreadsheet cell whose text merely began with `=` was recorded as a formula
+  with a null value, turning a documented threshold into a blank field.
+
+The graph had two of its own, found by running it over the full fixture set:
+members of a declared UDT (`CV101_Status.Running`) read as undeclared references,
+turning one genuine finding into seven false leads; and rows from a *hidden*
+worksheet were being treated as live requirements.
 
 ---
 
