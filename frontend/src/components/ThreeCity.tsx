@@ -2376,20 +2376,22 @@ export function ThreeCity({
       controls.enableDamping = !animationRef.current.reducedMotion;
       controls.dampingFactor = 0.075;
       controls.enablePan = false;
-      controls.enableRotate = false;
+      controls.enableRotate = true;
       controls.enableZoom = true;
+      controls.rotateSpeed = 0.62;
+      controls.zoomSpeed = 0.86;
       controls.screenSpacePanning = false;
       controls.minPolarAngle = THREE.MathUtils.degToRad(34);
       controls.maxPolarAngle = THREE.MathUtils.degToRad(69);
-      controls.minAzimuthAngle = THREE.MathUtils.degToRad(-8);
-      controls.maxAzimuthAngle = THREE.MathUtils.degToRad(98);
+      controls.minAzimuthAngle = -Infinity;
+      controls.maxAzimuthAngle = Infinity;
       controls.minZoom = 0.68;
       controls.maxZoom = 2.25;
       controls.enabled = viewModeRef.current === "overview";
       controls.update();
       controlsRef.current = controls;
       renderer.domElement.style.cursor =
-        viewModeRef.current === "first-person" ? "crosshair" : "default";
+        viewModeRef.current === "first-person" ? "crosshair" : "grab";
 
       const palette = createPalette();
       createWorldGround(scene, palette);
@@ -2445,14 +2447,20 @@ export function ThreeCity({
           }
           return;
         }
+        if (event.button !== 0) return;
         pointerStart = [event.clientX, event.clientY];
+        renderer!.domElement.style.cursor = "grabbing";
       };
       const onPointerMove = (event: PointerEvent) => {
         if (viewModeRef.current === "first-person") return;
+        if (pointerStart) {
+          renderer!.domElement.style.cursor = "grabbing";
+          return;
+        }
         const buildingId = pickBuilding(event);
         renderer!.domElement.style.cursor = buildingId
           ? "pointer"
-          : "default";
+          : "grab";
       };
       const onPointerUp = (event: PointerEvent) => {
         if (viewModeRef.current === "first-person") {
@@ -2461,22 +2469,24 @@ export function ThreeCity({
         }
         if (!pointerStart || event.button !== 0) {
           pointerStart = null;
+          renderer!.domElement.style.cursor = "grab";
           return;
         }
+        const buildingId = pickBuilding(event);
+        renderer!.domElement.style.cursor = buildingId ? "pointer" : "grab";
         const movement = Math.hypot(
           event.clientX - pointerStart[0],
           event.clientY - pointerStart[1]
         );
         pointerStart = null;
         if (movement > 7) return;
-        const buildingId = pickBuilding(event);
         if (buildingId) selectRef.current(buildingId);
       };
       const onPointerLeave = () => {
         pointerStart = null;
         if (renderer) {
           renderer.domElement.style.cursor =
-            viewModeRef.current === "first-person" ? "crosshair" : "default";
+            viewModeRef.current === "first-person" ? "crosshair" : "grab";
         }
       };
       const onContextLost = (event: Event) => {
@@ -2494,7 +2504,7 @@ export function ThreeCity({
               ? locked
                 ? "none"
                 : "crosshair"
-              : "default";
+              : "grab";
         }
       };
       const onMouseLook = (event: MouseEvent) => {
@@ -2738,7 +2748,7 @@ export function ThreeCity({
           ? document.pointerLockElement === renderer.domElement
             ? "none"
             : "crosshair"
-          : "default";
+          : "grab";
     }
     if (viewMode === "overview") setPointerLocked(false);
   }, [viewMode]);
@@ -2779,7 +2789,7 @@ export function ThreeCity({
       <div className="three-city-mode-badge" style={MODE_BADGE_STYLE}>
         {viewMode === "first-person"
           ? "OPS CITY · FIRST PERSON · WASD TO MOVE"
-          : "OPS CITY · FIXED ISOMETRIC · SCROLL TO ZOOM"}
+          : "OPS CITY · DRAG TO ORBIT 360° · SCROLL TO ZOOM"}
       </div>
 
       {viewMode === "first-person" && (

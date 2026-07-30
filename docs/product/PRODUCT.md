@@ -11,7 +11,7 @@ ESCO Engineering City is a local engineering-operations workspace. Its multi-dis
 - Agent positions derive from semantic workflow state, never random movement.
 - The home is an immersive Three.js WebGL digital-twin world with a central skyline, eight workflow districts, hundreds of deterministic instanced buildings, connected metropolitan blocks, roads, bridges, waterways, industrial and logistics infrastructure, and layered system overlays.
 - The city is visibly active: deterministic demo traffic moves in both directions, pedestrians circulate through the plaza, park, and engineering forecourts, water and workflow routes pulse, and building beacons/windows change over time. Pause and reduced-motion freeze this ambient activity.
-- The fixed isometric overview fills the viewport like a real city map instead of presenting the world as a rotating tabletop model. A separate first-person mode provides free street-level exploration without compromising the overview.
+- The overview opens in the composed isometric city view, then supports free 360° drag orbit plus wheel or pinch zoom without requiring first-person mode. Reset restores the original composition, while a separate first-person mode provides street-level exploration.
 - Its visual language uses a daylight-blue environment, continuous urban terrain, luminous cyan infrastructure and water, orange mobility routes, purple district accents, and varied green public space. Developed terrain stays free of a global black grid and visible platform edges.
 - The city-first chrome is one coherent spectator interface: a compact navigation rail, unified command bar, lightweight spatial labels, a small minimap, a clearly marked synthetic activity strip, compact layers, and an operational summary frame the world without shrinking it into a dashboard card.
 - Demo records are always marked `DEMO DATA`.
@@ -23,7 +23,7 @@ ESCO Engineering City is a local engineering-operations workspace. Its multi-dis
 ## Demonstration
 
 1. Run `scripts/product/run-demo.ps1` and open `http://127.0.0.1:4173`.
-2. Use **Map** to inspect the connected city, select district labels or anchor buildings, and review deterministic agent placement.
+2. Use **Map** to inspect the connected city. Drag anywhere on the world to orbit 360°, use the wheel or a pinch gesture to zoom, and choose **Reset city view** to restore the opening composition.
 3. Watch the synthetic traffic, pedestrians, water packets, workflow routes, and activity strip. Pause the timeline to freeze all ambient city motion.
 4. Choose **Walk**, click the world to enable mouse look, move with WASD or the arrow keys, and hold Shift to move faster. Press Escape to release the cursor and **Exit walk** to return to the map.
 5. Open Findings, select `F-107`, and compare evidence.
