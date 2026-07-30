@@ -7,7 +7,7 @@ Work began against bootstrap commit `2f47487`. Backend foundation commit `08c3cf
 ## Completed
 
 - Strict React/Vite foundation with Router, Query, Zustand, Vitest, and Playwright.
-- Immersive full-viewport Three.js WebGL operations city with a central landmark skyline, eight workflow districts, hundreds of deterministic instanced buildings, luminous road and bridge infrastructure, semantic agent mapping, constrained orbit controls, raycast selection, and reduced motion.
+- Immersive full-viewport Three.js WebGL operations city with a central landmark skyline, eight workflow districts, hundreds of deterministic instanced buildings, connected metropolitan blocks, a stable isometric overview, first-person walking with pointer-lock mouse look, semantic agent mapping, raycast selection, and reduced motion.
 - Reference-aligned command-center chrome with translucent labeled navigation, always-visible cyan district metrics, a functional minimap control stack, selectable six-layer dock, system status, and lower-right city overview.
 - Project portfolio, task board, findings, evidence comparison, approvals, reports, activity, and workspace tabs.
 - Clearly labeled offline demo data and real synthetic JSON browser export.
@@ -43,7 +43,7 @@ Delivery agents under `backend/app/agents/delivery/**` and report providers unde
 
 ## Known limitations
 
-- The city is a procedural Three.js scene built from real meshes, instancing, materials, lights, and shadows. Its digital-twin palette combines deep navy terrain, cyan infrastructure and water, orange mobility paths, purple district accents, and a vivid green park. The former global grid remains removed from developed terrain. The supplied reference guides composition and visual language; the implementation retains ESCO branding and uses no external runtime artwork.
+- The city is a procedural Three.js scene built from real meshes, instancing, materials, lights, and shadows. Its digital-twin palette combines continuous deep-navy urban terrain, cyan infrastructure and water, orange mobility paths, purple district accents, and a vivid green park. The former global grid and visible platform boundary remain removed. The supplied references guide composition and visual language; the implementation retains ESCO branding and uses no external runtime artwork.
 - Desktop backend process coordination awaits a documented backend executable command.
 - Backend report formats await provider interfaces; demo downloads are real JSON artifacts.
 

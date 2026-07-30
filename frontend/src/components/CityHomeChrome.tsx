@@ -1,9 +1,11 @@
 import {
   Building2,
   CarFront,
+  Footprints,
   LayoutGrid,
   Leaf,
   LocateFixed,
+  Map,
   Minus,
   Plus,
   ShieldCheck,
@@ -26,6 +28,7 @@ const LAYERS = [
 }>;
 
 export type CityHomeLayer = (typeof LAYERS)[number]["id"];
+export type CityViewMode = "overview" | "first-person";
 
 export interface CityHomeChromeProps {
   activeLayer?: CityHomeLayer;
@@ -34,6 +37,8 @@ export interface CityHomeChromeProps {
   onLocate?: () => void;
   onZoomIn?: () => void;
   onZoomOut?: () => void;
+  viewMode?: CityViewMode;
+  onViewModeChange?: (viewMode: CityViewMode) => void;
 }
 
 interface MapControlProps {
@@ -125,12 +130,46 @@ export function CityHomeChrome({
   onLayerChange,
   onLocate,
   onZoomIn,
-  onZoomOut
+  onZoomOut,
+  viewMode = "overview",
+  onViewModeChange
 }: CityHomeChromeProps) {
-  const rootClassName = ["city-home-chrome", className].filter(Boolean).join(" ");
+  const isWalking = viewMode === "first-person";
+  const rootClassName = ["city-home-chrome", isWalking && "is-walking", className].filter(Boolean).join(" ");
 
   return (
     <div className={rootClassName}>
+      <div className="city-home-chrome__view-switch" role="group" aria-label="City view mode">
+        <button
+          type="button"
+          className={viewMode === "overview" ? "is-active" : ""}
+          aria-pressed={viewMode === "overview"}
+          onClick={() => onViewModeChange?.("overview")}
+        >
+          <Map aria-hidden="true" strokeWidth={1.8} />
+          <span>Map view</span>
+        </button>
+        <button
+          type="button"
+          className={isWalking ? "is-active" : ""}
+          aria-pressed={isWalking}
+          onClick={() => onViewModeChange?.("first-person")}
+        >
+          <Footprints aria-hidden="true" strokeWidth={1.8} />
+          <span>Walk city</span>
+        </button>
+      </div>
+
+      {isWalking && (
+        <aside className="city-home-chrome__walk-command" aria-label="Walk mode controls">
+          <button type="button" onClick={() => onViewModeChange?.("overview")}>
+            <Map aria-hidden="true" strokeWidth={1.8} />
+            <span>Exit walk</span>
+            <small>Map view</small>
+          </button>
+        </aside>
+      )}
+
       <CityMinimap onLocate={onLocate} onZoomIn={onZoomIn} onZoomOut={onZoomOut} />
 
       <nav className="city-home-chrome__layer-dock" aria-label="Engineering city map layers">

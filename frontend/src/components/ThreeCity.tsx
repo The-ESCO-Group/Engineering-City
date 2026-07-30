@@ -11,6 +11,7 @@ export interface ThreeCityProps {
   speed: number;
   zoom: number;
   resetKey: number;
+  viewMode: "overview" | "first-person";
 }
 
 type Vec3 = readonly [number, number, number];
@@ -54,6 +55,7 @@ interface MaterialPalette {
   orangeGlow: THREE.MeshBasicMaterial;
   purpleGlow: THREE.MeshBasicMaterial;
   greenGlow: THREE.MeshBasicMaterial;
+  mobilityGlow: THREE.MeshBasicMaterial;
   agentOrange: THREE.MeshStandardMaterial;
 }
 
@@ -76,9 +78,39 @@ interface RoadSegment {
   width: number;
 }
 
+interface FirstPersonLook {
+  yaw: number;
+  pitch: number;
+}
+
 const HUB: Point2 = [4, 20];
 const LANDMARK: Point2 = [-5, -11];
 const PARK: Point2 = [50, 52];
+const OVERVIEW_POSITION: Vec3 = [126, 210, 132];
+const OVERVIEW_TARGET: Vec3 = [0, 2, 0];
+const OVERVIEW_VERTICAL_SIZE = 116;
+const FIRST_PERSON_START: Vec3 = [38, 1.86, 78];
+const FIRST_PERSON_TARGET: Vec3 = [4, 3.1, 18];
+const FIRST_PERSON_BOUNDS = {
+  minX: -112,
+  maxX: 112,
+  minZ: -86,
+  maxZ: 88
+};
+const MOVEMENT_KEYS = new Set([
+  "KeyW",
+  "KeyA",
+  "KeyS",
+  "KeyD",
+  "ArrowUp",
+  "ArrowLeft",
+  "ArrowDown",
+  "ArrowRight",
+  "ShiftLeft",
+  "ShiftRight"
+]);
+const METRO_VERTICAL_STREETS = [-99, -82, -64, -45, -25, -5, 16, 37, 59, 78, 96];
+const METRO_HORIZONTAL_STREETS = [-68, -53, -18, -4, 12, 40, 55, 69];
 
 const ANCHOR_SPECS: AnchorSpec[] = [
   { id: "intake", position: [-62, -47], lot: [12, 9] },
@@ -206,7 +238,8 @@ const ROAD_SEGMENTS: RoadSegment[] = [
   { from: HUB, to: [35, 37], width: 4.5 },
   { from: [35, 37], to: [77, 44], width: 4.4 },
   { from: [-25, 40], to: [-23, 67], width: 3.7 },
-  { from: [35, 37], to: [37, 60], width: 3.7 }
+  { from: [35, 37], to: [37, 60], width: 3.7 },
+  { from: [38, 78], to: HUB, width: 4.2 }
 ];
 
 const ROOT_STYLE: CSSProperties = {
@@ -235,6 +268,47 @@ const MODE_BADGE_STYLE: CSSProperties = {
   fontWeight: 800,
   letterSpacing: "1.1px",
   pointerEvents: "none"
+};
+
+const FIRST_PERSON_HUD_STYLE: CSSProperties = {
+  position: "absolute",
+  zIndex: 4,
+  top: 42,
+  left: "50%",
+  transform: "translateX(-50%)",
+  display: "grid",
+  justifyItems: "center",
+  gap: 2,
+  minWidth: 250,
+  padding: "7px 12px",
+  border: "1px solid rgba(92,221,255,.34)",
+  borderRadius: 3,
+  background: "rgba(3,8,23,.78)",
+  boxShadow: "0 8px 28px rgba(0,0,0,.32)",
+  color: "#dbe9ee",
+  fontSize: 8,
+  fontWeight: 700,
+  letterSpacing: ".65px",
+  lineHeight: 1.4,
+  pointerEvents: "none"
+};
+
+const CROSSHAIR_STYLE: CSSProperties = {
+  position: "absolute",
+  zIndex: 4,
+  top: "50%",
+  left: "50%",
+  width: 16,
+  height: 16,
+  transform: "translate(-50%, -50%)",
+  color: "#bdefff",
+  fontSize: 20,
+  fontWeight: 300,
+  lineHeight: "14px",
+  textAlign: "center",
+  textShadow: "0 0 8px rgba(20,221,255,.9)",
+  pointerEvents: "none",
+  userSelect: "none"
 };
 
 const BUILDING_NAV_STYLE: CSSProperties = {
@@ -340,6 +414,7 @@ function createPalette(): MaterialPalette {
     orangeGlow: makeGlow(0xff6a22, 0.84),
     purpleGlow: makeGlow(0xa45cff, 0.54),
     greenGlow: makeGlow(0x36ff7a, 0.58),
+    mobilityGlow: makeGlow(0xff6a22, 0.34),
     agentOrange: new THREE.MeshStandardMaterial({
       color: 0xff6a00,
       roughness: 0.34,
@@ -386,14 +461,6 @@ function accentGlass(palette: MaterialPalette, accent: DistrictAccent) {
     : accent === "orange"
       ? palette.glassOrange
       : palette.glassPurple;
-}
-
-function accentGlow(palette: MaterialPalette, accent: DistrictAccent) {
-  return accent === "cyan"
-    ? palette.cyanGlow
-    : accent === "orange"
-      ? palette.orangeGlow
-      : palette.purpleGlow;
 }
 
 function makeAccentMaterial(ambientAccent: number) {
@@ -458,7 +525,7 @@ function addFacadeBands(
 
 function createWorldGround(scene: THREE.Scene, palette: MaterialPalette) {
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(226, 174),
+    new THREE.PlaneGeometry(1400, 1400),
     new THREE.MeshStandardMaterial({
       color: 0x050b18,
       roughness: 0.98,
@@ -469,6 +536,19 @@ function createWorldGround(scene: THREE.Scene, palette: MaterialPalette) {
   ground.position.y = -0.02;
   ground.receiveShadow = true;
   scene.add(ground);
+
+  const urbanGround = new THREE.Mesh(
+    new THREE.PlaneGeometry(252, 184),
+    new THREE.MeshStandardMaterial({
+      color: 0x081522,
+      roughness: 0.96,
+      metalness: 0.035
+    })
+  );
+  urbanGround.rotation.x = -Math.PI / 2;
+  urbanGround.position.y = 0.004;
+  urbanGround.receiveShadow = true;
+  scene.add(urbanGround);
 
   createWaterBand(scene, palette, [0, -33], [219, 7.2]);
   createWaterBand(scene, palette, [0, 27.5], [219, 6.4]);
@@ -534,24 +614,18 @@ function createDistrictPads(scene: THREE.Scene, palette: MaterialPalette) {
     const surfaceMaterial = new THREE.MeshStandardMaterial({
       color:
         accent === "orange"
-          ? 0x21160f
+          ? 0x151923
           : accent === "purple"
-            ? 0x191329
+            ? 0x121827
             : index % 2 === 0
-              ? 0x0a1d2c
-              : 0x0c2230,
-      emissive: accent === "orange" ? 0x391000 : accent === "purple" ? 0x260b42 : 0x00364b,
-      emissiveIntensity: 0.36,
-      roughness: 0.9,
-      metalness: 0.05
+              ? 0x0d1b28
+              : 0x101e2a,
+      emissive: accent === "orange" ? 0x160700 : accent === "purple" ? 0x10051c : 0x00151e,
+      emissiveIntensity: 0.1,
+      roughness: 0.94,
+      metalness: 0.035
     });
-    const districtGlow = accentGlow(palette, accent);
-    const halo = new THREE.Mesh(new THREE.ShapeGeometry(shape), districtGlow);
-    halo.rotation.x = -Math.PI / 2;
-    halo.position.set(x, 0.098, z);
-    halo.scale.set(1.04, 1.04, 1);
-    halo.renderOrder = 1;
-    scene.add(halo);
+    const districtRoute = makeGlow(accentHex(accent), 0.18);
 
     const surface = new THREE.Mesh(new THREE.ShapeGeometry(shape), surfaceMaterial);
     surface.rotation.x = -Math.PI / 2;
@@ -566,14 +640,14 @@ function createDistrictPads(scene: THREE.Scene, palette: MaterialPalette) {
       scene,
       [width - 7, 0.025, 0.065],
       [x, 0.198, z],
-      districtGlow,
+      districtRoute,
       false
     );
     addBox(
       scene,
       [0.065, 0.025, depth - 7],
       [x, 0.199, z],
-      districtGlow,
+      districtRoute,
       false
     );
   });
@@ -639,9 +713,9 @@ function createRoad(scene: THREE.Scene, segment: RoadSegment, palette: MaterialP
   const unitZ = dz / length;
   const glowTrack = addBox(
     scene,
-    [length, 0.036, 0.68],
+    [length, 0.026, 0.18],
     [midpoint[0], 0.334, midpoint[1]],
-    palette.orangeGlow,
+    palette.mobilityGlow,
     false
   );
   orientAlongRoad(glowTrack, segment.from, segment.to);
@@ -649,9 +723,9 @@ function createRoad(scene: THREE.Scene, segment: RoadSegment, palette: MaterialP
   for (let distance = 1.1; distance < length - 1; distance += 2.35) {
     const dash = addBox(
       scene,
-      [Math.min(dashLength, length - distance), 0.04, 0.38],
+      [Math.min(dashLength, length - distance), 0.035, 0.16],
       [ax + unitX * distance, 0.336, az + unitZ * distance],
-      palette.orangeGlow,
+      palette.mobilityGlow,
       false
     );
     orientAlongRoad(dash, segment.from, segment.to);
@@ -722,6 +796,144 @@ function seededRandom(seed: number) {
   };
 }
 
+function isNearMetroStreet(x: number, z: number, clearance = 1.65) {
+  const onVertical =
+    z >= -75 &&
+    z <= 75 &&
+    METRO_VERTICAL_STREETS.some((streetX) => Math.abs(x - streetX) < clearance);
+  const onHorizontal =
+    x >= -110 &&
+    x <= 110 &&
+    METRO_HORIZONTAL_STREETS.some((streetZ) => Math.abs(z - streetZ) < clearance);
+  return onVertical || onHorizontal;
+}
+
+function isInsideDistrict(x: number, z: number, margin = 0) {
+  return DISTRICTS.some(
+    (district) =>
+      Math.abs(x - district.center[0]) < district.size[0] / 2 + margin &&
+      Math.abs(z - district.center[1]) < district.size[1] / 2 + margin
+  );
+}
+
+function isInsideWater(x: number, z: number) {
+  const northChannel = Math.abs(z + 33) < 4.25 && Math.abs(x) < 111;
+  const southChannel = Math.abs(z - 27.5) < 3.85 && Math.abs(x) < 111;
+  const eastChannel = Math.abs(x - 49) < 3.85 && z > -30 && z < 25;
+  return northChannel || southChannel || eastChannel;
+}
+
+function metroAccentAt(x: number, z: number): DistrictAccent {
+  if (x > 34 && z < 22) return "orange";
+  if (z < -27 || (x > 12 && z > 28)) return "purple";
+  return "cyan";
+}
+
+function createMetroFabric(scene: THREE.Scene, palette: MaterialPalette) {
+  const streetMatrices: THREE.Matrix4[] = [];
+  const laneMatrices: THREE.Matrix4[] = [];
+  for (const x of METRO_VERTICAL_STREETS) {
+    streetMatrices.push(boxMatrix(x, 0.105, 0, 1.4, 0.07, 150));
+    laneMatrices.push(boxMatrix(x, 0.148, 0, 0.045, 0.018, 147));
+  }
+  for (const z of METRO_HORIZONTAL_STREETS) {
+    streetMatrices.push(boxMatrix(0, 0.106, z, 220, 0.07, 1.4));
+    laneMatrices.push(boxMatrix(0, 0.149, z, 216, 0.018, 0.045));
+  }
+
+  const random = seededRandom(140219);
+  const whiteBodies: THREE.Matrix4[] = [];
+  const lightBodies: THREE.Matrix4[] = [];
+  const contacts: THREE.Matrix4[] = [];
+  const roofs: THREE.Matrix4[] = [];
+  const glassBands: Record<DistrictAccent, THREE.Matrix4[]> = {
+    cyan: [],
+    orange: [],
+    purple: []
+  };
+  const pitch = 5.35;
+  for (let x = -107; x <= 107; x += pitch) {
+    for (let z = -72; z <= 72; z += pitch) {
+      if (random() > 0.62) continue;
+      const buildingX = x + (random() - 0.5) * 0.55;
+      const buildingZ = z + (random() - 0.5) * 0.55;
+      if (
+        isInsideDistrict(buildingX, buildingZ, 1.4) ||
+        isInsideWater(buildingX, buildingZ) ||
+        isReserved(buildingX, buildingZ)
+      ) {
+        continue;
+      }
+
+      const width = 2.45 + random() * 1.25;
+      const depth = 2.45 + random() * 1.25;
+      const height = 2.3 + Math.pow(random(), 1.45) * 5.4;
+      const rotation = random() > 0.88 ? Math.PI / 2 : 0;
+      const accent = metroAccentAt(buildingX, buildingZ);
+      contacts.push(
+        boxMatrix(
+          buildingX + 0.1,
+          0.064,
+          buildingZ + 0.12,
+          width + 0.55,
+          0.025,
+          depth + 0.55,
+          rotation
+        )
+      );
+      const body = boxMatrix(
+        buildingX,
+        0.1 + height / 2,
+        buildingZ,
+        width,
+        height,
+        depth,
+        rotation
+      );
+      (random() > 0.45 ? whiteBodies : lightBodies).push(body);
+      glassBands[accent].push(
+        boxMatrix(
+          buildingX,
+          0.1 + height * 0.62,
+          buildingZ,
+          width + 0.045,
+          0.14,
+          depth + 0.045,
+          rotation
+        )
+      );
+      roofs.push(
+        boxMatrix(
+          buildingX,
+          height + 0.22,
+          buildingZ,
+          width + 0.14,
+          0.2,
+          depth + 0.14,
+          rotation
+        )
+      );
+    }
+  }
+
+  const unitBox = new THREE.BoxGeometry(1, 1, 1);
+  const laneMaterial = new THREE.MeshBasicMaterial({
+    color: 0x5a7b8e,
+    transparent: true,
+    opacity: 0.3,
+    depthWrite: false
+  });
+  addInstancedBoxes(scene, unitBox, streetMatrices, palette.asphalt, false);
+  addInstancedBoxes(scene, unitBox, laneMatrices, laneMaterial, false);
+  addInstancedBoxes(scene, unitBox, contacts, palette.contact, false);
+  addInstancedBoxes(scene, unitBox, whiteBodies, palette.white);
+  addInstancedBoxes(scene, unitBox, lightBodies, palette.light);
+  addInstancedBoxes(scene, unitBox, glassBands.cyan, palette.glassCyan, false);
+  addInstancedBoxes(scene, unitBox, glassBands.orange, palette.glassOrange, false);
+  addInstancedBoxes(scene, unitBox, glassBands.purple, palette.glassPurple, false);
+  addInstancedBoxes(scene, unitBox, roofs, palette.roof);
+}
+
 function isReserved(x: number, z: number) {
   if (Math.hypot(x - HUB[0], z - HUB[1]) < 14.2) return true;
   if (Math.hypot(x - LANDMARK[0], z - LANDMARK[1]) < 6.8) return true;
@@ -737,6 +949,7 @@ function isReserved(x: number, z: number) {
   ) {
     return true;
   }
+  if (isNearMetroStreet(x, z)) return true;
   return ROAD_SEGMENTS.some(
     (segment) => pointToSegmentDistance([x, z], segment) < segment.width / 2 + 1.5
   );
@@ -1328,6 +1541,32 @@ function disposeScene(scene: THREE.Scene) {
   materials.forEach((material) => material.dispose());
 }
 
+function resetFirstPersonCamera(camera: THREE.PerspectiveCamera): FirstPersonLook {
+  camera.position.set(...FIRST_PERSON_START);
+  camera.rotation.order = "YXZ";
+  const deltaX = FIRST_PERSON_TARGET[0] - FIRST_PERSON_START[0];
+  const deltaY = FIRST_PERSON_TARGET[1] - FIRST_PERSON_START[1];
+  const deltaZ = FIRST_PERSON_TARGET[2] - FIRST_PERSON_START[2];
+  const horizontalDistance = Math.hypot(deltaX, deltaZ);
+  const look = {
+    yaw: Math.atan2(-deltaX, -deltaZ),
+    pitch: Math.atan2(deltaY, horizontalDistance)
+  };
+  camera.rotation.set(look.pitch, look.yaw, 0, "YXZ");
+  camera.updateProjectionMatrix();
+  return look;
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.isContentEditable ||
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT"
+  );
+}
+
 const occupancyFor = (id: BuildingId) =>
   agents.filter((agent) => agent.building === id).length;
 
@@ -1338,24 +1577,33 @@ export function ThreeCity({
   reducedMotion,
   speed,
   zoom,
-  resetKey
+  resetKey,
+  viewMode
 }: ThreeCityProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
+  const firstPersonCameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const runtimesRef = useRef<Map<BuildingId, BuildingRuntime>>(new Map());
   const selectedRef = useRef<BuildingId | null>(selectedBuilding);
   const selectRef = useRef(selectBuilding);
   const animationRef = useRef({ paused, reducedMotion, speed });
+  const viewModeRef = useRef(viewMode);
+  const pressedKeysRef = useRef(new Set<string>());
+  const firstPersonLookRef = useRef<FirstPersonLook>({ yaw: 0, pitch: 0 });
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [pointerLocked, setPointerLocked] = useState(false);
 
   selectedRef.current = selectedBuilding;
   selectRef.current = selectBuilding;
   animationRef.current = { paused, reducedMotion, speed };
+  viewModeRef.current = viewMode;
 
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
+    const pressedKeys = pressedKeysRef.current;
 
     let disposed = false;
     let frame = 0;
@@ -1363,6 +1611,7 @@ export function ThreeCity({
     let renderer: THREE.WebGLRenderer | null = null;
     let controls: OrbitControls | null = null;
     let scene: THREE.Scene | null = null;
+    let detachInputListeners: (() => void) | null = null;
     let pointerStart: Point2 | null = null;
     const pickable: THREE.Mesh[] = [];
     const raycaster = new THREE.Raycaster();
@@ -1372,7 +1621,7 @@ export function ThreeCity({
       setRenderError(null);
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x030817);
-      scene.fog = new THREE.Fog(0x030817, 174, 305);
+      scene.fog = new THREE.Fog(0x030817, 150, 370);
 
       renderer = new THREE.WebGLRenderer({
         antialias: true,
@@ -1395,18 +1644,25 @@ export function ThreeCity({
       renderer.domElement.style.display = "block";
       renderer.domElement.style.touchAction = "none";
       mount.appendChild(renderer.domElement);
+      rendererRef.current = renderer;
 
       const camera = new THREE.OrthographicCamera(-105, 105, 63, -63, 0.1, 450);
-      camera.position.set(138, 118, 146);
+      camera.position.set(...OVERVIEW_POSITION);
       camera.zoom = 1;
-      camera.lookAt(0, -7, 0);
+      camera.lookAt(...OVERVIEW_TARGET);
       cameraRef.current = camera;
 
+      const firstPersonCamera = new THREE.PerspectiveCamera(58, 1, 0.08, 800);
+      firstPersonLookRef.current = resetFirstPersonCamera(firstPersonCamera);
+      firstPersonCameraRef.current = firstPersonCamera;
+
       controls = new OrbitControls(camera, renderer.domElement);
-      controls.target.set(0, -7, 0);
+      controls.target.set(...OVERVIEW_TARGET);
       controls.enableDamping = !animationRef.current.reducedMotion;
       controls.dampingFactor = 0.075;
       controls.enablePan = false;
+      controls.enableRotate = false;
+      controls.enableZoom = true;
       controls.screenSpacePanning = false;
       controls.minPolarAngle = THREE.MathUtils.degToRad(34);
       controls.maxPolarAngle = THREE.MathUtils.degToRad(69);
@@ -1414,11 +1670,15 @@ export function ThreeCity({
       controls.maxAzimuthAngle = THREE.MathUtils.degToRad(98);
       controls.minZoom = 0.68;
       controls.maxZoom = 2.25;
+      controls.enabled = viewModeRef.current === "overview";
       controls.update();
       controlsRef.current = controls;
+      renderer.domElement.style.cursor =
+        viewModeRef.current === "first-person" ? "crosshair" : "default";
 
       const palette = createPalette();
       createWorldGround(scene, palette);
+      createMetroFabric(scene, palette);
       createDistrictPads(scene, palette);
       createRoadNetwork(scene, palette);
       createProceduralBuildings(scene, palette);
@@ -1444,23 +1704,40 @@ export function ThreeCity({
         pointer.y = -((event.clientY - bounds.top) / Math.max(1, bounds.height)) * 2 + 1;
       };
       const pickBuilding = (event: PointerEvent) => {
+        if (viewModeRef.current !== "overview") return undefined;
         updatePointer(event);
         raycaster.setFromCamera(pointer, camera);
         const hit = raycaster.intersectObjects(pickable, false)[0];
         return hit?.object.userData.buildingId as BuildingId | undefined;
       };
       const onPointerDown = (event: PointerEvent) => {
+        if (viewModeRef.current === "first-person") {
+          pointerStart = null;
+          if (
+            event.button === 0 &&
+            renderer &&
+            document.pointerLockElement !== renderer.domElement
+          ) {
+            void renderer.domElement.requestPointerLock().catch(() => {
+              if (!disposed) setPointerLocked(false);
+            });
+          }
+          return;
+        }
         pointerStart = [event.clientX, event.clientY];
       };
       const onPointerMove = (event: PointerEvent) => {
+        if (viewModeRef.current === "first-person") return;
         const buildingId = pickBuilding(event);
         renderer!.domElement.style.cursor = buildingId
           ? "pointer"
-          : event.buttons
-            ? "grabbing"
-            : "grab";
+          : "default";
       };
       const onPointerUp = (event: PointerEvent) => {
+        if (viewModeRef.current === "first-person") {
+          pointerStart = null;
+          return;
+        }
         if (!pointerStart || event.button !== 0) {
           pointerStart = null;
           return;
@@ -1476,7 +1753,10 @@ export function ThreeCity({
       };
       const onPointerLeave = () => {
         pointerStart = null;
-        if (renderer) renderer.domElement.style.cursor = "grab";
+        if (renderer) {
+          renderer.domElement.style.cursor =
+            viewModeRef.current === "first-person" ? "crosshair" : "default";
+        }
       };
       const onContextLost = (event: Event) => {
         event.preventDefault();
@@ -1484,11 +1764,80 @@ export function ThreeCity({
           setRenderError("The WebGL context was lost. Reload the page to restore the 3D city.");
         }
       };
+      const onPointerLockChange = () => {
+        const locked = document.pointerLockElement === renderer?.domElement;
+        setPointerLocked(locked);
+        if (renderer) {
+          renderer.domElement.style.cursor =
+            viewModeRef.current === "first-person"
+              ? locked
+                ? "none"
+                : "crosshair"
+              : "default";
+        }
+      };
+      const onMouseLook = (event: MouseEvent) => {
+        if (
+          viewModeRef.current !== "first-person" ||
+          document.pointerLockElement !== renderer?.domElement
+        ) {
+          return;
+        }
+        const look = firstPersonLookRef.current;
+        look.yaw -= event.movementX * 0.0019;
+        look.pitch = THREE.MathUtils.clamp(
+          look.pitch - event.movementY * 0.0019,
+          THREE.MathUtils.degToRad(-78),
+          THREE.MathUtils.degToRad(78)
+        );
+        firstPersonCamera.rotation.set(look.pitch, look.yaw, 0, "YXZ");
+      };
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (
+          viewModeRef.current !== "first-person" ||
+          isEditableTarget(event.target) ||
+          !MOVEMENT_KEYS.has(event.code)
+        ) {
+          return;
+        }
+        pressedKeys.add(event.code);
+        event.preventDefault();
+      };
+      const onKeyUp = (event: KeyboardEvent) => {
+        pressedKeys.delete(event.code);
+        if (
+          viewModeRef.current === "first-person" &&
+          MOVEMENT_KEYS.has(event.code) &&
+          !isEditableTarget(event.target)
+        ) {
+          event.preventDefault();
+        }
+      };
+      const onWindowBlur = () => {
+        pressedKeys.clear();
+      };
       renderer.domElement.addEventListener("pointerdown", onPointerDown);
       renderer.domElement.addEventListener("pointermove", onPointerMove);
       renderer.domElement.addEventListener("pointerup", onPointerUp);
       renderer.domElement.addEventListener("pointerleave", onPointerLeave);
       renderer.domElement.addEventListener("webglcontextlost", onContextLost);
+      document.addEventListener("pointerlockchange", onPointerLockChange);
+      document.addEventListener("mousemove", onMouseLook);
+      window.addEventListener("keydown", onKeyDown);
+      window.addEventListener("keyup", onKeyUp);
+      window.addEventListener("blur", onWindowBlur);
+      detachInputListeners = () => {
+        renderer?.domElement.removeEventListener("pointerdown", onPointerDown);
+        renderer?.domElement.removeEventListener("pointermove", onPointerMove);
+        renderer?.domElement.removeEventListener("pointerup", onPointerUp);
+        renderer?.domElement.removeEventListener("pointerleave", onPointerLeave);
+        renderer?.domElement.removeEventListener("webglcontextlost", onContextLost);
+        document.removeEventListener("pointerlockchange", onPointerLockChange);
+        document.removeEventListener("mousemove", onMouseLook);
+        window.removeEventListener("keydown", onKeyDown);
+        window.removeEventListener("keyup", onKeyUp);
+        window.removeEventListener("blur", onWindowBlur);
+      };
 
       const resize = () => {
         if (!renderer) return;
@@ -1496,12 +1845,17 @@ export function ThreeCity({
         const width = Math.max(1, Math.round(bounds.width));
         const height = Math.max(1, Math.round(bounds.height));
         const aspect = width / height;
-        const verticalSize = Math.max(124, 222 / Math.max(0.65, aspect));
+        const verticalSize = Math.max(
+          OVERVIEW_VERTICAL_SIZE,
+          132 / Math.max(0.75, aspect)
+        );
         camera.left = (-verticalSize * aspect) / 2;
         camera.right = (verticalSize * aspect) / 2;
         camera.top = verticalSize / 2;
         camera.bottom = -verticalSize / 2;
         camera.updateProjectionMatrix();
+        firstPersonCamera.aspect = aspect;
+        firstPersonCamera.updateProjectionMatrix();
         renderer.setSize(width, height, false);
       };
       resize();
@@ -1511,14 +1865,55 @@ export function ThreeCity({
       const timer = new THREE.Timer();
       timer.connect(document);
       let animationElapsed = 0;
+      const firstPersonForward = new THREE.Vector3();
+      const firstPersonRight = new THREE.Vector3();
+      const firstPersonMovement = new THREE.Vector3();
       const render = (timestamp?: number) => {
         if (disposed || !renderer || !scene || !controls) return;
         frame = window.requestAnimationFrame(render);
         timer.update(timestamp);
         const delta = Math.min(timer.getDelta(), 0.05);
         const state = animationRef.current;
+        const firstPersonActive = viewModeRef.current === "first-person";
+        controls.enabled = !firstPersonActive;
         controls.enableDamping = !state.reducedMotion;
-        controls.update();
+        if (!firstPersonActive) {
+          controls.update();
+        } else {
+          const keys = pressedKeys;
+          const forwardAxis =
+            (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0) -
+            (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0);
+          const rightAxis =
+            (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0) -
+            (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0);
+          if (forwardAxis !== 0 || rightAxis !== 0) {
+            const yaw = firstPersonLookRef.current.yaw;
+            firstPersonForward.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+            firstPersonRight.set(Math.cos(yaw), 0, -Math.sin(yaw));
+            firstPersonMovement
+              .copy(firstPersonForward)
+              .multiplyScalar(forwardAxis)
+              .addScaledVector(firstPersonRight, rightAxis)
+              .normalize();
+            const fast = keys.has("ShiftLeft") || keys.has("ShiftRight");
+            firstPersonCamera.position.addScaledVector(
+              firstPersonMovement,
+              delta * (fast ? 17 : 7.5)
+            );
+            firstPersonCamera.position.x = THREE.MathUtils.clamp(
+              firstPersonCamera.position.x,
+              FIRST_PERSON_BOUNDS.minX,
+              FIRST_PERSON_BOUNDS.maxX
+            );
+            firstPersonCamera.position.z = THREE.MathUtils.clamp(
+              firstPersonCamera.position.z,
+              FIRST_PERSON_BOUNDS.minZ,
+              FIRST_PERSON_BOUNDS.maxZ
+            );
+            firstPersonCamera.position.y = FIRST_PERSON_START[1];
+          }
+        }
         if (!state.paused && !state.reducedMotion) {
           animationElapsed += delta * Math.max(0.1, state.speed);
           agentMarkers.forEach((marker) => {
@@ -1535,7 +1930,7 @@ export function ThreeCity({
             marker.halo.material.opacity = 0.56;
           });
         }
-        renderer.render(scene, camera);
+        renderer.render(scene, firstPersonActive ? firstPersonCamera : camera);
       };
       render();
 
@@ -1544,14 +1939,16 @@ export function ThreeCity({
         window.cancelAnimationFrame(frame);
         timer.dispose();
         resizeObserver?.disconnect();
-        renderer?.domElement.removeEventListener("pointerdown", onPointerDown);
-        renderer?.domElement.removeEventListener("pointermove", onPointerMove);
-        renderer?.domElement.removeEventListener("pointerup", onPointerUp);
-        renderer?.domElement.removeEventListener("pointerleave", onPointerLeave);
-        renderer?.domElement.removeEventListener("webglcontextlost", onContextLost);
+        detachInputListeners?.();
+        pressedKeys.clear();
+        if (document.pointerLockElement === renderer?.domElement) {
+          document.exitPointerLock();
+        }
         controls?.dispose();
         controlsRef.current = null;
         cameraRef.current = null;
+        firstPersonCameraRef.current = null;
+        rendererRef.current = null;
         runtimesRef.current = new Map();
         if (scene) disposeScene(scene);
         renderer?.renderLists.dispose();
@@ -1561,10 +1958,20 @@ export function ThreeCity({
       };
     } catch (error: unknown) {
       disposed = true;
+      detachInputListeners?.();
+      pressedKeys.clear();
+      if (document.pointerLockElement === renderer?.domElement) {
+        document.exitPointerLock();
+      }
       controls?.dispose();
+      controlsRef.current = null;
+      cameraRef.current = null;
+      firstPersonCameraRef.current = null;
+      rendererRef.current = null;
       if (scene) disposeScene(scene);
       renderer?.dispose();
       renderer?.domElement.remove();
+      setPointerLocked(false);
       setRenderError(
         error instanceof Error
           ? error.message
@@ -1578,6 +1985,29 @@ export function ThreeCity({
   }, [selectedBuilding]);
 
   useEffect(() => {
+    viewModeRef.current = viewMode;
+    pressedKeysRef.current.clear();
+    const controls = controlsRef.current;
+    const renderer = rendererRef.current;
+    if (controls) controls.enabled = viewMode === "overview";
+    if (renderer) {
+      if (
+        viewMode === "overview" &&
+        document.pointerLockElement === renderer.domElement
+      ) {
+        document.exitPointerLock();
+      }
+      renderer.domElement.style.cursor =
+        viewMode === "first-person"
+          ? document.pointerLockElement === renderer.domElement
+            ? "none"
+            : "crosshair"
+          : "default";
+    }
+    if (viewMode === "overview") setPointerLocked(false);
+  }, [viewMode]);
+
+  useEffect(() => {
     const camera = cameraRef.current;
     if (!camera) return;
     camera.zoom = THREE.MathUtils.clamp(zoom, 0.72, 1.55);
@@ -1587,14 +2017,20 @@ export function ThreeCity({
 
   useEffect(() => {
     const camera = cameraRef.current;
+    const firstPersonCamera = firstPersonCameraRef.current;
     const controls = controlsRef.current;
-    if (!camera || !controls) return;
-    camera.position.set(138, 118, 146);
-    camera.zoom = 1;
-    controls.target.set(0, -7, 0);
-    camera.lookAt(controls.target);
-    camera.updateProjectionMatrix();
-    controls.update();
+    if (camera && controls) {
+      camera.position.set(...OVERVIEW_POSITION);
+      camera.zoom = 1;
+      controls.target.set(...OVERVIEW_TARGET);
+      camera.lookAt(controls.target);
+      camera.updateProjectionMatrix();
+      controls.update();
+    }
+    if (firstPersonCamera) {
+      firstPersonLookRef.current = resetFirstPersonCamera(firstPersonCamera);
+    }
+    pressedKeysRef.current.clear();
   }, [resetKey]);
 
   useEffect(() => {
@@ -1604,7 +2040,38 @@ export function ThreeCity({
   return (
     <div className="three-city-host pixi-city-host" style={ROOT_STYLE}>
       <div ref={mountRef} style={CANVAS_MOUNT_STYLE} aria-hidden="true" />
-      <div className="three-city-mode-badge" style={MODE_BADGE_STYLE}>OPS CITY · TRUE 3D · DRAG TO ORBIT · SCROLL TO ZOOM</div>
+      <div className="three-city-mode-badge" style={MODE_BADGE_STYLE}>
+        {viewMode === "first-person"
+          ? "OPS CITY · FIRST PERSON · WASD TO MOVE"
+          : "OPS CITY · FIXED ISOMETRIC · SCROLL TO ZOOM"}
+      </div>
+
+      {viewMode === "first-person" && (
+        <>
+          <div
+            className="three-city-first-person-hud"
+            style={FIRST_PERSON_HUD_STYLE}
+            role="status"
+            aria-live="polite"
+          >
+            <strong style={{ color: pointerLocked ? "#62e5ff" : "#ffad73" }}>
+              {pointerLocked ? "MOUSE LOOK ACTIVE" : "CLICK CITY TO LOOK"}
+            </strong>
+            <span>WASD / ARROWS TO WALK · HOLD SHIFT TO MOVE FASTER</span>
+            <span>{pointerLocked ? "PRESS ESC TO RELEASE CURSOR" : "ESC KEEPS WALK MODE ACTIVE"}</span>
+          </div>
+          <div
+            className="three-city-crosshair"
+            style={{
+              ...CROSSHAIR_STYLE,
+              opacity: pointerLocked ? 0.95 : 0.45
+            }}
+            aria-hidden="true"
+          >
+            +
+          </div>
+        </>
+      )}
 
       {renderError && (
         <div className="city-render-error three-city-error" style={ERROR_STYLE} role="alert">
