@@ -48,3 +48,4 @@ Delivery agents under `backend/app/agents/delivery/**` and report providers unde
 ## Commits
 
 - `d5560d39f654ae136692f1478efbab29a9d1db49` — verified product demo slice, desktop shell, scripts, tests, and documentation.
+- `46f8fba4f3005826030432ec01ad2d936410f22b` — realistic PixiJS industrial campus, startup diagnostics, verified Tauri render, and Windows resources.
