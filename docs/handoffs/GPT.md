@@ -8,7 +8,8 @@ Work began against bootstrap commit `2f47487`. Backend foundation commit `08c3cf
 
 - Strict React/Vite foundation with Router, Query, Zustand, Vitest, and Playwright.
 - Immersive full-viewport Three.js WebGL operations city with a central landmark skyline, eight workflow districts, hundreds of deterministic instanced buildings, connected metropolitan blocks, a stable isometric overview, first-person walking with pointer-lock mouse look, semantic agent mapping, raycast selection, and reduced motion.
-- Reference-aligned command-center chrome with translucent labeled navigation, always-visible cyan district metrics, a functional minimap control stack, selectable six-layer dock, system status, and lower-right city overview.
+- Deterministic city-life simulation with bidirectional traffic, pedestrian movement and idling, water and route packets, rooftop beacons, and phase-varied window lighting; all ambient motion honors pause, speed, and reduced-motion state.
+- City-first spectator chrome with a compact icon rail, unified command bar, lightweight spatial labels, functional minimap controls, clearly labeled synthetic activity strip, compact six-layer dock, and operational summary.
 - Project portfolio, task board, findings, evidence comparison, approvals, reports, activity, and workspace tabs.
 - Clearly labeled offline demo data and real synthetic JSON browser export.
 - Tauri 2 Windows shell with local-only backend URL validation, Windows application resources, and a verified non-blank WebView render.
@@ -43,7 +44,7 @@ Delivery agents under `backend/app/agents/delivery/**` and report providers unde
 
 ## Known limitations
 
-- The city is a procedural Three.js scene built from real meshes, instancing, materials, lights, and shadows. Its digital-twin palette combines continuous deep-navy urban terrain, cyan infrastructure and water, orange mobility paths, purple district accents, and a vivid green park. The former global grid and visible platform boundary remain removed. The supplied references guide composition and visual language; the implementation retains ESCO branding and uses no external runtime artwork.
+- The city is a procedural Three.js scene built from real meshes, instancing, materials, lights, and shadows. Its daylight digital-twin palette combines continuous blue urban terrain, cyan infrastructure and water, orange mobility paths, purple district accents, and varied green public space. The former global grid and visible platform boundary remain removed. City activity is deterministic synthetic demo motion, not a claim of live backend telemetry. The supplied references guide composition and visual language; the implementation retains ESCO branding and uses no external runtime artwork.
 - Desktop backend process coordination awaits a documented backend executable command.
 - Backend report formats await provider interfaces; demo downloads are real JSON artifacts.
 
@@ -55,3 +56,4 @@ Delivery agents under `backend/app/agents/delivery/**` and report providers unde
 - `97ae786ecd115d4ca85587787ddd7c15041d91a9` — expanded the renderer into a dense, reference-driven multi-district operations city with instanced geometry, infrastructure, and an accessible map HUD.
 - `21e562809f9cd117ee0f0769a86114f547dc1cda` — rebuilt the home as a colorful full-viewport digital twin with emissive districts, polished façade detail, functional minimap/layer chrome, and a no-grid developed world.
 - `d69072c9a2e301a2d31d7278e9f82748e74fcbea` — expanded the city into a connected edge-to-edge metro and added first-person walking, pointer-lock mouse look, and verified map/walk controls.
+- `a5b31b83076e77131ca3b20c71093370165ea40d` — brought the city to life with moving traffic and pedestrians, animated infrastructure, street-level detail, cleaner spectator chrome, and updated visual regression previews.
