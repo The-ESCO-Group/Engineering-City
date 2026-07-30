@@ -10,9 +10,10 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import CHAR, DateTime, Dialect, Text, TypeDecorator
+from sqlalchemy import CHAR, DateTime, Dialect, String, Text, TypeDecorator
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
@@ -41,6 +42,54 @@ class GUID(TypeDecorator[uuid.UUID]):
         if value is None:
             return None
         return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+
+
+class StrEnumType[E: StrEnum](TypeDecorator[E]):
+    """Stores a :class:`~enum.StrEnum` as ``VARCHAR`` and loads it back as the enum.
+
+    Declaring ``Mapped[ProjectStatus] = mapped_column(String(32))`` looks correct
+    and is not: SQLAlchemy writes the string but hands back a plain ``str`` on
+    load, so ``project.status is ProjectStatus.ARCHIVED`` is silently ``False``
+    for every row read from the database and ``project.status.value`` raises
+    ``AttributeError``. The bug only shows up after a round-trip, so it hides
+    from any test that inspects an object it just created in the same session.
+
+    Registering this decorator in ``Base.type_annotation_map`` fixes it once, for
+    every current and future enum column. A column whose enum is not in that map
+    fails loudly at mapper configuration time rather than degrading quietly.
+    """
+
+    impl = String
+    cache_ok = True
+
+    def __init__(self, enum_cls: type[E], length: int = 40) -> None:
+        super().__init__(length=length)
+        self.enum_cls = enum_cls
+        self.length = length
+
+    def process_bind_param(self, value: Any, dialect: Dialect) -> str | None:
+        if value is None:
+            return None
+        # Coerce through the enum so an unrecognised string is rejected on write
+        # rather than becoming a row nothing can read back.
+        return str(self.enum_cls(value).value)
+
+    def process_result_value(self, value: Any, dialect: Dialect) -> E | None:
+        if value is None:
+            return None
+        try:
+            return self.enum_cls(value)
+        except ValueError as exc:
+            # Enum members are only ever added, never renamed, so this means the
+            # row was written by something other than this application. Failing
+            # loudly is right: silently coercing would hide the corruption.
+            raise ValueError(
+                f"database holds {value!r} in a {self.enum_cls.__name__} column, "
+                f"which is not a valid member"
+            ) from exc
+
+    def copy(self, **kwargs: Any) -> StrEnumType[E]:
+        return StrEnumType(self.enum_cls, length=self.length)
 
 
 class JSONDict(TypeDecorator[dict[str, Any]]):

@@ -29,7 +29,7 @@ class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     client_reference: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     status: Mapped[ProjectStatus] = mapped_column(
-        String(32), default=ProjectStatus.DRAFT, nullable=False, index=True
+        default=ProjectStatus.DRAFT, nullable=False, index=True
     )
 
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -97,7 +97,7 @@ class ProjectMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         GUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    role: Mapped[ProjectRole] = mapped_column(String(32), nullable=False)
+    role: Mapped[ProjectRole] = mapped_column(nullable=False)
 
     project: Mapped[Project] = relationship(back_populates="members")
     user: Mapped[User] = relationship(back_populates="memberships")

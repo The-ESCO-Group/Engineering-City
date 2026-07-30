@@ -32,7 +32,7 @@ class Role(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "roles"
     __table_args__ = (UniqueConstraint("name", name="uq_roles_name"),)
 
-    name: Mapped[RoleName] = mapped_column(String(32), nullable=False)
+    name: Mapped[RoleName] = mapped_column(nullable=False)
     description: Mapped[str] = mapped_column(String(255), default="", nullable=False)
 
     users: Mapped[list[User]] = relationship(

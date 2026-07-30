@@ -250,7 +250,7 @@ def build_openapi() -> dict[str, Any]:
         database_url="sqlite+pysqlite:///:memory:",
         log_json=False,
     )
-    app = create_app(settings)
+    app = create_app(settings, run_bootstrap=False)
     document = app.openapi()
     document["info"]["x-contract-version"] = CONTRACT_VERSION
     document["info"]["license"] = {"name": "ESCO Group internal"}

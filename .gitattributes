@@ -1,0 +1,32 @@
+# Binary formats: never apply end-of-line conversion, never try to diff.
+*.pdf   binary
+*.xlsx  binary
+*.xlsm  binary
+*.docx  binary
+*.zip   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.glb   binary
+*.blend binary
+
+# Test fixtures must be byte-identical on every machine.
+#
+# Two concrete reasons, not tidiness:
+#   * the synthetic PDFs are hand-assembled and carry a cross-reference table of
+#     absolute byte offsets, so a single injected CR shifts every offset and the
+#     file stops being a readable PDF;
+#   * evidence-anchor content hashes are SHA-256 over exact extracted bytes, so
+#     line-ending rewriting would make the same fixture hash differently on a
+#     Windows checkout than on a Linux one and the test suite would stop being
+#     deterministic.
+fixtures/** -text
+
+# Generated contracts are compared byte-for-byte against freshly generated output
+# by backend/tests/test_contracts.py, which writes LF.
+contracts/*.json text eol=lf
+contracts/*.yaml text eol=lf

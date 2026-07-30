@@ -50,8 +50,610 @@ paths:
                   $ref: '#/components/schemas/CapabilityStatus'
                 type: array
                 title: Response Capabilities Api System Capabilities Get
+  /api/auth/login:
+    post:
+      tags:
+      - authentication
+      summary: Exchange credentials for an access token
+      description: 'Authenticate locally.
+
+
+        Both success and failure are audited. Every failure returns the same message
+
+        regardless of cause, so the response cannot be used to enumerate accounts.'
+      operationId: login_api_auth_login_post
+      parameters:
+      - name: User-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User-Agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/auth/logout:
+    post:
+      tags:
+      - authentication
+      summary: Revoke the current access token
+      description: 'Deny-list the presented token and clear the cookie.
+
+
+        The token is genuinely invalidated server-side; this is not a client-side
+
+        gesture that leaves a stolen token usable until it expires.'
+      operationId: logout_api_auth_logout_post
+      parameters:
+      - name: User-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User-Agent
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/auth/me:
+    get:
+      tags:
+      - authentication
+      summary: The authenticated user and their project roles
+      operationId: me_api_auth_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserResponse'
+  /api/auth/users:
+    post:
+      tags:
+      - authentication
+      summary: Create a user (administrator only)
+      operationId: create_user_api_auth_users_post
+      parameters:
+      - name: User-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User-Agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSummary'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - authentication
+      summary: List users (administrator only)
+      operationId: list_users_api_auth_users_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserSummary'
+                title: Response List Users Api Auth Users Get
+  /api/projects:
+    post:
+      tags:
+      - projects
+      summary: Create a project
+      operationId: create_project_api_projects_post
+      parameters:
+      - name: User-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User-Agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - projects
+      summary: List projects the caller can see
+      operationId: list_projects_api_projects_get
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/ProjectStatus'
+          - type: 'null'
+          title: Status
+      - name: include_archived
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: true
+          title: Include Archived
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_ProjectRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}:
+    get:
+      tags:
+      - projects
+      summary: Project detail with membership and roll-up counts
+      operationId: get_project_api_projects__project_id__get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - projects
+      summary: Update project metadata
+      description: 'Update editable metadata.
+
+
+        ``status`` is deliberately not accepted here — it belongs to the workflow
+
+        engine. Use the workflow endpoints to change what a project is doing.'
+      operationId: update_project_api_projects__project_id__patch
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/archive:
+    post:
+      tags:
+      - projects
+      summary: Archive a project (read-only from then on)
+      operationId: archive_project_api_projects__project_id__archive_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/members:
+    get:
+      tags:
+      - projects
+      summary: List project members
+      operationId: list_members_api_projects__project_id__members_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectMemberRead'
+                title: Response List Members Api Projects  Project Id  Members Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - projects
+      summary: Add a member or change their project role
+      operationId: add_member_api_projects__project_id__members_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddProjectMemberRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectMemberRead'
+                title: Response Add Member Api Projects  Project Id  Members Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/files:
+    post:
+      tags:
+      - files
+      summary: Upload one or more files
+      description: 'Validate and store uploaded files.
+
+
+        Each file is accepted or rejected independently: one refused file does not
+
+        discard the rest, and every rejection comes back with a reason the uploader
+
+        can act on. A ZIP is expanded safely and each usable member is recorded as a
+
+        file in its own right.'
+      operationId: upload_files_api_projects__project_id__files_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      - name: User-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User-Agent
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_files_api_projects__project_id__files_post'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - files
+      summary: List a project's files
+      operationId: list_files_api_projects__project_id__files_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      - name: include_deleted
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Include Deleted
+      - name: file_kind
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/FileKind'
+          - type: 'null'
+          title: File Kind
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UploadedFileRead'
+                title: Response List Files Api Projects  Project Id  Files Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/files/{file_id}:
+    get:
+      tags:
+      - files
+      summary: File metadata, parse artifacts and anchor count
+      operationId: get_file_api_files__file_id__get
+      parameters:
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: File Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - files
+      summary: Delete a file and remove its stored bytes
+      description: 'Delete a file.
+
+
+        The bytes are removed but the row is retained, so evidence anchors that
+
+        cited it resolve to a tombstone rather than silently disappearing.'
+      operationId: delete_file_api_files__file_id__delete
+      parameters:
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: File Id
+      - name: User-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User-Agent
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/files/{file_id}/content:
+    get:
+      tags:
+      - files
+      summary: Download the stored original bytes
+      description: 'Stream a stored original.
+
+
+        ``Content-Disposition: attachment`` plus the ``nosniff`` header applied to
+
+        every response means an uploaded document is never rendered as active
+
+        content by a browser.'
+      operationId: download_file_api_files__file_id__content_get
+      parameters:
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: File Id
+      responses:
+        '200':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    AddProjectMemberRequest:
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          title: User Id
+        role:
+          $ref: '#/components/schemas/ProjectRole'
+          default: engineer
+      type: object
+      required:
+      - user_id
+      title: AddProjectMemberRequest
+    Body_upload_files_api_projects__project_id__files_post:
+      properties:
+        files:
+          items:
+            type: string
+            contentMediaType: application/octet-stream
+          type: array
+          title: Files
+          description: One or more engineering documents.
+        document_role:
+          anyOf:
+          - $ref: '#/components/schemas/DocumentRole'
+          - type: 'null'
+          description: Declared engineering purpose, applied to every file in this request.
+      type: object
+      required:
+      - files
+      title: Body_upload_files_api_projects__project_id__files_post
     CapabilityStatus:
       properties:
         name:
@@ -84,6 +686,208 @@ components:
         Reported rather than crashed on: a missing delivery plugin degrades the
 
         product, it does not break it.'
+    CreateProjectRequest:
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Name
+        description:
+          type: string
+          title: Description
+          default: ''
+        client_reference:
+          type: string
+          maxLength: 120
+          title: Client Reference
+          default: ''
+        attributes:
+          additionalProperties: true
+          type: object
+          title: Attributes
+      type: object
+      required:
+      - name
+      title: CreateProjectRequest
+    CreateUserRequest:
+      properties:
+        email:
+          type: string
+          format: email
+          title: Email
+        display_name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Display Name
+        password:
+          type: string
+          maxLength: 256
+          minLength: 12
+          title: Password
+        roles:
+          items:
+            $ref: '#/components/schemas/RoleName'
+          type: array
+          title: Roles
+      type: object
+      required:
+      - email
+      - display_name
+      - password
+      title: CreateUserRequest
+      description: Administrator-only user provisioning.
+    CurrentUserResponse:
+      properties:
+        user:
+          $ref: '#/components/schemas/UserSummary'
+        project_roles:
+          additionalProperties:
+            type: string
+          type: object
+          title: Project Roles
+      type: object
+      required:
+      - user
+      title: CurrentUserResponse
+    DocumentRole:
+      type: string
+      enum:
+      - control_logic
+      - interlock_schedule
+      - io_list
+      - functional_description
+      - testing_notes
+      - hmi_export
+      - alarm_list
+      - other
+      - unclassified
+      title: DocumentRole
+      description: 'The engineering purpose a file serves, as declared by the uploader or
+
+        inferred during intake. Drives which agents care about the file.'
+    FileDetail:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        original_filename:
+          type: string
+          title: Original Filename
+        file_kind:
+          $ref: '#/components/schemas/FileKind'
+        document_role:
+          $ref: '#/components/schemas/DocumentRole'
+        role_declared_by_user:
+          type: boolean
+          title: Role Declared By User
+          default: false
+        media_type:
+          type: string
+          title: Media Type
+          default: ''
+        extension:
+          type: string
+          title: Extension
+          default: ''
+        size_bytes:
+          type: integer
+          title: Size Bytes
+          default: 0
+        sha256:
+          type: string
+          title: Sha256
+          default: ''
+        status:
+          $ref: '#/components/schemas/FileStatus'
+        status_detail:
+          type: string
+          title: Status Detail
+          default: ''
+        uploaded_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Uploaded By Id
+        parent_file_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Parent File Id
+          description: Set when this file was extracted from an uploaded archive.
+        archive_member_path:
+          type: string
+          title: Archive Member Path
+          default: ''
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        artifacts:
+          items:
+            $ref: '#/components/schemas/ParsedArtifactRead'
+          type: array
+          title: Artifacts
+        anchor_count:
+          type: integer
+          title: Anchor Count
+          default: 0
+      type: object
+      required:
+      - id
+      - project_id
+      - original_filename
+      - file_kind
+      - document_role
+      - status
+      - created_at
+      - updated_at
+      title: FileDetail
+    FileKind:
+      type: string
+      enum:
+      - l5x
+      - xlsx
+      - csv
+      - docx
+      - pdf
+      - xml
+      - zip
+      - text
+      - unknown
+      title: FileKind
+      description: Classification assigned during intake, driving parser selection.
+    FileStatus:
+      type: string
+      enum:
+      - uploaded
+      - parsing
+      - parsed
+      - parse_failed
+      - rejected
+      - deleted
+      title: FileStatus
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
     HealthResponse:
       properties:
         status:
@@ -125,3 +929,621 @@ components:
       - environment
       - database
       title: HealthResponse
+    LoginRequest:
+      properties:
+        email:
+          type: string
+          format: email
+          title: Email
+        password:
+          type: string
+          maxLength: 256
+          minLength: 1
+          title: Password
+      type: object
+      required:
+      - email
+      - password
+      title: LoginRequest
+    LoginResponse:
+      properties:
+        access_token:
+          type: string
+          title: Access Token
+        token_type:
+          type: string
+          title: Token Type
+          default: bearer
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+        user:
+          $ref: '#/components/schemas/UserSummary'
+      type: object
+      required:
+      - access_token
+      - expires_at
+      - user
+      title: LoginResponse
+      description: 'Returned on success.
+
+
+        The token is also set as an httpOnly cookie; it is echoed in the body so a
+
+        desktop shell that cannot use cookies can send it as a bearer token.'
+    OkResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        message:
+          type: string
+          title: Message
+          default: ''
+      type: object
+      title: OkResponse
+      description: Acknowledgement for operations with no meaningful body.
+    Page_ProjectRead_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ProjectRead'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+          description: Total matching rows, ignoring limit/offset.
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: Page[ProjectRead]
+    ParsedArtifactRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        file_id:
+          type: string
+          format: uuid
+          title: File Id
+        artifact_kind:
+          type: string
+          title: Artifact Kind
+        parser_name:
+          type: string
+          title: Parser Name
+        parser_version:
+          type: string
+          title: Parser Version
+        summary:
+          additionalProperties: true
+          type: object
+          title: Summary
+        warnings:
+          items: {}
+          type: array
+          title: Warnings
+        unsupported:
+          items: {}
+          type: array
+          title: Unsupported
+        duration_ms:
+          type: integer
+          title: Duration Ms
+          default: 0
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - file_id
+      - artifact_kind
+      - parser_name
+      - parser_version
+      - created_at
+      title: ParsedArtifactRead
+    ProjectCounts:
+      properties:
+        files:
+          type: integer
+          title: Files
+          default: 0
+        files_parsed:
+          type: integer
+          title: Files Parsed
+          default: 0
+        tasks:
+          type: integer
+          title: Tasks
+          default: 0
+        tasks_completed:
+          type: integer
+          title: Tasks Completed
+          default: 0
+        findings:
+          type: integer
+          title: Findings
+          default: 0
+        findings_open:
+          type: integer
+          title: Findings Open
+          default: 0
+        approvals_pending:
+          type: integer
+          title: Approvals Pending
+          default: 0
+        reports:
+          type: integer
+          title: Reports
+          default: 0
+      type: object
+      title: ProjectCounts
+      description: Cheap roll-ups so the city view does not have to fetch every collection.
+    ProjectDetail:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+        client_reference:
+          type: string
+          title: Client Reference
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        is_paused:
+          type: boolean
+          title: Is Paused
+        created_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Created By Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        paused_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Paused At
+        archived_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Archived At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        failure_reason:
+          type: string
+          title: Failure Reason
+          default: ''
+        event_seq:
+          type: integer
+          title: Event Seq
+          default: 0
+        tokens_used:
+          type: integer
+          title: Tokens Used
+          default: 0
+        attributes:
+          additionalProperties: true
+          type: object
+          title: Attributes
+        members:
+          items:
+            $ref: '#/components/schemas/ProjectMemberRead'
+          type: array
+          title: Members
+        counts:
+          $ref: '#/components/schemas/ProjectCounts'
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - client_reference
+      - status
+      - is_paused
+      - created_at
+      - updated_at
+      title: ProjectDetail
+    ProjectMemberRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        user_id:
+          type: string
+          format: uuid
+          title: User Id
+        role:
+          $ref: '#/components/schemas/ProjectRole'
+        display_name:
+          type: string
+          title: Display Name
+          default: ''
+        email:
+          type: string
+          title: Email
+          default: ''
+      type: object
+      required:
+      - id
+      - user_id
+      - role
+      title: ProjectMemberRead
+    ProjectRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+        client_reference:
+          type: string
+          title: Client Reference
+        status:
+          $ref: '#/components/schemas/ProjectStatus'
+        is_paused:
+          type: boolean
+          title: Is Paused
+        created_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Created By Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        paused_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Paused At
+        archived_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Archived At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        failure_reason:
+          type: string
+          title: Failure Reason
+          default: ''
+        event_seq:
+          type: integer
+          title: Event Seq
+          default: 0
+        tokens_used:
+          type: integer
+          title: Tokens Used
+          default: 0
+        attributes:
+          additionalProperties: true
+          type: object
+          title: Attributes
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - client_reference
+      - status
+      - is_paused
+      - created_at
+      - updated_at
+      title: ProjectRead
+    ProjectRole:
+      type: string
+      enum:
+      - owner
+      - engineer
+      - reviewer
+      - viewer
+      title: ProjectRole
+      description: 'Per-project membership role.
+
+
+        Distinct from :class:`RoleName`: a user may be a global ``engineer`` but only
+
+        a ``viewer`` on a specific project.'
+    ProjectStatus:
+      type: string
+      enum:
+      - draft
+      - ingesting
+      - planned
+      - running
+      - awaiting_review
+      - completed
+      - failed
+      - archived
+      title: ProjectStatus
+    RoleName:
+      type: string
+      enum:
+      - engineer
+      - reviewer
+      - administrator
+      title: RoleName
+      description: Global (system-wide) role assigned to a :class:`~app.models.user.User`.
+    UpdateProjectRequest:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Name
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        client_reference:
+          anyOf:
+          - type: string
+            maxLength: 120
+          - type: 'null'
+          title: Client Reference
+        attributes:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Attributes
+      type: object
+      title: UpdateProjectRequest
+      description: 'Partial update. Omitted fields are left unchanged.
+
+
+        ``status`` is intentionally absent: project status is owned by the workflow
+
+        engine and cannot be set directly.'
+    UploadResponse:
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        accepted_count:
+          type: integer
+          title: Accepted Count
+        rejected_count:
+          type: integer
+          title: Rejected Count
+        results:
+          items:
+            $ref: '#/components/schemas/UploadResultItem'
+          type: array
+          title: Results
+      type: object
+      required:
+      - project_id
+      - accepted_count
+      - rejected_count
+      - results
+      title: UploadResponse
+    UploadResultItem:
+      properties:
+        accepted:
+          type: boolean
+          title: Accepted
+        original_filename:
+          type: string
+          title: Original Filename
+        file:
+          anyOf:
+          - $ref: '#/components/schemas/UploadedFileRead'
+          - type: 'null'
+        extracted:
+          items:
+            $ref: '#/components/schemas/UploadedFileRead'
+          type: array
+          title: Extracted
+        rejection_code:
+          type: string
+          title: Rejection Code
+          default: ''
+        rejection_reason:
+          type: string
+          title: Rejection Reason
+          default: ''
+      type: object
+      required:
+      - accepted
+      - original_filename
+      title: UploadResultItem
+      description: 'Per-file outcome of a multi-file upload.
+
+
+        A rejected file is reported here with the reason rather than failing the
+
+        whole request, so uploading nine good files and one executable does not lose
+
+        the nine.'
+    UploadedFileRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        original_filename:
+          type: string
+          title: Original Filename
+        file_kind:
+          $ref: '#/components/schemas/FileKind'
+        document_role:
+          $ref: '#/components/schemas/DocumentRole'
+        role_declared_by_user:
+          type: boolean
+          title: Role Declared By User
+          default: false
+        media_type:
+          type: string
+          title: Media Type
+          default: ''
+        extension:
+          type: string
+          title: Extension
+          default: ''
+        size_bytes:
+          type: integer
+          title: Size Bytes
+          default: 0
+        sha256:
+          type: string
+          title: Sha256
+          default: ''
+        status:
+          $ref: '#/components/schemas/FileStatus'
+        status_detail:
+          type: string
+          title: Status Detail
+          default: ''
+        uploaded_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Uploaded By Id
+        parent_file_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Parent File Id
+          description: Set when this file was extracted from an uploaded archive.
+        archive_member_path:
+          type: string
+          title: Archive Member Path
+          default: ''
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - project_id
+      - original_filename
+      - file_kind
+      - document_role
+      - status
+      - created_at
+      - updated_at
+      title: UploadedFileRead
+    UserSummary:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        email:
+          type: string
+          title: Email
+        display_name:
+          type: string
+          title: Display Name
+        is_active:
+          type: boolean
+          title: Is Active
+        roles:
+          items:
+            $ref: '#/components/schemas/RoleName'
+          type: array
+          title: Roles
+      type: object
+      required:
+      - id
+      - email
+      - display_name
+      - is_active
+      title: UserSummary
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError

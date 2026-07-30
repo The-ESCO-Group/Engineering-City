@@ -1,0 +1,53 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 1585 >>
+stream
+BT
+/F1 14 Tf 1 0 0 1 56 740 Tm (SYNTHETIC FIXTURE - Conveyor Line 3 Pre-Commissioning Test Notes) Tj
+/F1 10 Tf 1 0 0 1 56 716 Tm (Document SYN-L3-TST-001 Rev A. Invented content, not a real project.) Tj
+/F1 11 Tf 1 0 0 1 56 686 Tm (1. Emergency stop) Tj
+/F1 10 Tf 1 0 0 1 56 668 Tm (   Actuated each station E-stop. Line permissive dropped in under 100 ms.) Tj
+/F1 10 Tf 1 0 0 1 56 654 Tm (   All three conveyors stopped. PASS.) Tj
+/F1 11 Tf 1 0 0 1 56 626 Tm (2. Motor overload) Tj
+/F1 10 Tf 1 0 0 1 56 608 Tm (   Simulated CV101 overload. CV101 stopped and latched interlocked.) Tj
+/F1 10 Tf 1 0 0 1 56 594 Tm (   Reset accepted only in Manual mode. PASS.) Tj
+/F1 11 Tf 1 0 0 1 56 566 Tm (3. CV102 jam detection) Tj
+/F1 10 Tf 1 0 0 1 56 548 Tm (   Blocked the CV102 photo-eye for 5 s. No conveyor stopped.) Tj
+/F1 10 Tf 1 0 0 1 56 534 Tm (   Expected CV101 and CV102 to stop per ILK-003. FAIL - raised as punch item) Tj
+/F1 10 Tf 1 0 0 1 56 520 Tm (   PL3-014.) Tj
+/F1 11 Tf 1 0 0 1 56 492 Tm (4. Guard door) Tj
+/F1 10 Tf 1 0 0 1 56 474 Tm (   Opened the drive-end guard. Line permissive dropped. PASS.) Tj
+/F1 11 Tf 1 0 0 1 56 446 Tm (5. Low air pressure) Tj
+/F1 10 Tf 1 0 0 1 56 428 Tm (   Bled the header to 52 psi. Line kept running. Permissive dropped only) Tj
+/F1 10 Tf 1 0 0 1 56 414 Tm (   at 39 psi. Threshold does not match the 60 psi in the functional) Tj
+/F1 10 Tf 1 0 0 1 56 400 Tm (   description. Raised as punch item PL3-015.) Tj
+/F1 11 Tf 1 0 0 1 56 372 Tm (6. Surge hopper level) Tj
+/F1 10 Tf 1 0 0 1 56 354 Tm (   Not tested. Interlock ILK-007 is undefined.) Tj
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000338 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1975
+%%EOF

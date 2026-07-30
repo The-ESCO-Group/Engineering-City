@@ -1,0 +1,16 @@
+SYNTHETIC FIXTURE - loose site notes, Conveyor Line 3
+=====================================================
+
+Invented content. Not a real project.
+
+- Ops mentioned the hopper "trips out sometimes" but nobody could say at what
+  level. No tag was identified.
+- Someone thought there used to be a second guard switch on the tail end. Not
+  found on the I/O list or in the logic.
+- Air pressure interlock: the panel drawing says 60 psi, the commissioning notes
+  say it actually dropped out around 39 psi. Unresolved.
+- CV103 drive fault behaviour is not written down anywhere.
+
+These notes are deliberately vague. Nothing here is sufficient on its own to
+support a technical finding, and a review that produced one from this alone
+would be fabricating.

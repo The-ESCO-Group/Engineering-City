@@ -64,16 +64,17 @@ class AgentInstance(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     kind: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
 
-    status: Mapped[AgentStatus] = mapped_column(
-        String(32), default=AgentStatus.IDLE, nullable=False
-    )
+    status: Mapped[AgentStatus] = mapped_column(default=AgentStatus.IDLE, nullable=False)
     #: Named place in the city ("intake_dock", "review_hall", ...).
     location: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     #: Short, human-readable statement of what the agent is doing right now.
     current_activity: Mapped[str] = mapped_column(String(255), default="", nullable=False)
-    current_task_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
-    )
+    #: Presentational pointer for the city view. Deliberately *not* a foreign
+    #: key: ``tasks.agent_instance_id`` is the authoritative link, and adding the
+    #: reverse constraint would create a circular dependency between the two
+    #: tables that neither SQLite's table rewrite nor a plain PostgreSQL dump can
+    #: order correctly.
+    current_task_id: Mapped[uuid.UUID | None] = mapped_column(GUID, nullable=True)
 
     definition: Mapped[AgentDefinition] = relationship(back_populates="instances")
     runs: Mapped[list[AgentRun]] = relationship(
@@ -103,9 +104,7 @@ class AgentRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     agent_kind: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
 
-    status: Mapped[AgentRunStatus] = mapped_column(
-        String(32), default=AgentRunStatus.RUNNING, nullable=False
-    )
+    status: Mapped[AgentRunStatus] = mapped_column(default=AgentRunStatus.RUNNING, nullable=False)
     provider: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     model: Mapped[str] = mapped_column(String(120), default="", nullable=False)
 
@@ -163,7 +162,7 @@ class AgentMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         GUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
 
-    role: Mapped[MessageRole] = mapped_column(String(16), nullable=False)
+    role: Mapped[MessageRole] = mapped_column(nullable=False)
     agent_kind: Mapped[str] = mapped_column(String(40), default="", nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     #: Optional structured attachment (counts, ids) for richer UI rendering.

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AlarmConfiguration Version="12.0" Project="SYNTHETIC_Line3_HMI">
+  <Comment>SYNTHETIC FIXTURE. Invented HMI alarm export, not a real project.</Comment>
+  <AlarmGroups>
+    <AlarmGroup Name="Safety" DisplayOrder="1"/>
+    <AlarmGroup Name="Conveyors" DisplayOrder="2"/>
+    <AlarmGroup Name="Process" DisplayOrder="3"/>
+  </AlarmGroups>
+  <Alarms>
+    <Alarm Name="ALM_ESTOP" Group="Safety" Severity="1" Latched="true"
+        AckRequired="true" Expression="ESTOP_OK == 0">
+      <Message>Emergency stop actuated - all line 3 conveyors stopped</Message>
+    </Alarm>
+    <Alarm Name="ALM_CV101_OL" Group="Conveyors" Severity="2" Latched="true"
+        AckRequired="true" Expression="CV101_OL_TRIP == 1">
+      <Message>CV101 motor overload - reset required in Manual</Message>
+    </Alarm>
+    <Alarm Name="ALM_CV102_OL" Group="Conveyors" Severity="2" Latched="true"
+        AckRequired="true" Expression="CV102_OL_TRIP == 1">
+      <Message>CV102 motor overload - reset required in Manual</Message>
+    </Alarm>
+    <Alarm Name="ALM_HOPPER_HIGH" Group="Process" Severity="3" Latched="false"
+        AckRequired="false" Expression="HOPPER_LEVEL_PCT &gt; 90.0">
+      <Message>Surge hopper level high</Message>
+    </Alarm>
+    <Alarm Name="ALM_CV102_JAM" Group="Conveyors" Severity="2" Latched="true"
+        AckRequired="true" Expression="CV102_JAM == 1">
+      <Message>CV102 jam detected - clear blockage before restart</Message>
+    </Alarm>
+    <Alarm Name="ALM_GUARD_OPEN" Group="Safety" Severity="1" Latched="true"
+        AckRequired="true" Expression="GUARD_DOOR_CLOSED == 0">
+      <Message>Guard door open - line permissive dropped</Message>
+    </Alarm>
+  </Alarms>
+</AlarmConfiguration>

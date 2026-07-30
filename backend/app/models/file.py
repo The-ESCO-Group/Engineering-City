@@ -48,10 +48,10 @@ class UploadedFile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     media_type: Mapped[str] = mapped_column(String(160), default="", nullable=False)
     extension: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     file_kind: Mapped[FileKind] = mapped_column(
-        String(32), default=FileKind.UNKNOWN, nullable=False, index=True
+        default=FileKind.UNKNOWN, nullable=False, index=True
     )
     document_role: Mapped[DocumentRole] = mapped_column(
-        String(40), default=DocumentRole.UNCLASSIFIED, nullable=False
+        default=DocumentRole.UNCLASSIFIED, nullable=False
     )
     #: True when the role was declared by the uploader rather than inferred.
     role_declared_by_user: Mapped[bool] = mapped_column(default=False, nullable=False)
@@ -60,7 +60,7 @@ class UploadedFile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sha256: Mapped[str] = mapped_column(String(64), default="", nullable=False, index=True)
 
     status: Mapped[FileStatus] = mapped_column(
-        String(32), default=FileStatus.UPLOADED, nullable=False, index=True
+        default=FileStatus.UPLOADED, nullable=False, index=True
     )
     #: Human-readable explanation when status is ``rejected`` or ``parse_failed``.
     status_detail: Mapped[str] = mapped_column(Text, default="", nullable=False)

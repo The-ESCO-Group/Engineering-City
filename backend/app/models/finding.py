@@ -55,13 +55,13 @@ class Finding(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     category: Mapped[FindingCategory] = mapped_column(
-        String(40), default=FindingCategory.OTHER, nullable=False, index=True
+        default=FindingCategory.OTHER, nullable=False, index=True
     )
     severity: Mapped[FindingSeverity] = mapped_column(
-        String(20), default=FindingSeverity.INFORMATIONAL, nullable=False
+        default=FindingSeverity.INFORMATIONAL, nullable=False
     )
     status: Mapped[FindingStatus] = mapped_column(
-        String(20), default=FindingStatus.OPEN, nullable=False, index=True
+        default=FindingStatus.OPEN, nullable=False, index=True
     )
 
     #: What the evidence literally shows.
@@ -140,9 +140,7 @@ class FindingEvidence(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     anchor_id: Mapped[uuid.UUID] = mapped_column(
         GUID, ForeignKey("evidence_anchors.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    evidence_kind: Mapped[EvidenceKind] = mapped_column(
-        String(32), default=EvidenceKind.DIRECT, nullable=False
-    )
+    evidence_kind: Mapped[EvidenceKind] = mapped_column(default=EvidenceKind.DIRECT, nullable=False)
     #: ``requirement`` | ``logic`` | ``context`` — which side of a comparison
     #: this evidence represents.
     role: Mapped[str] = mapped_column(String(32), default="context", nullable=False)
@@ -193,7 +191,7 @@ class Recommendation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     body: Mapped[str] = mapped_column(Text, default="", nullable=False)
     rationale: Mapped[str] = mapped_column(Text, default="", nullable=False)
     status: Mapped[RecommendationStatus] = mapped_column(
-        String(20), default=RecommendationStatus.PROPOSED, nullable=False, index=True
+        default=RecommendationStatus.PROPOSED, nullable=False, index=True
     )
 
     #: Safety- or damage-related recommendations always require approval; the

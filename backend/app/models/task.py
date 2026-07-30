@@ -38,12 +38,12 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     run_id: Mapped[uuid.UUID | None] = mapped_column(GUID, nullable=True, index=True)
 
-    kind: Mapped[TaskKind] = mapped_column(String(40), nullable=False, index=True)
+    kind: Mapped[TaskKind] = mapped_column(nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     status: Mapped[TaskStatus] = mapped_column(
-        String(32), default=TaskStatus.QUEUED, nullable=False, index=True
+        default=TaskStatus.QUEUED, nullable=False, index=True
     )
     #: Lower runs first among tasks that are ready at the same moment.
     priority: Mapped[int] = mapped_column(Integer, default=100, nullable=False)

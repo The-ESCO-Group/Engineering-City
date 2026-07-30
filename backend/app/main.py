@@ -6,6 +6,7 @@ instance and the entrypoint stays a one-liner.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from collections.abc import AsyncIterator
 
@@ -16,9 +17,14 @@ from app import CONTRACT_VERSION, __version__
 from app.agents.base.plugins import get_plugin_registry
 from app.api.errors import install_exception_handlers
 from app.api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
+from app.api.routes import auth as auth_routes
+from app.api.routes import files as file_routes
 from app.api.routes import health as health_routes
+from app.api.routes import projects as project_routes
+from app.core.bootstrap import bootstrap
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
+from app.orchestration.broadcast import get_broker
 
 logger = get_logger(__name__)
 
@@ -60,12 +66,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "report_providers": sorted(registry.report_providers),
         },
     )
+
+    # Bind the running loop so events recorded on worker threads and in sync
+    # request handlers can still reach WebSocket subscribers.
+    get_broker().bind_loop(asyncio.get_running_loop())
+
+    if app.state.run_bootstrap:
+        bootstrap(settings)
+
     yield
     logger.info("backend stopped")
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
-    """Build the ASGI application."""
+def create_app(settings: Settings | None = None, *, run_bootstrap: bool = True) -> FastAPI:
+    """Build the ASGI application.
+
+    ``run_bootstrap=False`` skips migrations and seeding, for tests that arrange
+    their own schema and fixtures.
+    """
     settings = settings or get_settings()
     configure_logging(level=settings.log_level, json_output=settings.log_json)
 
@@ -79,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/openapi.json",
     )
     app.state.settings = settings
+    app.state.run_bootstrap = run_bootstrap
 
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestContextMiddleware)
@@ -92,7 +111,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     install_exception_handlers(app)
-    app.include_router(health_routes.router, prefix=settings.api_prefix)
+
+    prefix = settings.api_prefix
+    app.include_router(health_routes.router, prefix=prefix)
+    app.include_router(auth_routes.router, prefix=prefix)
+    app.include_router(project_routes.router, prefix=prefix)
+    app.include_router(file_routes.router, prefix=prefix)
 
     return app
 

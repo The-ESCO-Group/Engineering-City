@@ -1,0 +1,6 @@
+Alarm Tag;Message;Severity;Group;Source Tag
+ALM_ESTOP;Emergency stop actuated;Critical;Safety;ESTOP_OK
+ALM_CV101_OL;CV101 motor overload;High;Conveyors;CV101_OL_TRIP
+ALM_CV102_OL;CV102 motor overload;High;Conveyors;CV102_OL_TRIP
+ALM_HOPPER_HIGH;Surge hopper level high;Medium;Process;HOPPER_LEVEL_PCT
+ALM_CV102_JAM;CV102 jam detected;High;Conveyors;CV102_JAM

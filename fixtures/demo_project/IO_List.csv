@@ -1,0 +1,15 @@
+# SYNTHETIC FIXTURE - Conveyor Line 3 I/O list. Invented data.
+Tag,Description,Type,Module,Address,Signal,Engineering Units
+ESTOP_OK,E-stop circuit healthy,DI,DI_01,DI_01:I.Data.0,24VDC,
+GRD_DR_CLSD,Guard door closed,DI,DI_01,DI_01:I.Data.1,24VDC,
+CV101_OL_TRIP,CV101 overload tripped,DI,DI_01,DI_01:I.Data.2,24VDC,
+CV102_OL_TRIP,CV102 overload tripped,DI,DI_01,DI_01:I.Data.3,24VDC,
+CV103_VFD_FLT,CV103 VFD fault,DI,DI_01,DI_01:I.Data.4,24VDC,
+CV101_Start_PB,CV101 start pushbutton,DI,DI_01,DI_01:I.Data.5,24VDC,
+CV101_Stop_PB,CV101 stop pushbutton (NC),DI,DI_01,DI_01:I.Data.6,24VDC,
+CV101_RUN_CMD,CV101 run command,DO,DO_01,DO_01:O.Data.0,24VDC,
+CV102_RUN_CMD,CV102 run command,DO,DO_01,DO_01:O.Data.1,24VDC,
+CV103_RUN_CMD,CV103 run command,DO,DO_01,DO_01:O.Data.2,24VDC,
+AIR_PRESS_PSI,Line 3 header air pressure,AI,AI_01,AI_01:I.Ch0Data,4-20mA,psi
+HOPPER_LEVEL_PCT,Surge hopper level,AI,AI_01,AI_01:I.Ch1Data,4-20mA,%
+CV102_JAM,CV102 jam photo-eye blocked,DI,DI_01,DI_01:I.Data.7,24VDC,

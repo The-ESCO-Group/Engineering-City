@@ -45,9 +45,9 @@ class Approval(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         GUID, ForeignKey("reports.id", ondelete="CASCADE"), nullable=True
     )
 
-    kind: Mapped[ApprovalKind] = mapped_column(String(48), nullable=False, index=True)
+    kind: Mapped[ApprovalKind] = mapped_column(nullable=False, index=True)
     status: Mapped[ApprovalStatus] = mapped_column(
-        String(20), default=ApprovalStatus.PENDING, nullable=False, index=True
+        default=ApprovalStatus.PENDING, nullable=False, index=True
     )
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)

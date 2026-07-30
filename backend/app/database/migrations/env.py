@@ -1,0 +1,100 @@
+"""Alembic environment.
+
+The URL comes from application settings rather than ``alembic.ini``, so
+migrations cannot be run against a different database than the app uses and no
+connection string is ever committed.
+
+``render_as_batch`` is enabled because SQLite cannot ``ALTER TABLE DROP COLUMN``
+or alter a constraint; batch mode rewrites the table instead, which is what
+makes demonstration-mode upgrades work at all.
+"""
+
+from __future__ import annotations
+
+from logging.config import fileConfig
+
+from alembic import context
+from sqlalchemy import engine_from_config, pool
+
+from app.core.config import get_settings
+
+# Importing the package registers every table on Base.metadata, which is what
+# autogenerate diffs against.
+from app.models import Base
+
+config = context.config
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
+
+target_metadata = Base.metadata
+
+settings = get_settings()
+config.set_main_option("sqlalchemy.url", settings.database_url)
+
+
+def _include_object(
+    obj: object, name: str | None, type_: str, reflected: bool, compare_to: object
+) -> bool:
+    """Keep autogenerate focused on the application's own tables."""
+    if type_ == "table" and name is not None and name.startswith("sqlite_"):
+        return False
+    return True
+
+
+def run_migrations_offline() -> None:
+    """Emit SQL to stdout without connecting (``alembic upgrade head --sql``)."""
+    context.configure(
+        url=settings.database_url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+        render_as_batch=True,
+        compare_type=True,
+        compare_server_default=True,
+        include_object=_include_object,
+        user_module_prefix="app.database.types.",
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    """Run migrations against a live connection."""
+    section = config.get_section(config.config_ini_section, {})
+    section["sqlalchemy.url"] = settings.database_url
+
+    connectable = engine_from_config(section, prefix="sqlalchemy.", poolclass=pool.NullPool)
+
+    with connectable.connect() as connection:
+        if connection.dialect.name == "sqlite":
+            # SQLite disables foreign keys per connection; without this a
+            # migration could leave orphaned rows behind.
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            render_as_batch=True,
+            compare_type=True,
+            compare_server_default=True,
+            include_object=_include_object,
+            user_module_prefix="app.database.types.",
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+
+        # SQLite reports non-transactional DDL, so Alembic's begin_transaction()
+        # is a no-op there and the INSERT into alembic_version is left
+        # uncommitted -- SQLAlchemy 2.0 connections do not autocommit. Without
+        # this the schema is created but the revision is never stamped, and the
+        # next `alembic upgrade` believes it has nothing to do.
+        connection.commit()
+
+    connectable.dispose()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()

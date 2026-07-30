@@ -4,8 +4,9 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 `backend/app/agents/{base,review}`, `backend/tests`, `contracts`, `infra/backend`,
 `scripts/backend`, `docs/backend`.
 
-**Last updated:** Milestone 0
+**Last updated:** Milestone 1
 **Contract version:** `1.0.0`
+**Tests:** 401 passing · ruff, mypy clean · 42/42 live-process smoke checks
 
 ---
 
@@ -14,8 +15,8 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 | Milestone | Scope | State |
 | --- | --- | --- |
 | 0 | Foundation, core schemas, contracts, health endpoint | ✅ complete |
-| 1 | Persistence, authentication, audit, storage | ⏳ next |
-| 2 | Parsers and normalised evidence graph | ⏳ |
+| 1 | Persistence, authentication, audit, storage | ✅ complete |
+| 2 | Parsers and normalised evidence graph | ⏳ next |
 | 3 | Workflow engine and WebSockets | ⏳ |
 | 4 | Four review agents and provider adapters | ⏳ |
 | 5 | Full API and backend integration tests | ⏳ |
@@ -25,7 +26,8 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 
 | Milestone | Commit | Message |
 | --- | --- | --- |
-| 0 | _(see below)_ | `foundation: establish backend and contracts v1` |
+| 0 | `08c3cfb` | `foundation: establish backend and contracts v1` |
+| 1 | _(this commit)_ | `persistence: authentication, audit, storage and safe intake` |
 
 ---
 
@@ -62,6 +64,81 @@ below.
 
 ---
 
+## Milestone 1 — what exists now
+
+**Authentication** — Argon2id password hashing, HS256 access tokens with a `jti`
+so `POST /api/auth/logout` genuinely revokes rather than gesturing. Login is
+local only; no outbound call, no external identity provider. Failure messages are
+identical for unknown-email, wrong-password and disabled-account, and an unknown
+account still pays the cost of a real hash verification so response timing cannot
+enumerate addresses.
+
+**Authorisation** — two layers, both required: a global role
+(`engineer`/`reviewer`/`administrator`) and per-project membership. Holding the
+global `engineer` role does **not** grant access to another engineer's project.
+Recording an approval needs both the global `reviewer` role and a reviewing role
+on the project. Administrators are treated as owners everywhere so an orphaned
+project can be recovered.
+
+**Audit** — append-only, written in the *same transaction* as the change it
+describes, so an operation that rolls back never leaves an entry claiming it
+happened. Credential-shaped keys in `details` are redacted. Covers project
+creation/update/archive, file upload/rejection/deletion, login success **and
+failure**, logout, user creation and permission changes.
+
+**Storage** — `data/projects/{id}/{originals,derived,reports}/`. Originals are
+written once, sealed read-only, and never reopened for writing, so an evidence
+anchor taken today still refers to the same bytes tomorrow. SHA-256 on every
+blob. Deleting a file removes the bytes but keeps the row, so a citation resolves
+to a tombstone instead of silently disappearing.
+
+**Safe intake** — allowlist by content *and* extension. Refuses executables by
+magic bytes regardless of filename (`MZ`, ELF, Mach-O, shebang, OLE), refuses
+dangerous extensions, and refuses `.ACD`/`.doc`/`.xls` with a message that says
+why and what to upload instead. A content/extension mismatch is accepted, routed
+by content, and **warned about** rather than silently corrected.
+
+**Safe archives** — the whole central directory is validated before a single byte
+is written: entry count, total uncompressed size, compression ratio (zip-bomb),
+and every member name proved containable. Zip Slip, backslash traversal, absolute
+paths and drive prefixes are all refused; symlink and device members are skipped
+with a reason; a member that understates its size is caught mid-copy. A rejected
+archive leaves nothing behind, and the scratch tree is cleaned up unconditionally.
+
+**Safe XML** — one hardened entry point (`app.security.xml_safety`). DTDs and
+entities are disabled, so XXE and billion-laughs are refused; nesting depth and
+document size are bounded. An XML upload carrying a DOCTYPE is refused at intake
+with an explanation rather than failing opaquely later.
+
+**Migrations** — Alembic, one revision, round-trips clean (`upgrade` → `check` →
+`downgrade base` → `upgrade`) and `alembic check` confirms the migration matches
+the ORM. `render_as_batch` is on so SQLite can alter tables at all.
+
+### Defects found and fixed by an adversarial review of this milestone
+
+Worth recording because all of them passed a fully green test suite first:
+
+* **Enum columns did not round-trip.** `Mapped[ProjectStatus]` with `String(32)`
+  stores correctly but loads back as a plain `str`, so
+  `status is ProjectStatus.ARCHIVED` was `False` for every persisted row. This
+  made archived projects still accept uploads, and made `DELETE /api/files/{id}`
+  return 500 *after* unlinking the blob. Fixed with a `StrEnumType` decorator
+  registered in `Base.type_annotation_map` (no DDL change, no migration), plus a
+  structural test that fails for any future enum column that forgets it.
+* **The seeded administrator could never sign in.** `admin@esco.local` — and
+  every `.local`/`.test`/`.invalid` address — is rejected by `EmailStr`. Seeded
+  accounts moved to `esco.internal`, and `Settings` now refuses to start with a
+  bootstrap email the login endpoint would reject.
+* **Failed logins were rolled back.** The audit entry was added and then the route
+  only committed on success, discarding the entire record of refused sign-ins.
+* **PK bytes were classified by extension.** An archive named `.csv` was routed to
+  a text parser and its contents silently omitted from the review.
+* Archive fixes: integrity check ran before the zip-bomb limits; a traversing
+  member left already-written files behind; over-nesting was reported as a
+  traversal attempt.
+
+---
+
 ## Running the backend
 
 ```bash
@@ -78,6 +155,14 @@ cp .env.example .env                           # optional; defaults work
 Interactive docs: <http://127.0.0.1:8000/docs>
 Health: <http://127.0.0.1:8000/api/health>
 
+Defaults with no configuration: SQLite at `data/esco_city.sqlite3`, MockProvider,
+no network access, no external service. The schema is migrated and an
+administrator is seeded on first boot.
+
+Sign in with `admin@esco.internal` / `esco-demo-admin`. In demo mode
+`engineer@esco.internal` / `esco-demo-engineer` and `reviewer@esco.internal` /
+`esco-demo-reviewer` are seeded too, so each role can be exercised.
+
 Checks:
 
 ```bash
@@ -86,10 +171,22 @@ Checks:
 .venv/Scripts/python -m mypy
 .venv/Scripts/python -m pytest
 .venv/Scripts/python scripts/backend/generate_contracts.py --check
+.venv/Scripts/python scripts/backend/smoke.py          # boots a real server
 ```
 
-Defaults with no configuration: SQLite at `data/esco_city.sqlite3`, MockProvider,
-no network access, no external service.
+`smoke.py` starts uvicorn against a throwaway database, signs in, creates a
+project, uploads the whole synthetic fixture set, checks the rejection paths,
+downloads and deletes a file, and archives the project — 42 assertions against a
+live process rather than a TestClient.
+
+Fixtures and migrations:
+
+```bash
+.venv/Scripts/python scripts/backend/make_fixtures.py  # regenerate fixtures
+.venv/Scripts/python -m alembic upgrade head
+.venv/Scripts/python -m alembic check                  # models match migration?
+.venv/Scripts/python -m alembic revision --autogenerate -m "describe it"
+```
 
 ---
 
@@ -121,16 +218,45 @@ design changes, releasing safety recommendations without human approval).
 
 ## Available endpoints
 
-As of Milestone 0:
+Every endpoint below is implemented, tested and exercised against a live process
+by `scripts/backend/smoke.py`. Nothing is listed here until it works.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Liveness, contract version, enabled providers, capabilities |
 | `GET` | `/api/system/capabilities` | Optional plugin capabilities and why any are missing |
+| `POST` | `/api/auth/login` | Sign in; returns a token and sets an httpOnly cookie |
+| `POST` | `/api/auth/logout` | Revoke the presented token |
+| `GET` | `/api/auth/me` | Current user and their per-project roles |
+| `POST` | `/api/auth/users` | Create a user (administrator only) |
+| `GET` | `/api/auth/users` | List users (administrator only) |
+| `POST` | `/api/projects` | Create a project |
+| `GET` | `/api/projects` | List projects the caller may see (paginated) |
+| `GET` | `/api/projects/{project_id}` | Detail with membership and roll-up counts |
+| `PATCH` | `/api/projects/{project_id}` | Update metadata (**not** status) |
+| `POST` | `/api/projects/{project_id}/archive` | Archive; read-only from then on |
+| `GET` | `/api/projects/{project_id}/members` | List members |
+| `POST` | `/api/projects/{project_id}/members` | Add a member or change their role |
+| `POST` | `/api/projects/{project_id}/files` | Upload one or more files |
+| `GET` | `/api/projects/{project_id}/files` | List a project's files |
+| `GET` | `/api/files/{file_id}` | File metadata, artifacts, anchor count |
+| `GET` | `/api/files/{file_id}/content` | Download the stored original |
+| `DELETE` | `/api/files/{file_id}` | Delete a file (row retained as a tombstone) |
 
-The full endpoint set (auth, projects, files, workflow, agents, findings,
-approvals, reports, events, WebSocket) lands across Milestones 1–5. This table
-is updated as each ships — an endpoint is listed here only once it works.
+**Auth transport** — send `Authorization: Bearer <token>` *or* rely on the
+`esco_session` httpOnly cookie that login sets. Both work; the browser frontend
+should use the cookie, the desktop shell the header.
+
+**Upload semantics** — `POST .../files` takes a multipart `files` list plus an
+optional `document_role`. Each file is accepted or rejected **independently**:
+the response is `201` with `accepted_count`, `rejected_count` and a per-file
+result carrying `rejection_code` and `rejection_reason`. Uploading nine good
+files and one executable keeps the nine. An uploaded ZIP is expanded and each
+usable member appears in `extracted` as a file in its own right, with
+`parent_file_id` and `archive_member_path` set.
+
+Workflow, agents, findings, approvals, reports and the WebSocket land in
+Milestones 3–5.
 
 ---
 
@@ -215,12 +341,27 @@ startup.
 
 ## Known limitations
 
-* **Milestone 0 only.** Only the health endpoints are implemented. No auth, no
-  file upload, no parsers, no workflow, no agents yet.
-* **No Alembic migrations yet** — the schema is currently created from
-  `Base.metadata`. Migrations land in Milestone 1; until then a schema change
-  means deleting your local `data/esco_city.sqlite3`.
+* **No parsers yet.** Files are stored, hashed, classified by kind and role, and
+  safely expanded from archives — but nothing reads their *contents*. Parsers and
+  evidence anchors land in Milestone 2, so `GET /api/files/{id}` currently
+  reports zero artifacts and zero anchors for every file. That is accurate, not a
+  placeholder.
+* **No workflow, agents, findings, approvals or reports yet** (Milestones 3–5).
 * **No live WebSocket.** Contract is frozen; transport lands in Milestone 3.
+  Events *are* already persisted (`project.created`, `file.uploaded`,
+  `file.deleted`) with gap-free per-project `seq`, so replay will have real
+  history to serve.
+* **Demo passwords are in the repository.** `esco-demo-admin` and the seeded demo
+  accounts exist so the offline demonstration works out of the box.
+  `ESCO_ENVIRONMENT=production` refuses to start until `ESCO_JWT_SECRET` and
+  `ESCO_BOOTSTRAP_ADMIN_PASSWORD` are set, and `ESCO_BOOTSTRAP_DEMO_USERS=false`
+  turns the demo accounts off.
+* **Read-only sealing is best-effort.** Originals are chmod'ed read-only; some
+  network and container filesystems ignore that, in which case immutability is a
+  convention rather than an enforced property. A warning is logged when the chmod
+  fails.
+* **Per-project byte quota counts only live files.** Deleted rows are excluded, so
+  reclaiming space works, but the derived/ tree is not counted against the quota.
 * **PostgreSQL is untested in CI.** The models use portable types and the intent
   is full support, but only SQLite is exercised so far.
 * **`.ACD` files are not supported and never will be.** The format is
@@ -252,3 +393,19 @@ Nothing blocking yet. Noted for when the relevant milestone lands:
 5. **Health endpoint for the desktop shell** — `GET /api/health` returns
    `contract_version`. Consider failing fast in the client if it does not match
    the version the generated client was built from.
+6. **Seeded demo credentials** — `admin@esco.internal` / `esco-demo-admin`. Note
+   the domain: `.local`, `.test` and `.invalid` are reserved special-use domains
+   and `EmailStr` rejects them, so don't use them in frontend fixtures either.
+7. **Upload is partially-accepting by design.** `POST .../files` returns `201`
+   even when some files were refused. Read `results[].accepted` per file and show
+   `rejection_reason` — it is written to be shown to an engineer verbatim. Do not
+   treat a non-zero `rejected_count` as a failed request.
+8. **Deleted files keep their row.** `GET /api/files/{id}` still returns `200`
+   with `status: "deleted"`; only `/content` becomes `404`. Render it as a
+   tombstone so a citation that pointed at it does not silently vanish.
+9. **Synthetic fixtures are available** for frontend work:
+   `fixtures/demo_project/` holds a full invented project (L5X, interlock
+   workbook, I/O list, functional description, PDFs including one with no text
+   layer, HMI XML, and a ZIP package). `fixtures/README.md` documents the ground
+   truth — exactly which discrepancies a correct review should and should not
+   report. Please add only synthetic data; no ESCO customer content in the repo.

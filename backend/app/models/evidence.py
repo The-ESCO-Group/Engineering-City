@@ -54,9 +54,9 @@ class EvidenceAnchor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         GUID, ForeignKey("parsed_artifacts.id", ondelete="SET NULL"), nullable=True
     )
 
-    anchor_type: Mapped[AnchorType] = mapped_column(String(40), nullable=False)
+    anchor_type: Mapped[AnchorType] = mapped_column(nullable=False)
     evidence_kind: Mapped[EvidenceKind] = mapped_column(
-        String(32), default=EvidenceKind.DIRECT, nullable=False, index=True
+        default=EvidenceKind.DIRECT, nullable=False, index=True
     )
 
     #: Short label naming the source, e.g. the filename or sheet name.

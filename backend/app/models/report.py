@@ -42,9 +42,7 @@ class Report(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     provider_version: Mapped[str] = mapped_column(String(40), default="", nullable=False)
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[ReportStatus] = mapped_column(
-        String(20), default=ReportStatus.DRAFT, nullable=False
-    )
+    status: Mapped[ReportStatus] = mapped_column(default=ReportStatus.DRAFT, nullable=False)
     #: Relative to the project directory; never an absolute path.
     relative_path: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
     media_type: Mapped[str] = mapped_column(String(160), default="", nullable=False)

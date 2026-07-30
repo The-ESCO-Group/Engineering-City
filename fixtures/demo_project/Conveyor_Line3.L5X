@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<RSLogix5000Content SchemaRevision="1.0" SoftwareRevision="32.00"
+    TargetName="Conveyor_Line3" TargetType="Controller" ContainsContext="false"
+    ExportDate="Mon Jan 06 09:14:22 2025" ExportOptions="References DecoratedData Context">
+<Controller Use="Target" Name="Conveyor_Line3" ProcessorType="1756-L83E"
+    MajorRev="32" MinorRev="11" TimeSlice="20"
+    ProjectCreationDate="Mon Nov 04 08:00:00 2024"
+    LastModifiedDate="Mon Jan 06 09:12:04 2025">
+  <Description><![CDATA[SYNTHETIC FIXTURE - Conveyor Line 3. Not a real project.]]></Description>
+
+  <DataTypes Use="Context">
+    <DataType Name="ConveyorStatus" Family="NoFamily" Class="User">
+      <Description><![CDATA[Per-conveyor status word.]]></Description>
+      <Members>
+        <Member Name="Running" DataType="BOOL" Dimension="0" Radix="Decimal"
+            Hidden="false" ExternalAccess="Read/Write"/>
+        <Member Name="Faulted" DataType="BOOL" Dimension="0" Radix="Decimal"
+            Hidden="false" ExternalAccess="Read/Write"/>
+        <Member Name="Interlocked" DataType="BOOL" Dimension="0" Radix="Decimal"
+            Hidden="false" ExternalAccess="Read/Write"/>
+        <Member Name="SpeedFeedback" DataType="REAL" Dimension="0" Radix="Float"
+            Hidden="false" ExternalAccess="Read/Write"/>
+      </Members>
+    </DataType>
+  </DataTypes>
+
+  <Modules Use="Context">
+    <Module Name="Local" CatalogNumber="1756-L83E" Vendor="1" ProductType="14"
+        ProductCode="168" Major="32" Minor="11" ParentModule="Local"
+        ParentModPortId="1" Inhibited="false" MajorFault="true"/>
+    <Module Name="DI_01" CatalogNumber="1756-IB16" Vendor="1" ProductType="7"
+        ProductCode="4" Major="3" Minor="1" ParentModule="Local"
+        ParentModPortId="1" Inhibited="false" MajorFault="false">
+      <Description><![CDATA[Digital input card - line 3 safety and status inputs.]]></Description>
+    </Module>
+    <Module Name="DO_01" CatalogNumber="1756-OB16E" Vendor="1" ProductType="7"
+        ProductCode="5" Major="3" Minor="1" ParentModule="Local"
+        ParentModPortId="1" Inhibited="false" MajorFault="false">
+      <Description><![CDATA[Digital output card - conveyor run commands.]]></Description>
+    </Module>
+    <Module Name="AI_01" CatalogNumber="1756-IF8" Vendor="1" ProductType="10"
+        ProductCode="20" Major="3" Minor="1" ParentModule="Local"
+        ParentModPortId="1" Inhibited="false" MajorFault="false">
+      <Description><![CDATA[Analog input card - air pressure and hopper level.]]></Description>
+    </Module>
+  </Modules>
+
+  <AddOnInstructionDefinitions Use="Context">
+    <AddOnInstructionDefinition Name="MotorStarter" Revision="1.2"
+        RevisionExtension="a" ExecutePrescan="false" ExecutePostscan="false"
+        ExecuteEnableInFalse="false" CreatedDate="2024-11-04T08:10:00.000Z"
+        SoftwareRevision="v32.00">
+      <Description><![CDATA[Seals in a motor run command while all permissives hold.]]></Description>
+      <Parameters>
+        <Parameter Name="EnableIn" TagType="Base" DataType="BOOL" Usage="Input"
+            Radix="Decimal" Required="false" Visible="false" ExternalAccess="Read Only"/>
+        <Parameter Name="EnableOut" TagType="Base" DataType="BOOL" Usage="Output"
+            Radix="Decimal" Required="false" Visible="false" ExternalAccess="Read Only"/>
+        <Parameter Name="StartCmd" TagType="Base" DataType="BOOL" Usage="Input"
+            Radix="Decimal" Required="true" Visible="true" ExternalAccess="Read/Write"/>
+        <Parameter Name="StopCmd" TagType="Base" DataType="BOOL" Usage="Input"
+            Radix="Decimal" Required="true" Visible="true" ExternalAccess="Read/Write"/>
+        <Parameter Name="Permissive" TagType="Base" DataType="BOOL" Usage="Input"
+            Radix="Decimal" Required="true" Visible="true" ExternalAccess="Read/Write"/>
+        <Parameter Name="RunOut" TagType="Base" DataType="BOOL" Usage="Output"
+            Radix="Decimal" Required="true" Visible="true" ExternalAccess="Read/Write"/>
+      </Parameters>
+      <Routines>
+        <Routine Name="Logic" Type="RLL">
+          <RLLContent>
+            <Rung Number="0" Type="N">
+              <Comment><![CDATA[Seal-in with permissive break.]]></Comment>
+              <Text><![CDATA[XIC(StopCmd)XIC(Permissive)[XIC(StartCmd),XIC(RunOut)]OTE(RunOut);]]></Text>
+            </Rung>
+          </RLLContent>
+        </Routine>
+      </Routines>
+    </AddOnInstructionDefinition>
+  </AddOnInstructionDefinitions>
+
+  <Tags Use="Context">
+    <Tag Name="ESTOP_OK" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Emergency stop circuit healthy. De-energises on trip.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="CV101_OL_TRIP" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV101 motor overload relay tripped.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="CV102_OL_TRIP" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV102 motor overload relay tripped.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="GRD_DR_CLSD" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Guard door closed and latched.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="AIR_PRESS_PSI" TagType="Base" DataType="REAL" Radix="Float"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Plant air pressure at the line 3 header, psi.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="REAL" Radix="Float" Value="82.5"/></Data>
+    </Tag>
+    <Tag Name="CV103_VFD_FLT" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV103 variable frequency drive fault contact.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="HOPPER_LEVEL_PCT" TagType="Base" DataType="REAL" Radix="Float"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Surge hopper level, percent of full.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="REAL" Radix="Float" Value="45.0"/></Data>
+    </Tag>
+    <Tag Name="LINE_PERMISSIVE" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Master permissive for all line 3 conveyors.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="CV101_Status" TagType="Base" DataType="ConveyorStatus"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV101 status word.]]></Description>
+    </Tag>
+    <Tag Name="CV102_Status" TagType="Base" DataType="ConveyorStatus"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV102 status word.]]></Description>
+    </Tag>
+    <Tag Name="CV103_Status" TagType="Base" DataType="ConveyorStatus"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV103 status word.]]></Description>
+    </Tag>
+    <Tag Name="ALM_ESTOP" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Alarm: emergency stop actuated.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="ALM_CV101_OL" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Alarm: CV101 motor overload.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+  </Tags>
+
+  <Programs Use="Context">
+    <Program Name="MainProgram" TestEdits="false" MainRoutineName="MainRoutine"
+        Disabled="false" UseAsFolder="false">
+      <Description><![CDATA[Line 3 control.]]></Description>
+      <Tags>
+        <Tag Name="ModeSelect" TagType="Base" DataType="DINT" Radix="Decimal"
+            Constant="false" ExternalAccess="Read/Write">
+          <Description><![CDATA[0 = Off, 1 = Manual, 2 = Auto.]]></Description>
+          <Data Format="Decorated"><DataValue DataType="DINT" Radix="Decimal" Value="0"/></Data>
+        </Tag>
+        <Tag Name="AutoMode" TagType="Base" DataType="BOOL" Radix="Decimal"
+            Constant="false" ExternalAccess="Read/Write">
+          <Description><![CDATA[Auto mode active.]]></Description>
+          <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+        </Tag>
+        <Tag Name="ManualMode" TagType="Base" DataType="BOOL" Radix="Decimal"
+            Constant="false" ExternalAccess="Read/Write">
+          <Description><![CDATA[Manual mode active.]]></Description>
+          <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+        </Tag>
+        <Tag Name="CV101_Start_PB" TagType="Base" DataType="BOOL" Radix="Decimal"
+            Constant="false" ExternalAccess="Read/Write">
+          <Description><![CDATA[CV101 start pushbutton.]]></Description>
+          <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+        </Tag>
+        <Tag Name="CV101_Stop_PB" TagType="Base" DataType="BOOL" Radix="Decimal"
+            Constant="false" ExternalAccess="Read/Write">
+          <Description><![CDATA[CV101 stop pushbutton, normally closed.]]></Description>
+          <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="1"/></Data>
+        </Tag>
+        <Tag Name="CV101_Starter" TagType="Base" DataType="MotorStarter"
+            Constant="false" ExternalAccess="Read/Write"/>
+      </Tags>
+      <Routines>
+        <Routine Name="MainRoutine" Type="RLL">
+          <Description><![CDATA[Scheduler.]]></Description>
+          <RLLContent>
+            <Rung Number="0" Type="N">
+              <Comment><![CDATA[Evaluate mode selection first.]]></Comment>
+              <Text><![CDATA[JSR(Mode_Logic,0);]]></Text>
+            </Rung>
+            <Rung Number="1" Type="N">
+              <Comment><![CDATA[Then interlocks, which gate every run command.]]></Comment>
+              <Text><![CDATA[JSR(Conveyor_Interlocks,0);]]></Text>
+            </Rung>
+            <Rung Number="2" Type="N">
+              <Comment><![CDATA[Then the conveyor run logic.]]></Comment>
+              <Text><![CDATA[JSR(Conveyor_Control,0);]]></Text>
+            </Rung>
+            <Rung Number="3" Type="N">
+              <Comment><![CDATA[Alarms last so they reflect this scan.]]></Comment>
+              <Text><![CDATA[JSR(Alarm_Logic,0);]]></Text>
+            </Rung>
+          </RLLContent>
+        </Routine>
+
+        <Routine Name="Mode_Logic" Type="RLL">
+          <Description><![CDATA[Operating mode selection.]]></Description>
+          <RLLContent>
+            <Rung Number="0" Type="N">
+              <Comment><![CDATA[Manual mode when the selector is in position 1.]]></Comment>
+              <Text><![CDATA[EQU(ModeSelect,1)OTE(ManualMode);]]></Text>
+            </Rung>
+            <Rung Number="1" Type="N">
+              <Comment><![CDATA[Auto mode when the selector is in position 2.]]></Comment>
+              <Text><![CDATA[EQU(ModeSelect,2)OTE(AutoMode);]]></Text>
+            </Rung>
+          </RLLContent>
+        </Routine>
+
+        <Routine Name="Conveyor_Interlocks" Type="RLL">
+          <Description><![CDATA[Line 3 interlocks. Master permissive is built here.]]></Description>
+          <RLLContent>
+            <Rung Number="0" Type="N">
+              <Comment><![CDATA[ILK-001 Emergency stop. ESTOP_OK de-energises on trip,
+so the permissive drops on loss of the circuit. Fail-safe.]]></Comment>
+              <Text><![CDATA[XIC(ESTOP_OK)XIC(GRD_DR_CLSD)XIO(CV101_OL_TRIP)XIO(CV102_OL_TRIP)GRT(AIR_PRESS_PSI,40.0)OTE(LINE_PERMISSIVE);]]></Text>
+            </Rung>
+            <Rung Number="1" Type="N">
+              <Comment><![CDATA[ILK-002 CV101 overload latches the conveyor interlocked bit.]]></Comment>
+              <Text><![CDATA[XIC(CV101_OL_TRIP)OTL(CV101_Status.Interlocked);]]></Text>
+            </Rung>
+            <Rung Number="2" Type="N">
+              <Comment><![CDATA[ILK-002 CV102 overload latches the conveyor interlocked bit.]]></Comment>
+              <Text><![CDATA[XIC(CV102_OL_TRIP)OTL(CV102_Status.Interlocked);]]></Text>
+            </Rung>
+            <Rung Number="3" Type="N">
+              <Comment><![CDATA[CV103 drive fault stops CV103. No entry for this exists in the
+interlock schedule.]]></Comment>
+              <Text><![CDATA[XIC(CV103_VFD_FLT)OTL(CV103_Status.Interlocked);]]></Text>
+            </Rung>
+            <Rung Number="4" Type="N">
+              <Comment><![CDATA[Interlock reset requires manual mode and no active trip.]]></Comment>
+              <Text><![CDATA[XIC(ManualMode)XIO(CV101_OL_TRIP)XIO(CV102_OL_TRIP)OTU(CV101_Status.Interlocked);]]></Text>
+            </Rung>
+          </RLLContent>
+        </Routine>
+
+        <Routine Name="Conveyor_Control" Type="RLL">
+          <Description><![CDATA[Run commands for CV101 to CV103.]]></Description>
+          <RLLContent>
+            <Rung Number="0" Type="N">
+              <Comment><![CDATA[CV101 run via the MotorStarter AOI, gated by the permissive.]]></Comment>
+              <Text><![CDATA[MotorStarter(CV101_Starter,CV101_Start_PB,CV101_Stop_PB,LINE_PERMISSIVE,CV101_Status.Running);]]></Text>
+            </Rung>
+            <Rung Number="1" Type="N">
+              <Comment><![CDATA[CV102 follows CV101 in auto.]]></Comment>
+              <Text><![CDATA[XIC(AutoMode)XIC(CV101_Status.Running)XIC(LINE_PERMISSIVE)XIO(CV102_Status.Interlocked)OTE(CV102_Status.Running);]]></Text>
+            </Rung>
+            <Rung Number="2" Type="N">
+              <Comment><![CDATA[CV103 discharge conveyor. NOTE: no LINE_PERMISSIVE contact
+on this rung.]]></Comment>
+              <Text><![CDATA[XIC(AutoMode)XIC(CV102_Status.Running)XIO(CV103_Status.Interlocked)OTE(CV103_Status.Running);]]></Text>
+            </Rung>
+            <Rung Number="3" Type="N">
+              <Comment><![CDATA[Duplicate of rung 1 left in place during commissioning.]]></Comment>
+              <Text><![CDATA[XIC(AutoMode)XIC(CV101_Status.Running)XIC(LINE_PERMISSIVE)XIO(CV102_Status.Interlocked)OTE(CV102_Status.Running);]]></Text>
+            </Rung>
+          </RLLContent>
+        </Routine>
+
+        <Routine Name="Alarm_Logic" Type="RLL">
+          <Description><![CDATA[Alarm bits for the HMI.]]></Description>
+          <RLLContent>
+            <Rung Number="0" Type="N">
+              <Comment><![CDATA[Emergency stop alarm.]]></Comment>
+              <Text><![CDATA[XIO(ESTOP_OK)OTE(ALM_ESTOP);]]></Text>
+            </Rung>
+            <Rung Number="1" Type="N">
+              <Comment><![CDATA[CV101 overload alarm.]]></Comment>
+              <Text><![CDATA[XIC(CV101_OL_TRIP)OTE(ALM_CV101_OL);]]></Text>
+            </Rung>
+            <Rung Number="2" Type="N">
+              <Comment><![CDATA[Hopper level high alarm. ALM_HOPPER_HIGH is referenced here
+but is not declared anywhere in this export.]]></Comment>
+              <Text><![CDATA[GRT(HOPPER_LEVEL_PCT,90.0)OTE(ALM_HOPPER_HIGH);]]></Text>
+            </Rung>
+          </RLLContent>
+        </Routine>
+      </Routines>
+    </Program>
+  </Programs>
+
+  <Tasks Use="Context">
+    <Task Name="MainTask" Type="CONTINUOUS" Priority="10" Watchdog="500"
+        DisableUpdateOutputs="false" InhibitTask="false">
+      <Description><![CDATA[Continuous task for line 3.]]></Description>
+      <ScheduledPrograms>
+        <ScheduledProgram Name="MainProgram"/>
+      </ScheduledPrograms>
+    </Task>
+  </Tasks>
+</Controller>
+</RSLogix5000Content>

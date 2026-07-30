@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.enums import EventType
@@ -40,7 +40,7 @@ class Event(UUIDPrimaryKeyMixin, Base):
     project_id: Mapped[uuid.UUID] = mapped_column(
         GUID, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    event_type: Mapped[EventType] = mapped_column(String(48), nullable=False)
+    event_type: Mapped[EventType] = mapped_column(nullable=False)
 
     agent_id: Mapped[uuid.UUID | None] = mapped_column(GUID, nullable=True)
     task_id: Mapped[uuid.UUID | None] = mapped_column(GUID, nullable=True)

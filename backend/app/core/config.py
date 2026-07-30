@@ -14,7 +14,8 @@ import functools
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import EmailStr, Field, SecretStr, field_validator, model_validator
+from pydantic import ValidationError as PydanticValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.enums import ProviderKind
@@ -91,7 +92,7 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = False  # local http:// by default
 
     #: Seed an administrator on first boot so a fresh demo is usable.
-    bootstrap_admin_email: str = "admin@esco.local"
+    bootstrap_admin_email: str = "admin@esco.internal"
     bootstrap_admin_password: SecretStr = SecretStr("esco-demo-admin")
     bootstrap_demo_users: bool = True
 
@@ -153,6 +154,30 @@ class Settings(BaseSettings):
         """Allow ``ESCO_CORS_ORIGINS=a,b`` in addition to JSON lists."""
         if isinstance(value, str) and not value.strip().startswith("["):
             return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("bootstrap_admin_email", mode="after")
+    @classmethod
+    def _admin_email_must_be_loginable(cls, value: str) -> str:
+        """Refuse to seed an account the login endpoint would reject.
+
+        ``POST /api/auth/login`` validates ``email`` as an ``EmailStr``, and
+        ``email-validator`` rejects reserved special-use domains — ``.local``,
+        ``.test``, ``.localhost``, ``.invalid``. Seeding ``admin@esco.local``
+        therefore produced a fresh install with an administrator nobody could
+        ever sign in as. Applying the same check the endpoint applies turns that
+        into a startup error instead of an unusable account.
+        """
+        from pydantic import TypeAdapter
+
+        try:
+            TypeAdapter(EmailStr).validate_python(value)
+        except PydanticValidationError as exc:
+            raise ValueError(
+                f"ESCO_BOOTSTRAP_ADMIN_EMAIL={value!r} would be rejected by the "
+                f"login endpoint, so the seeded administrator could never sign "
+                f"in: {exc.errors()[0]['msg']}"
+            ) from exc
         return value
 
     @model_validator(mode="after")

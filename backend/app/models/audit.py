@@ -27,7 +27,7 @@ class AuditEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_audit_entries_action_created_at", "action", "created_at"),
     )
 
-    action: Mapped[AuditAction] = mapped_column(String(48), nullable=False, index=True)
+    action: Mapped[AuditAction] = mapped_column(nullable=False, index=True)
 
     #: The authenticated human, when there was one.
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(

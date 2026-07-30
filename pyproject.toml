@@ -101,6 +101,9 @@ ignore = [
 "backend/tests/**" = ["S105", "S106", "S311", "T20"]
 "backend/app/database/migrations/**" = ["I001", "E402"]
 "scripts/**" = ["T20"]
+# The synthetic L5X fixture embeds real instruction strings; reflowing them
+# would change the fixture the parser tests assert against.
+"scripts/backend/make_fixtures.py" = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
