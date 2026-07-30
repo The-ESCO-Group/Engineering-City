@@ -4,9 +4,9 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 `backend/app/agents/{base,review}`, `backend/tests`, `contracts`, `infra/backend`,
 `scripts/backend`, `docs/backend`.
 
-**Last updated:** Milestone 2
+**Last updated:** Milestone 4
 **Contract version:** `1.0.0`
-**Tests:** 789 passing · ruff, mypy clean · 42/42 live-process smoke checks
+**Tests:** 994 passing · ruff, mypy clean · 49/49 live-process smoke checks
 
 ---
 
@@ -17,9 +17,9 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 | 0 | Foundation, core schemas, contracts, health endpoint | ✅ complete |
 | 1 | Persistence, authentication, audit, storage | ✅ complete |
 | 2 | Parsers and normalised evidence graph | ✅ complete |
-| 3 | Workflow engine and WebSockets | ⏳ |
-| 4 | Four review agents and provider adapters | ⏳ |
-| 5 | Full API and backend integration tests | ⏳ |
+| 3 | Workflow engine and WebSockets | ✅ complete |
+| 4 | Four review agents and provider adapters | ✅ complete |
+| 5 | Full API and backend integration tests | 🔶 mostly done (findings/approvals/reports endpoints outstanding) |
 | 6 | Security review, documentation, handoff | ⏳ |
 
 ### Commits
@@ -28,7 +28,8 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 | --- | --- | --- |
 | 0 | `08c3cfb` | `foundation: establish backend and contracts v1` |
 | 1 | `c74b812` | `persistence: authentication, audit, storage and safe intake` |
-| 2 | _(this commit)_ | `parsers: seven file parsers and the cross-file evidence graph` |
+| 2 | `751ba54` | `parsers: seven file parsers and the cross-file evidence graph` |
+| 3+4 | _(this commit)_ | `workflow: persisted queue, live events and the four review agents` |
 
 ---
 
@@ -204,6 +205,100 @@ The graph had two of its own, found by running it over the full fixture set:
 members of a declared UDT (`CV101_Status.Running`) read as undeclared references,
 turning one genuine finding into seven false leads; and rows from a *hidden*
 worksheet were being treated as live requirements.
+
+---
+
+## Milestones 3 and 4 — what exists now
+
+**The queue is the database.** No Redis. A worker claims a task by writing a
+lease; if the process dies the lease expires and a sweep requeues it. At-least-
+once, so every handler is idempotent — `Task.idempotency_key` stops duplicate
+tasks and each handler converges rather than duplicating.
+
+**A run** is: intake → one parse task per file → evidence graph → the Project
+Manager Agent plans → the specialists it scheduled → senior review → the approval
+gate → delivery → finalise. The prelude is fixed because it is mechanical; the
+specialists are planned because which ones are worth running depends on what was
+actually uploaded.
+
+**Restart recovery.** A task left `running` by a killed worker returns to the
+queue rather than sitting there forever, and the attempt is not double-counted —
+a crash costs one attempt, not two.
+
+**Events** are persisted before broadcast, with a gap-free per-project `seq`.
+`GET /api/projects/{id}/events?since_seq=N` and
+`WS /ws/projects/{id}?since_seq=N` are interchangeable for catching up. The
+socket answers with a `hello` frame carrying `current_seq` and
+`replay_truncated`; when that is true the client must refetch over REST rather
+than assume it has a complete picture.
+
+**Providers.** `mock` (deterministic, offline, the default), `ollama` (local),
+`openai` and `anthropic`. The last two send project content off this machine, so
+they cannot even be *constructed* unless an administrator lists them in
+`ESCO_ENABLED_PROVIDERS` and supplies a credential. There is no fallback from a
+failing provider to another one.
+
+**The MockProvider is not a model and says so.** It is a fixed rule engine that
+restates what the evidence graph already established, every response carries a
+warning to that effect, and its confidence is capped. Nobody should be able to
+mistake a mock run for an engineering review.
+
+**The four agents.** Their permissions are narrow and enforced in code, not
+prompt wording:
+
+| Agent | May propose | Notably may **not** |
+| --- | --- | --- |
+| Project Manager | tasks, messages, blockers | create a finding — so it cannot draw a technical conclusion |
+| PLC Review | findings, recommendations, messages | claim anything about a running controller |
+| Interlock Review | findings, recommendations, approvals, messages | — |
+| Senior Review | review verdicts, approvals, messages | create a finding, or **raise** a confidence |
+
+**What the runner refuses**, before anything reaches the database: an action type
+outside the closed set; a payload that fails its model; a technical claim with no
+evidence anchor; an anchor id that does not belong to this project; a safety- or
+damage-related recommendation marked as not needing approval; a senior review
+that tries to raise confidence. Refusals are recorded on the run — what a model
+*tried* to do is part of the record.
+
+### The full review, over the synthetic project
+
+Every planted case in `fixtures/README.md` comes out right, on the MockProvider,
+with no network:
+
+| Case | Outcome |
+| --- | --- |
+| ILK-003 documented, wired, never implemented | **high**, approval raised, project halts at `awaiting_review` |
+| ILK-004 same interlock, different name | medium — not inflated, because it *is* implemented |
+| ILK-007 no tag, no threshold | documentation gap; no threshold invented |
+| `ALM_HOPPER_HIGH` undeclared | medium, cited to the exact rung |
+| Duplicate rung | low |
+| ILK-001, ILK-002, ILK-005 (correct) | **no findings** — no false positives |
+| `Scanned_Drawing.pdf` | reported as unreadable, never as reviewed |
+
+The project reaches `awaiting_review`, **not** `completed`, while that approval
+is outstanding.
+
+### Defects an adversarial review of this milestone found
+
+* **A failed dependency stalled a run forever.** The queue ignored
+  `TaskDependency.hard`, so one unreadable document left the graph task — and
+  everything behind it — queued permanently while the project still reported
+  itself `running`. No error, nothing to act on.
+* **Blocked tasks hid runnable ones.** The claim window was sized from `limit`,
+  so a run of dependency-blocked tasks starved the work behind them.
+* **The duplicate-enqueue recovery called `db.rollback()`**, discarding the
+  caller's whole transaction — inside `start_run` that is every task, dependency,
+  audit row and event created so far.
+* **Handlers were only registered when an in-process worker was enabled**, so an
+  API process paired with an external worker reported every task kind as
+  unhandled.
+* **The WebSocket used the process-global settings**, rejecting tokens the REST
+  API had just issued whenever the app was built with explicit settings.
+* **The graph fabricated anchor keys no parser emits** (`range:Interlocks!row5`
+  against the parser's `range:Interlocks!A5:H5`). Nothing errored — the Interlock
+  Review Agent simply had nothing to cite and produced no discrepancies at all.
+  There is now a test asserting that *every* citation the graph emits resolves to
+  a real anchor, for every file type.
 
 ---
 

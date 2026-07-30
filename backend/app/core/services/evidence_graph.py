@@ -561,11 +561,17 @@ class _Builder:
                     for name in ("trip_tag", "trip_condition", "action", "failsafe")
                     if not getattr(requirement, name)
                 ]
+                # The key the parser actually emitted for this row, not one
+                # composed here. A fabricated key resolves to no anchor, and the
+                # failure is silent: the Interlock Review Agent simply has
+                # nothing to cite and reports no discrepancies at all.
+                ref = str(entry.get("ref") or "").strip()
+                anchor_key = f"range:{sheet}!{ref}" if ref else f"cell:{sheet}!A{row}"
                 requirement.sources.append(
                     Provenance(
                         file_id=record.id,
                         filename=filename,
-                        anchor_key=f"range:{sheet}!row{row}",
+                        anchor_key=anchor_key,
                         display_location=f"{filename} / {sheet} / row {row}",
                     )
                 )
@@ -743,9 +749,13 @@ class _Builder:
                 if not text:
                     continue
                 index = _as_int(paragraph.get("index"))
+                # A heading is anchored as ``heading:<index>``, not
+                # ``paragraph:<index>`` — composing the wrong one here gives a
+                # statement a citation that resolves to nothing.
+                is_heading = paragraph.get("heading_level") is not None
                 document.statements.append(
                     {
-                        "anchor_key": f"paragraph:{index}",
+                        "anchor_key": f"heading:{index}" if is_heading else f"paragraph:{index}",
                         "section": " / ".join(_as_list_of_str(paragraph.get("section_path"))),
                         "text": text,
                     }

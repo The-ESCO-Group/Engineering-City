@@ -53,6 +53,26 @@ def wait_for_health(base_url: str, timeout: float = 60.0) -> dict[str, object]:
     raise RuntimeError(f"backend did not become healthy within {timeout:.0f}s: {last}")
 
 
+def _wait_for_review(client: httpx.Client, project_id: str, auth: dict[str, str]) -> dict:
+    """Poll the workflow state until the background worker settles.
+
+    Polling is the honest way to observe an asynchronous worker from outside the
+    process. The test suite drives the queue directly instead, where determinism
+    matters more than realism.
+    """
+    state: dict = {}
+    deadline = time.monotonic() + 180.0
+    while time.monotonic() < deadline:
+        response = client.get(f"/api/projects/{project_id}/workflow", headers=auth)
+        if response.status_code != 200:
+            return {"error": response.text}
+        state = response.json()
+        if state.get("queued", 0) == 0 and state.get("running", 0) == 0:
+            return state
+        time.sleep(0.5)
+    return state
+
+
 def run_checks(base_url: str, admin_email: str, admin_password: str) -> None:
     print("\n[health]")
     health = wait_for_health(base_url)
@@ -217,6 +237,30 @@ def run_checks(base_url: str, admin_email: str, admin_password: str) -> None:
     gone = client.get(f"/api/files/{csv_row['id']}/content", headers=auth)
     check("deleted content is no longer served", gone.status_code == 404)
 
+    print("\n[review]")
+    run = client.post(f"/api/projects/{project_id}/runs", headers=auth, json={})
+    check("review run starts", run.status_code == 201, run.text)
+    if run.status_code == 201:
+        check("a task graph was created", run.json()["task_count"] > 5, run.text)
+        state = _wait_for_review(client, project_id, auth)
+        check(
+            "the run reaches the approval gate",
+            state.get("awaiting_approval", 0) >= 1,
+            str(state),
+        )
+        check("no task failed", state.get("failed", 0) == 0, str(state))
+
+        events = client.get(f"/api/projects/{project_id}/events", headers=auth)
+        check(
+            "the event log records the review",
+            events.status_code == 200 and len(events.json()) > 20,
+            str(events.status_code),
+        )
+        if events.status_code == 200:
+            types = {row["event_type"] for row in events.json()}
+            check("a finding was created", "finding.created" in types, str(sorted(types)))
+            check("an approval was requested", "approval.requested" in types)
+
     print("\n[archive]")
     archived = client.post(f"/api/projects/{project_id}/archive", headers=auth)
     check("project archives", archived.status_code == 200, archived.text)
@@ -254,7 +298,7 @@ def main() -> int:
             "ESCO_DATABASE_URL": f"sqlite+pysqlite:///{(root / 'smoke.sqlite3').as_posix()}",
             "ESCO_LOG_JSON": "false",
             "ESCO_LOG_LEVEL": "WARNING",
-            "ESCO_WORKER_ENABLED": "false",
+            "ESCO_WORKER_ENABLED": "true",
             "ESCO_BOOTSTRAP_ADMIN_EMAIL": "admin@esco.internal",
             "ESCO_BOOTSTRAP_ADMIN_PASSWORD": "esco-demo-admin",
             "PYTHONPATH": str(REPO_ROOT / "backend"),

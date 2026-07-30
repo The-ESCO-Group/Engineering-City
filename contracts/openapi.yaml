@@ -621,6 +621,403 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/runs:
+    post:
+      tags:
+      - workflow
+      summary: Start a review run
+      description: 'Create the task graph for a new run.
+
+
+        Returns `409` if a run is already in progress: two concurrent runs over one
+
+        project would interleave findings and neither would be reproducible.'
+      operationId: start_run_api_projects__project_id__runs_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartRunRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/pause:
+    post:
+      tags:
+      - workflow
+      summary: Pause the run
+      description: 'Stop the worker taking further tasks.
+
+
+        A task already running is allowed to finish; interrupting it mid-write would
+
+        leave partial state for the recovery path to untangle.'
+      operationId: pause_run_api_projects__project_id__pause_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowControlRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowStateResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/resume:
+    post:
+      tags:
+      - workflow
+      summary: Resume a paused run
+      operationId: resume_run_api_projects__project_id__resume_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowControlRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowStateResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/cancel:
+    post:
+      tags:
+      - workflow
+      summary: Cancel the run
+      description: 'Cancel every unfinished task.
+
+
+        Completed work is kept: cancelling a run is not the same as retracting what
+
+        it already found.'
+      operationId: cancel_run_api_projects__project_id__cancel_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowControlRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowStateResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/workflow:
+    get:
+      tags:
+      - workflow
+      summary: Current workflow state and task counts
+      operationId: workflow_state_api_projects__project_id__workflow_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowStateResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/tasks:
+    get:
+      tags:
+      - workflow
+      summary: List a project's tasks
+      operationId: list_tasks_api_projects__project_id__tasks_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/TaskStatus'
+          - type: 'null'
+          title: Status
+      - name: run_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TaskRead'
+                title: Response List Tasks Api Projects  Project Id  Tasks Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/tasks/{task_id}:
+    get:
+      tags:
+      - workflow
+      summary: Task detail with its dependency edges
+      operationId: get_task_api_tasks__task_id__get
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Task Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/recover:
+    post:
+      tags:
+      - workflow
+      summary: Requeue tasks abandoned by a stopped worker
+      description: 'Manually trigger the lease sweep.
+
+
+        The worker does this automatically at startup and periodically; this exists
+
+        for an operator who has just restarted after a crash and does not want to
+
+        wait out the sweep interval.'
+      operationId: recover_tasks_api_projects__project_id__recover_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/parsers:
+    get:
+      tags:
+      - workflow
+      summary: Which file kinds this installation can parse
+      description: 'Per-kind parser availability.
+
+
+        A kind reported unavailable here explains why a file of that kind will not be
+
+        analysed, rather than leaving it looking merely unexamined.'
+      operationId: parser_capabilities_api_projects__project_id__parsers_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Parser Capabilities Api Projects  Project Id  Parsers Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/events:
+    get:
+      tags:
+      - events
+      summary: Replay a project's event history
+      description: 'Events in sequence order.
+
+
+        Pass the last `seq` you saw as `since_seq` to fetch only what followed. This
+
+        is the same ordering the WebSocket delivers, so the two are interchangeable
+
+        for catching up.'
+      operationId: list_events_api_projects__project_id__events_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      - name: since_seq
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+          title: Since Seq
+      - name: event_type
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              $ref: '#/components/schemas/EventType'
+          - type: 'null'
+          title: Event Type
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          default: 200
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EventEnvelope'
+                title: Response List Events Api Projects  Project Id  Events Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AddProjectMemberRequest:
@@ -767,6 +1164,100 @@ components:
       description: 'The engineering purpose a file serves, as declared by the uploader or
 
         inferred during intake. Drives which agents care about the file.'
+    EventEnvelope:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        schema_version:
+          type: integer
+          title: Schema Version
+          description: Envelope version. Bumped only on a breaking payload change.
+        seq:
+          type: integer
+          title: Seq
+          description: Gap-free per-project sequence number. Reconnecting clients pass the last value
+            they saw as ?since_seq= to replay what they missed.
+        event_type:
+          $ref: '#/components/schemas/EventType'
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Id
+          description: Agent instance that caused the event, if any.
+        task_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Task Id
+        actor_user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Actor User Id
+          description: Authenticated human that caused the event, if any.
+        occurred_at:
+          type: string
+          format: date-time
+          title: Occurred At
+        payload:
+          additionalProperties: true
+          type: object
+          title: Payload
+      type: object
+      required:
+      - id
+      - schema_version
+      - seq
+      - event_type
+      - project_id
+      - occurred_at
+      title: EventEnvelope
+      description: One entry in a project's ordered event stream.
+    EventType:
+      type: string
+      enum:
+      - project.created
+      - project.updated
+      - project.completed
+      - project.failed
+      - file.uploaded
+      - file.parsing_started
+      - file.parsed
+      - file.parse_failed
+      - file.deleted
+      - workflow.started
+      - workflow.paused
+      - workflow.resumed
+      - workflow.cancelled
+      - task.created
+      - task.started
+      - task.completed
+      - task.failed
+      - task.blocked
+      - agent.status_changed
+      - agent.location_changed
+      - agent.message_created
+      - finding.created
+      - finding.reviewed
+      - finding.updated
+      - approval.requested
+      - approval.decided
+      - report.created
+      title: EventType
+      description: 'Event types broadcast over the project WebSocket.
+
+
+        Persisted before broadcast; see ``contracts/events.schema.json``.'
     FileDetail:
       properties:
         id:
@@ -1319,6 +1810,302 @@ components:
       - administrator
       title: RoleName
       description: Global (system-wide) role assigned to a :class:`~app.models.user.User`.
+    RunRead:
+      properties:
+        run_id:
+          type: string
+          format: uuid
+          title: Run Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        status:
+          type: string
+          title: Status
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        task_count:
+          type: integer
+          title: Task Count
+        tasks:
+          items:
+            $ref: '#/components/schemas/TaskRead'
+          type: array
+          title: Tasks
+      type: object
+      required:
+      - run_id
+      - project_id
+      - status
+      - started_at
+      - task_count
+      title: RunRead
+      description: 'A workflow run: the task graph created by one ``POST /runs`` call.'
+    StartRunRequest:
+      properties:
+        force_reparse:
+          type: boolean
+          title: Force Reparse
+          default: false
+        file_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: File Ids
+        note:
+          type: string
+          title: Note
+          default: ''
+      type: object
+      title: StartRunRequest
+      description: Starts a workflow run over the project's current files.
+    TaskDetail:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        run_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Run Id
+        kind:
+          $ref: '#/components/schemas/TaskKind'
+        title:
+          type: string
+          title: Title
+        description:
+          type: string
+          title: Description
+          default: ''
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        priority:
+          type: integer
+          title: Priority
+          default: 100
+        agent_kind:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Kind
+        agent_instance_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Instance Id
+        attempts:
+          type: integer
+          title: Attempts
+          default: 0
+        max_attempts:
+          type: integer
+          title: Max Attempts
+          default: 3
+        available_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Available At
+        started_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Started At
+        finished_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Finished At
+        error_code:
+          type: string
+          title: Error Code
+          default: ''
+        error_message:
+          type: string
+          title: Error Message
+          default: ''
+        blocked_reason:
+          type: string
+          title: Blocked Reason
+          default: ''
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        payload:
+          additionalProperties: true
+          type: object
+          title: Payload
+        result:
+          additionalProperties: true
+          type: object
+          title: Result
+        depends_on:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Depends On
+        blocks:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Blocks
+      type: object
+      required:
+      - id
+      - project_id
+      - kind
+      - title
+      - status
+      - created_at
+      - updated_at
+      title: TaskDetail
+    TaskKind:
+      type: string
+      enum:
+      - intake
+      - inventory_files
+      - parse_file
+      - build_evidence_graph
+      - plan_project
+      - review_plc
+      - review_interlocks
+      - senior_review
+      - request_approvals
+      - delivery
+      - finalize_project
+      title: TaskKind
+      description: Identifies the handler that executes a task.
+    TaskRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        run_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Run Id
+        kind:
+          $ref: '#/components/schemas/TaskKind'
+        title:
+          type: string
+          title: Title
+        description:
+          type: string
+          title: Description
+          default: ''
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        priority:
+          type: integer
+          title: Priority
+          default: 100
+        agent_kind:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Kind
+        agent_instance_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Instance Id
+        attempts:
+          type: integer
+          title: Attempts
+          default: 0
+        max_attempts:
+          type: integer
+          title: Max Attempts
+          default: 3
+        available_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Available At
+        started_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Started At
+        finished_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Finished At
+        error_code:
+          type: string
+          title: Error Code
+          default: ''
+        error_message:
+          type: string
+          title: Error Message
+          default: ''
+        blocked_reason:
+          type: string
+          title: Blocked Reason
+          default: ''
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - project_id
+      - kind
+      - title
+      - status
+      - created_at
+      - updated_at
+      title: TaskRead
+    TaskStatus:
+      type: string
+      enum:
+      - queued
+      - running
+      - blocked
+      - awaiting_approval
+      - completed
+      - failed
+      - cancelled
+      title: TaskStatus
     UpdateProjectRequest:
       properties:
         name:
@@ -1547,3 +2334,67 @@ components:
       - msg
       - type
       title: ValidationError
+    WorkflowControlRequest:
+      properties:
+        reason:
+          type: string
+          title: Reason
+          default: ''
+      type: object
+      title: WorkflowControlRequest
+    WorkflowStateResponse:
+      properties:
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        project_status:
+          type: string
+          title: Project Status
+        is_paused:
+          type: boolean
+          title: Is Paused
+        active_run_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Active Run Id
+        queued:
+          type: integer
+          title: Queued
+          default: 0
+        running:
+          type: integer
+          title: Running
+          default: 0
+        blocked:
+          type: integer
+          title: Blocked
+          default: 0
+        awaiting_approval:
+          type: integer
+          title: Awaiting Approval
+          default: 0
+        completed:
+          type: integer
+          title: Completed
+          default: 0
+        failed:
+          type: integer
+          title: Failed
+          default: 0
+        cancelled:
+          type: integer
+          title: Cancelled
+          default: 0
+        message:
+          type: string
+          title: Message
+          default: ''
+      type: object
+      required:
+      - project_id
+      - project_status
+      - is_paused
+      title: WorkflowStateResponse

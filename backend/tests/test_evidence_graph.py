@@ -13,6 +13,7 @@ to disprove.
 
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.services import evidence_graph
@@ -363,3 +364,83 @@ def test_an_empty_project_produces_an_honest_empty_graph(db: Session, project: P
     assert graph.has_interlock_schedule is False
     assert "Interlock schedule" in graph.missing_inputs
     assert any("L5X" in item for item in graph.missing_inputs)
+
+
+# ---------------------------------------------------------------------------
+# Citation integrity: every anchor_key the graph emits must resolve.
+# ---------------------------------------------------------------------------
+def test_every_anchor_key_the_graph_emits_resolves_to_a_real_anchor(
+    db: Session, ingested_project: Project
+) -> None:
+    """A fabricated anchor key fails silently, which is the dangerous part.
+
+    The graph composed ``range:Interlocks!row5`` for interlock rows while the
+    XLSX parser emitted ``range:Interlocks!A5:H5``. Nothing errored — the
+    Interlock Review Agent simply had no citation for any requirement, so it
+    produced no discrepancies at all and the run reported success.
+
+    This checks every provenance key the graph hands downstream, for every file
+    type, so the same class of mismatch cannot reappear in a parser nobody
+    thought to re-test.
+    """
+    from app.models.evidence import EvidenceAnchor
+
+    graph = build_graph(db, ingested_project.id)
+    persisted = {
+        (anchor.file_id, anchor.anchor_key)
+        for anchor in db.execute(
+            select(EvidenceAnchor).where(EvidenceAnchor.project_id == ingested_project.id)
+        ).scalars()
+    }
+
+    unresolved: list[str] = []
+
+    def check(file_id: object, key: str, where: str) -> None:
+        import uuid as _uuid
+
+        resolved = file_id if isinstance(file_id, _uuid.UUID) else _uuid.UUID(str(file_id))
+        if (resolved, key) not in persisted:
+            unresolved.append(f"{where}: {key}")
+
+    for requirement in graph.interlocks:
+        for source in requirement.sources:
+            check(source.file_id, source.anchor_key, f"interlock {requirement.identifier}")
+
+    for fact in graph.logic:
+        if fact.file_id is not None:
+            check(fact.file_id, fact.anchor_key, f"rung {fact.program}/{fact.routine}")
+
+    for tag in graph.tags.values():
+        for source in tag.sources:
+            check(source.file_id, source.anchor_key, f"tag {tag.name}")
+
+    for point in graph.io_points:
+        source = point["source"]
+        check(source["file_id"], source["anchor_key"], f"io point {point['tag']}")
+
+    for alarm in graph.alarms:
+        source = alarm["source"]
+        check(source["file_id"], source["anchor_key"], f"alarm {alarm['name']}")
+
+    for document in graph.documents:
+        for statement in document.statements[:50]:
+            check(document.file_id, statement["anchor_key"], f"statement in {document.filename}")
+
+    assert unresolved == [], (
+        f"{len(unresolved)} citation(s) point at anchors that do not exist:\n  "
+        + "\n  ".join(unresolved[:15])
+    )
+
+
+def test_every_current_interlock_can_cite_its_schedule_row(
+    db: Session, ingested_project: Project
+) -> None:
+    """Without a resolvable requirement anchor, no discrepancy can be reported."""
+    graph = build_graph(db, ingested_project.id)
+    for requirement in graph.interlocks:
+        if not requirement.is_current:
+            continue
+        assert requirement.sources, f"{requirement.identifier} has no source"
+        assert requirement.sources[0].anchor_key.startswith("range:"), (
+            f"{requirement.identifier} cites {requirement.sources[0].anchor_key}"
+        )

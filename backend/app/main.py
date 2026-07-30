@@ -13,18 +13,25 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# Imported for the side effect: this package registers every task handler.
+# Bound to an underscore name so the module-level `app` symbol is not shadowed
+# by the package of the same name.
+import app.orchestration as _orchestration  # noqa: F401
 from app import CONTRACT_VERSION, __version__
 from app.agents.base.plugins import get_plugin_registry
 from app.api.errors import install_exception_handlers
 from app.api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 from app.api.routes import auth as auth_routes
+from app.api.routes import events as event_routes
 from app.api.routes import files as file_routes
 from app.api.routes import health as health_routes
 from app.api.routes import projects as project_routes
+from app.api.routes import workflow as workflow_routes
 from app.core.bootstrap import bootstrap
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.orchestration.broadcast import get_broker
+from app.orchestration.worker import get_worker, stop_worker
 
 logger = get_logger(__name__)
 
@@ -74,15 +81,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if app.state.run_bootstrap:
         bootstrap(settings)
 
+    worker = None
+    if settings.worker_enabled and app.state.run_worker:
+        worker = get_worker(settings)
+        worker.start()
+
     yield
+
+    if worker is not None:
+        stop_worker()
     logger.info("backend stopped")
 
 
-def create_app(settings: Settings | None = None, *, run_bootstrap: bool = True) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    run_bootstrap: bool = True,
+    run_worker: bool = True,
+) -> FastAPI:
     """Build the ASGI application.
 
-    ``run_bootstrap=False`` skips migrations and seeding, for tests that arrange
-    their own schema and fixtures.
+    ``run_bootstrap=False`` skips migrations and seeding, and ``run_worker=False``
+    leaves the background worker stopped, for tests that arrange their own schema
+    and drive the queue deterministically.
     """
     settings = settings or get_settings()
     configure_logging(level=settings.log_level, json_output=settings.log_json)
@@ -98,6 +119,7 @@ def create_app(settings: Settings | None = None, *, run_bootstrap: bool = True) 
     )
     app.state.settings = settings
     app.state.run_bootstrap = run_bootstrap
+    app.state.run_worker = run_worker
 
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestContextMiddleware)
@@ -117,6 +139,10 @@ def create_app(settings: Settings | None = None, *, run_bootstrap: bool = True) 
     app.include_router(auth_routes.router, prefix=prefix)
     app.include_router(project_routes.router, prefix=prefix)
     app.include_router(file_routes.router, prefix=prefix)
+    app.include_router(workflow_routes.router, prefix=prefix)
+    app.include_router(event_routes.router, prefix=prefix)
+    # The WebSocket lives at /ws/projects/{id}, outside the /api prefix.
+    app.include_router(event_routes.ws_router)
 
     return app
 
