@@ -1576,6 +1576,169 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/model-configurations:
+    get:
+      tags:
+      - model configuration
+      summary: Model configuration (administrator only)
+      description: 'Configured rows, most specific first.
+
+
+        Omitting ``project_id`` returns the global rows; supplying one returns that
+
+        project''s rows *and* the globals it falls back to, so the effective
+
+        resolution order is visible rather than having to be inferred.'
+      operationId: list_configurations_api_model_configurations_get
+      parameters:
+      - name: project_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelConfigurationRead'
+                title: Response List Configurations Api Model Configurations Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/model-configurations/providers:
+    get:
+      tags:
+      - model configuration
+      summary: Which providers this installation may use
+      description: 'Enabled providers, and which of them send content off this machine.
+
+
+        That last part is the fact an administrator actually needs before choosing
+
+        one, so it is stated rather than left to be inferred from the name.'
+      operationId: list_providers_api_model_configurations_providers_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/CapabilityStatus'
+                type: array
+                title: Response List Providers Api Model Configurations Providers Get
+  /api/model-configurations/{agent_kind}:
+    put:
+      tags:
+      - model configuration
+      summary: Set the provider and model for an agent (administrator only)
+      description: 'Create or replace one configuration row.
+
+
+        The provider must already be in ``ESCO_ENABLED_PROVIDERS``. Refusing here as
+
+        well as at resolution time means an administrator finds out immediately,
+
+        rather than discovering mid-review that the row they saved is being ignored.'
+      operationId: upsert_configuration_api_model_configurations__agent_kind__put
+      parameters:
+      - name: agent_kind
+        in: path
+        required: true
+        schema:
+          type: string
+          description: Agent kind, or '_default' for all agents.
+          title: Agent Kind
+        description: Agent kind, or '_default' for all agents.
+      - name: project_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Project Id
+      - name: User-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User-Agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateModelConfigurationRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelConfigurationRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - model configuration
+      summary: Remove a configuration row and fall back to the default
+      operationId: delete_configuration_api_model_configurations__agent_kind__delete
+      parameters:
+      - name: agent_kind
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Kind
+      - name: project_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Project Id
+      - name: User-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User-Agent
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/projects/{project_id}/events:
     get:
       tags:
@@ -3158,6 +3321,42 @@ components:
         Note: this is *not* a transcript of model reasoning. Only concise,
 
         reviewable statements are stored.'
+    ModelConfigurationRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Project Id
+        agent_kind:
+          type: string
+          title: Agent Kind
+          default: ''
+        provider:
+          type: string
+          title: Provider
+        model:
+          type: string
+          title: Model
+        temperature:
+          type: number
+          title: Temperature
+          default: 0.0
+        max_output_tokens:
+          type: integer
+          title: Max Output Tokens
+          default: 4096
+      type: object
+      required:
+      - id
+      - provider
+      - model
+      title: ModelConfigurationRead
     OkResponse:
       properties:
         ok:
@@ -4013,6 +4212,32 @@ components:
         (fact, inference, evidence) is immutable so the record of what the platform
 
         actually said cannot be rewritten after the fact.'
+    UpdateModelConfigurationRequest:
+      properties:
+        provider:
+          type: string
+          title: Provider
+        model:
+          type: string
+          title: Model
+        temperature:
+          type: number
+          maximum: 2.0
+          minimum: 0.0
+          title: Temperature
+          default: 0.0
+        max_output_tokens:
+          type: integer
+          maximum: 200000.0
+          minimum: 1.0
+          title: Max Output Tokens
+          default: 4096
+      type: object
+      required:
+      - provider
+      - model
+      title: UpdateModelConfigurationRequest
+      description: Administrator-only. The provider must already be enabled in settings.
     UpdateProjectRequest:
       properties:
         name:

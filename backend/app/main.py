@@ -28,6 +28,7 @@ from app.api.routes import events as event_routes
 from app.api.routes import files as file_routes
 from app.api.routes import findings as finding_routes
 from app.api.routes import health as health_routes
+from app.api.routes import model_config as model_config_routes
 from app.api.routes import projects as project_routes
 from app.api.routes import reports as report_routes
 from app.api.routes import workflow as workflow_routes
@@ -148,6 +149,7 @@ def create_app(
     app.include_router(finding_routes.router, prefix=prefix)
     app.include_router(approval_routes.router, prefix=prefix)
     app.include_router(report_routes.router, prefix=prefix)
+    app.include_router(model_config_routes.router, prefix=prefix)
     app.include_router(event_routes.router, prefix=prefix)
     # The WebSocket lives at /ws/projects/{id}, outside the /api prefix.
     app.include_router(event_routes.ws_router)

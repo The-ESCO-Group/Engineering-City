@@ -6,7 +6,7 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 
 **Last updated:** Milestone 6 — Claude-owned scope complete
 **Contract version:** `1.0.0`
-**Tests:** 994 passing · ruff, mypy clean · 72/72 live-process smoke checks
+**Tests:** 999 passing · ruff, mypy clean · 72/72 live-process smoke checks
 
 ---
 
@@ -31,7 +31,8 @@ Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`
 | 2 | `751ba54` | `parsers: seven file parsers and the cross-file evidence graph` |
 | 3+4 | `1303c08` | `workflow: persisted queue, live events and the four review agents` |
 | 5 | `4869889` | `api: findings, approvals, agents and reports` |
-| 6 | _(this commit)_ | `security: review, documentation and handoff` |
+| 6 | `3d79213` | `security: review, documentation and handoff` |
+| — | _(this commit)_ | `config: model-configuration endpoints and checkpoint durability` |
 
 ---
 
@@ -304,6 +305,109 @@ is outstanding.
 
 ---
 
+## Work for GPT — the outstanding half
+
+The backend side of the remaining work is done (model-configuration endpoints and
+checkpoint durability, below). What is left is all in GPT-owned directories, so I
+have not touched any of it. In rough priority order.
+
+### 1. Delivery agents — `backend/app/agents/delivery/` *(reserved for you)*
+
+`GET /api/system/capabilities` currently reports `delivery_agents: false`, which
+is accurate: nothing is installed, so a review produces findings but no
+deliverables. The workflow already has a `delivery` task that completes with
+`delivery_available: false` and an explanation, so nothing breaks — it just does
+nothing.
+
+To install one, create `backend/app/agents/delivery/__init__.py` exposing either
+a `register(registry)` function or a module-level `DELIVERY_AGENTS` sequence:
+
+```python
+def register(registry):
+    registry.add_delivery_agent(TestPlanAgent())
+```
+
+`DeliveryAgentPlugin` needs `kind: str`, `display_name: str`, `version: str`,
+`handles_task_kinds: Sequence[str]`, and `run(context) -> AgentRunResult`.
+
+Two things worth knowing:
+
+* **Delivery agents run *after* human approval**, so they should read only
+  findings whose `status` is `accepted`. Anything else has not been agreed by an
+  engineer and must not reach a deliverable.
+* **`Task.checkpoint` is the tool for a long generation.** A delivery agent
+  producing twenty reports is one task doing twenty things, so use
+  `context.mark_done(item)` / `context.done()` to record progress — the queue is
+  at-least-once and a crashed task is re-run from the start otherwise. Durability
+  is proved by `backend/tests/orchestration/test_checkpoints.py`. The core
+  handlers do not use it because the workflow already decomposes to one task per
+  file, which is finer grained; yours will not have that luxury.
+
+### 2. Report providers — `backend/app/reporting/` *(reserved for you)*
+
+`ReportProvider` needs `report_type: str`, `display_name: str`, `version: str`,
+`supported_formats: Sequence[str]`, `render(snapshot, export_format)`.
+`ExportFormatProvider` needs `format_key`, `media_type`, `file_extension`,
+`version`, `serialize(document) -> bytes`.
+
+Write output through `ProjectStorage.write_report()` and record a `Report` row;
+`GET /api/reports/{id}/content` will then serve it. The `Report` model already
+carries `finding_ids`, so a report stays traceable to the findings it was built
+from — please populate it.
+
+The obvious first two, given the fixture: a **discrepancy matrix** (the interlock
+comparison as a table) and a **test plan** derived from the accepted findings.
+
+### 3. Frontend integration — `frontend/`
+
+These endpoints are live and contract-generated; the city view is not yet reading
+them:
+
+| Endpoint | What it gives the UI |
+| --- | --- |
+| `WS /ws/projects/{id}` | Live `agent.status_changed`, `agent.location_changed`, `task.*`, `finding.created`, `approval.requested` — everything the city animates on |
+| `GET /api/projects/{id}/agents` | Agent presence: `status`, `location`, `current_activity` |
+| `GET /api/projects/{id}/messages` | The activity feed |
+| `GET /api/projects/{id}/findings` | Findings list, paginated and filterable |
+| `GET /api/findings/{id}` | Every citation resolved, with `display_location` |
+| `GET /api/projects/{id}/approvals` | The decision queue |
+| `POST /api/approvals/{id}/decision` | The approval gate |
+
+Four things the UI needs to get right, because they are product promises rather
+than presentation choices:
+
+1. **Never show `fact` and `inference` as one block.** They are separate fields
+   precisely so a deduction is never displayed as an observation.
+2. **Always show `limitations` and `confidence`.** Hiding uncertainty is the
+   failure this product exists to prevent.
+3. **`display_location` is the citation.** It is written to be followable
+   verbatim — "MainProgram / Conveyor_Interlocks / Rung 0" — so show it, do not
+   summarise it.
+4. **A finding with `requires_approval: true` is not a result yet.** It needs an
+   engineer's decision before it can be presented as one.
+
+### 4. Smaller items
+
+* **`GET /api/projects/{id}/parsers`** reports which file kinds this installation
+  can read, and why any cannot. Worth surfacing at upload time so a user learns a
+  format is unsupported before they wait for a review.
+* **Provider badge.** `GET /api/model-configurations/providers` says which
+  providers are enabled and which send content off the machine. If a project ran
+  on the MockProvider, the UI should say so — every agent run carries a warning
+  to that effect in `AgentRunDetail.warnings`, and a demo run must not look like
+  a real review.
+
+### Not requests, just notes
+
+* Do not hand-edit `contracts/` — it is generated and `test_contracts.py` fails on
+  drift. If you need a field that is not there, note it in `docs/handoffs/GPT.md`
+  and I will add it to the source model and regenerate.
+* `fixtures/demo_project/` is a full synthetic project you can develop against,
+  and `fixtures/README.md` documents exactly which findings a correct review
+  produces — useful for building the UI against known output.
+
+---
+
 ## Definition of done
 
 Every item verified, most of them against a live process rather than only in
@@ -461,6 +565,10 @@ by `scripts/backend/smoke.py`. Nothing is listed here until it works.
 | `GET` | `/api/projects/{project_id}/reports` | Reports generated for a project |
 | `GET` | `/api/reports/{report_id}` | Report metadata |
 | `GET` | `/api/reports/{report_id}/content` | Download a generated report |
+| `GET` | `/api/model-configurations` | Configured provider/model rows (administrator) |
+| `GET` | `/api/model-configurations/providers` | Enabled providers, and which send data off-machine |
+| `PUT` | `/api/model-configurations/{agent_kind}` | Set an agent's provider and model (administrator) |
+| `DELETE` | `/api/model-configurations/{agent_kind}` | Fall back to the next-broadest scope |
 | `POST` | `/api/projects/{project_id}/runs` | Start a review run |
 | `POST` | `/api/projects/{project_id}/pause` | Pause the run |
 | `POST` | `/api/projects/{project_id}/resume` | Resume a paused run |
