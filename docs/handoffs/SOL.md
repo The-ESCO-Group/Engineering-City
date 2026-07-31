@@ -5,6 +5,7 @@
 - Branch: `master`
 - Milestone 0 commit: `5cf531c`
 - Milestone 1 commit: `7a2f4d2`
+- Milestone 2 commit: `676a8e0`
 - Product world commit: `fae0776`
 - Contract version consumed: `1.0.0`
 - Backend application version: `0.1.0`
@@ -134,6 +135,53 @@ Milestone 2 validation:
   camera preservation across quality changes, focus containment/restoration,
   camera reset, and Walk-mode entry/exit
 
+## Milestone 3 event-driven workflow city
+
+The city now renders a deterministic projection of the ordered project event
+stream instead of the previous static agent fixture:
+
+- a bounded pure reducer validates generated event envelopes, applies only
+  contiguous sequences, buffers gaps, ignores exact duplicates, detects
+  contradictory IDs/sequences, and produces a concise authoritative-resync
+  request instead of guessing
+- reducer state joins agents, tasks, locations, and the project work package by
+  semantic IDs; `task.assigned` carries the client-owned travel destination and
+  package state advances through intake, planning, review, validation, export,
+  approval, and release events
+- live and replay views share the same reducer; the timeline supports Go Live,
+  play/pause, 0.5×/1×/2×, exact event scrubbing, sparse canonical sequence
+  labels, and visible gap/stale/offline treatment
+- the renderer resolves backend semantic locations to client-owned scene nodes,
+  constructs stable orthogonal routes, offsets co-located agents, preserves
+  deterministic replay, and jumps rather than travels when reduced motion or a
+  paused scrub requires it
+- engineering-agent movement is event-driven only. Ambient vehicles and
+  pedestrians remain separate decorative city life and cannot increment task,
+  agent, or package state
+- active tasks appear as small carried work capsules and the project package
+  moves independently between semantic districts with state-colored treatment
+- every rendered agent is keyboard-selectable from a compact city dock; canvas
+  selection is also supported. The inspector shows only reported assignment,
+  location, status, blocker, public activity, and recent event facts, omits
+  unavailable cost/model/confidence fields, and explicitly excludes private
+  chain-of-thought
+- the contract-shaped demo now contains 40 ordered workflow events covering
+  assignments, travel, task state, a finding and approval gate, a change set,
+  validation, export, an artifact, and a release candidate awaiting approval
+
+Milestone 3 validation:
+
+- generated contract drift check passed
+- frontend strict typecheck passed
+- full frontend lint passed
+- reducer, route, timeline, inspector, quality, semantic-location, scene-node,
+  and accessible agent-dock tests passed: 53/53
+- full frontend unit suite passed: 66/66
+- frontend production build passed: 1,680 modules
+- 1440×900 Chromium visual QA passed for the live state, 40-event timeline,
+  first-event scrub, return-to-live, five-agent accessible dock, and populated
+  inspector
+
 ## Milestone 0 audit
 
 ### Contract and backend surface
@@ -193,11 +241,11 @@ and `release`.
 
 The product-owned directory maps 29 lowercase semantic location IDs to exact
 client-owned scene nodes and these stable selection anchors without storing
-model- or backend-supplied coordinates. Agent markers,
-occupancy, and route animation in the Three.js scene still read the synthetic
-domain records directly. Live agents currently affect the activity strip only,
-and `agent.location_changed` still has no backend caller. Connecting reducer
-state and deterministic paths is Milestone 3.
+model- or backend-supplied coordinates. The generated backend contract enables
+16 workflow locations. Agent occupancy, route animation, task capsules, and
+project-package movement now come from the reducer projection of contract
+events. Expansion destinations remain visual-only and cannot be produced by a
+canonical backend assignment.
 
 ### Event types consumed
 
@@ -328,8 +376,9 @@ unnecessary.
 
 ## Known limitations and product truth
 
-- The city is visually strong but its agent presence is not yet driven by real
-  event history.
+- The city is driven by retained event history. A live project that has not yet
+  emitted agent assignment/location/status events correctly shows no workflow
+  agents rather than substituting decorative records.
 - Ambient vehicles and pedestrians are deterministic decoration, not engineering
   agents. They must remain visually subordinate and must never imply workflow
   progress.

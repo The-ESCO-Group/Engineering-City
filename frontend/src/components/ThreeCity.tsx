@@ -1,16 +1,25 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { agents, buildings, type BuildingId } from "../domain";
-import type { LocationId } from "../world/ids";
+import { buildings, type BuildingId } from "../domain";
+import type { AgentId, LocationId, PackageId } from "../world/ids";
+import { CITY_LOCATIONS } from "../world/locations";
 import {
   WORLD_QUALITY_PROFILES,
   type WorldQualityProfile
 } from "../world/quality";
 import {
+  markerStackOffset,
+  planSemanticRoute,
+  pointAlongRoute,
+  routeLength,
+  type WorldPoint
+} from "../world/routes";
+import {
   getSceneLocationNode,
   type SceneLocationNode
 } from "../world/sceneLocations";
+import type { WorldAgent, WorldPackage, WorldTask } from "../world/types";
 import type { CityHomeLayer } from "./CityHomeChrome";
 
 export interface ThreeCityProps {
@@ -27,7 +36,11 @@ export interface ThreeCityProps {
   selectionRequestKey?: number;
   focusLocationId?: LocationId | null;
   focusRequestKey?: number;
-  showWorkflowAgents: boolean;
+  worldAgents?: readonly WorldAgent[];
+  worldTasks?: readonly WorldTask[];
+  worldPackages?: readonly WorldPackage[];
+  selectedAgentId?: AgentId | null;
+  onSelectAgent?: (agentId: AgentId) => void;
   onLabelPositionsChange?: (positions: CityLabelPositions) => void;
 }
 
@@ -98,10 +111,34 @@ interface BuildingRuntime {
 }
 
 interface AgentRuntime {
+  id: AgentId;
   root: THREE.Group;
+  halo: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>;
+  coreMaterial: THREE.MeshStandardMaterial;
+  workPackage: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
+  baseY: number;
+  phase: number;
+  destinationLocationId: LocationId;
+  lastSequence: number;
+  route: readonly WorldPoint[];
+  routeLength: number;
+  routeTravelled: number;
+  destination: WorldPoint;
+}
+
+interface PackageRuntime {
+  id: PackageId;
+  root: THREE.Group;
+  coreMaterial: THREE.MeshStandardMaterial;
   halo: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>;
   baseY: number;
   phase: number;
+  destinationLocationId: LocationId;
+  lastSequence: number;
+  route: readonly WorldPoint[];
+  routeLength: number;
+  routeTravelled: number;
+  destination: WorldPoint;
 }
 
 interface LinearMotion {
@@ -3072,44 +3109,331 @@ function createAnchorBuilding(
   return { accent, selection, ambientAccent };
 }
 
-function createAgentMarkers(scene: THREE.Scene, palette: MaterialPalette): AgentRuntime[] {
-  const markers: AgentRuntime[] = [];
-  const sortedAgents = [...agents].sort((left, right) => left.id.localeCompare(right.id));
-  sortedAgents.forEach((agent, globalIndex) => {
-    const spec = ANCHOR_SPECS.find((candidate) => candidate.id === agent.building);
-    if (!spec) return;
-    const siblings = sortedAgents.filter((candidate) => candidate.building === agent.building);
-    const siblingIndex = siblings.findIndex((candidate) => candidate.id === agent.id);
-    const root = new THREE.Group();
-    const baseY = 0.34;
-    root.position.set(
-      spec.position[0] - spec.lot[0] / 2 + 0.8 + siblingIndex * 0.82,
-      baseY,
-      spec.position[1] + spec.lot[1] / 2 + 0.75
-    );
-    root.userData.agentId = agent.id;
+function agentStatusColor(status: WorldAgent["status"]) {
+  switch (status) {
+    case "blocked":
+      return 0xff5f6d;
+    case "waiting":
+    case "awaiting_approval":
+      return 0xffb84c;
+    case "completed":
+      return 0x4ee58a;
+    case "offline":
+      return 0x6f7f87;
+    case "reviewing":
+      return 0xb87aff;
+    case "walking":
+    case "working":
+      return 0x54e6f2;
+    default:
+      return 0xeaf9fb;
+  }
+}
 
-    addCylinder(root, 0.085, 0.7, [0, 0.38, 0], palette.blackSteel, 10);
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12), palette.agentOrange);
-    core.position.y = 0.86;
-    core.castShadow = true;
-    root.add(core);
-    const haloMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff6a00,
+function packageStateColor(state: WorldPackage["state"]) {
+  switch (state) {
+    case "blocked":
+      return 0xff5f6d;
+    case "approval":
+      return 0xffb84c;
+    case "review":
+    case "validation":
+      return 0xb87aff;
+    case "released":
+      return 0x4ee58a;
+    default:
+      return 0x54e6f2;
+  }
+}
+
+function desiredAgentLocation(agent: WorldAgent): LocationId | null {
+  return agent.targetLocationId ?? agent.locationId;
+}
+
+function createAgentMarker(
+  scene: THREE.Scene,
+  palette: MaterialPalette,
+  agent: WorldAgent,
+  locationId: LocationId,
+  position: WorldPoint,
+  globalIndex: number,
+  agentPickable: THREE.Mesh[]
+): AgentRuntime {
+  const root = new THREE.Group();
+  const baseY = 0.34;
+  root.position.set(position[0], baseY, position[1]);
+  root.scale.setScalar(1.85);
+  root.userData.agentId = agent.id;
+
+  addCylinder(root, 0.09, 0.72, [0, 0.39, 0], palette.blackSteel, 10);
+  const color = agentStatusColor(agent.status);
+  const coreMaterial = new THREE.MeshStandardMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 0.72,
+    roughness: 0.28,
+    metalness: 0.34
+  });
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 12), coreMaterial);
+  core.position.y = 0.88;
+  core.castShadow = true;
+  core.userData.agentId = agent.id;
+  root.add(core);
+  agentPickable.push(core);
+
+  const haloMaterial = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.68,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false
+  });
+  const halo = new THREE.Mesh(new THREE.TorusGeometry(0.47, 0.04, 8, 28), haloMaterial);
+  halo.rotation.x = Math.PI / 2;
+  halo.position.y = 0.1;
+  halo.userData.agentId = agent.id;
+  root.add(halo);
+  agentPickable.push(halo);
+
+  const workMaterial = new THREE.MeshStandardMaterial({
+    color: 0xe8fbff,
+    emissive: 0x7b43c9,
+    emissiveIntensity: 0.7,
+    roughness: 0.32,
+    metalness: 0.38
+  });
+  const workPackage = new THREE.Mesh(new THREE.BoxGeometry(0.33, 0.26, 0.29), workMaterial);
+  workPackage.position.set(0.42, 0.67, 0);
+  workPackage.rotation.y = Math.PI / 4;
+  workPackage.userData.agentId = agent.id;
+  workPackage.castShadow = true;
+  root.add(workPackage);
+  agentPickable.push(workPackage);
+
+  scene.add(root);
+  return {
+    id: agent.id,
+    root,
+    halo,
+    coreMaterial,
+    workPackage,
+    baseY,
+    phase: globalIndex * 1.17,
+    destinationLocationId: locationId,
+    lastSequence: agent.lastEvent.sequence,
+    route: [position],
+    routeLength: 0,
+    routeTravelled: 0,
+    destination: position
+  };
+}
+
+function createPackageMarker(
+  scene: THREE.Scene,
+  worldPackage: WorldPackage,
+  locationId: LocationId,
+  position: WorldPoint,
+  index: number
+): PackageRuntime {
+  const root = new THREE.Group();
+  const baseY = 0.42;
+  root.position.set(position[0], baseY, position[1]);
+  root.scale.setScalar(1.38);
+  root.userData.packageId = worldPackage.id;
+  const color = packageStateColor(worldPackage.state);
+  const coreMaterial = new THREE.MeshStandardMaterial({
+    color: 0xeefcff,
+    emissive: color,
+    emissiveIntensity: 0.78,
+    roughness: 0.27,
+    metalness: 0.42
+  });
+  const core = new THREE.Mesh(new THREE.BoxGeometry(1.08, 0.64, 0.82), coreMaterial);
+  core.position.y = 0.48;
+  core.rotation.y = Math.PI / 4;
+  core.castShadow = true;
+  root.add(core);
+  const strapMaterial = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.8,
+    toneMapped: false
+  });
+  const strap = new THREE.Mesh(new THREE.BoxGeometry(1.16, 0.08, 0.9), strapMaterial);
+  strap.position.y = 0.5;
+  strap.rotation.y = Math.PI / 4;
+  root.add(strap);
+  const halo = new THREE.Mesh(
+    new THREE.TorusGeometry(0.82, 0.045, 8, 32),
+    new THREE.MeshBasicMaterial({
+      color,
       transparent: true,
-      opacity: agent.state === "waiting" ? 0.42 : 0.72,
+      opacity: 0.46,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       toneMapped: false
-    });
-    const halo = new THREE.Mesh(new THREE.TorusGeometry(0.41, 0.035, 8, 28), haloMaterial);
-    halo.rotation.x = Math.PI / 2;
-    halo.position.y = 0.1;
-    root.add(halo);
-    scene.add(root);
-    markers.push({ root, halo, baseY, phase: globalIndex * 1.17 });
+    })
+  );
+  halo.rotation.x = Math.PI / 2;
+  halo.position.y = 0.08;
+  root.add(halo);
+  scene.add(root);
+  return {
+    id: worldPackage.id,
+    root,
+    coreMaterial,
+    halo,
+    baseY,
+    phase: index * 1.41,
+    destinationLocationId: locationId,
+    lastSequence: worldPackage.lastEvent?.sequence ?? 0,
+    route: [position],
+    routeLength: 0,
+    routeTravelled: 0,
+    destination: position
+  };
+}
+
+function beginMarkerRoute(
+  runtime: AgentRuntime | PackageRuntime,
+  locationId: LocationId,
+  destination: WorldPoint,
+  routeKey: string,
+  instant: boolean
+) {
+  const current: WorldPoint = [runtime.root.position.x, runtime.root.position.z];
+  const moved = Math.hypot(destination[0] - current[0], destination[1] - current[1]);
+  if (moved < 0.03 && runtime.destinationLocationId === locationId) {
+    runtime.destination = destination;
+    return;
+  }
+  if (instant) {
+    runtime.route = [destination];
+    runtime.routeLength = 0;
+    runtime.routeTravelled = 0;
+    runtime.root.position.x = destination[0];
+    runtime.root.position.z = destination[1];
+  } else {
+    const semanticRoute = planSemanticRoute(
+      runtime.destinationLocationId,
+      locationId,
+      routeKey
+    );
+    const middle = semanticRoute.slice(1, -1);
+    runtime.route = [current, ...middle, destination];
+    runtime.routeLength = routeLength(runtime.route);
+    runtime.routeTravelled = 0;
+  }
+  runtime.destinationLocationId = locationId;
+  runtime.destination = destination;
+}
+
+const TERMINAL_WORLD_TASKS = new Set(["completed", "failed", "cancelled"]);
+
+function syncAgentMarkers(
+  scene: THREE.Scene,
+  palette: MaterialPalette,
+  runtimes: Map<AgentId, AgentRuntime>,
+  agentPickable: THREE.Mesh[],
+  worldAgents: readonly WorldAgent[],
+  worldTasks: readonly WorldTask[],
+  selectedAgentId: AgentId | null,
+  instant: boolean
+) {
+  runtimes.forEach((runtime) => {
+    runtime.root.visible = false;
   });
-  return markers;
+  const taskById = new Map(worldTasks.map((task) => [task.id, task]));
+  const visible = worldAgents
+    .filter((agent) => desiredAgentLocation(agent) !== null)
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const byLocation = new Map<string, WorldAgent[]>();
+  visible.forEach((agent) => {
+    const locationId = desiredAgentLocation(agent)!;
+    const group = byLocation.get(locationId) ?? [];
+    group.push(agent);
+    byLocation.set(locationId, group);
+  });
+
+  visible.forEach((agent, globalIndex) => {
+    const locationId = desiredAgentLocation(agent)!;
+    const siblings = byLocation.get(locationId) ?? [agent];
+    const siblingIndex = siblings.findIndex((candidate) => candidate.id === agent.id);
+    const node = getSceneLocationNode(locationId).position;
+    const offset = markerStackOffset(siblingIndex, siblings.length);
+    const destination: WorldPoint = [node[0] + offset[0], node[1] + offset[1]];
+    let runtime = runtimes.get(agent.id);
+    if (!runtime) {
+      runtime = createAgentMarker(
+        scene,
+        palette,
+        agent,
+        locationId,
+        destination,
+        globalIndex,
+        agentPickable
+      );
+      runtimes.set(agent.id, runtime);
+    } else {
+      const rewound = agent.lastEvent.sequence < runtime.lastSequence;
+      beginMarkerRoute(runtime, locationId, destination, agent.id, instant || rewound);
+      runtime.lastSequence = agent.lastEvent.sequence;
+    }
+    runtime.root.visible = true;
+    const color = agentStatusColor(agent.status);
+    runtime.coreMaterial.color.setHex(color);
+    runtime.coreMaterial.emissive.setHex(color);
+    runtime.halo.material.color.setHex(selectedAgentId === agent.id ? 0xffffff : color);
+    const task = agent.taskId ? taskById.get(agent.taskId) : undefined;
+    runtime.workPackage.visible = Boolean(
+      task && !TERMINAL_WORLD_TASKS.has(task.status)
+    );
+    runtime.workPackage.material.emissive.setHex(
+      task?.status === "blocked" ? 0xff5f6d : task?.status === "awaiting_approval" ? 0xffb84c : 0x7b43c9
+    );
+  });
+}
+
+function syncPackageMarkers(
+  scene: THREE.Scene,
+  runtimes: Map<PackageId, PackageRuntime>,
+  worldPackages: readonly WorldPackage[],
+  instant: boolean
+) {
+  runtimes.forEach((runtime) => {
+    runtime.root.visible = false;
+  });
+  const visible = worldPackages
+    .filter((worldPackage): worldPackage is WorldPackage & { locationId: LocationId } =>
+      worldPackage.locationId !== null
+    )
+    .sort((left, right) => left.id.localeCompare(right.id));
+  visible.forEach((worldPackage, index) => {
+    const node = getSceneLocationNode(worldPackage.locationId).position;
+    const offset = markerStackOffset(index + 3, visible.length + 3);
+    const destination: WorldPoint = [node[0] + offset[0] * 1.25, node[1] + offset[1] * 1.25];
+    let runtime = runtimes.get(worldPackage.id);
+    if (!runtime) {
+      runtime = createPackageMarker(scene, worldPackage, worldPackage.locationId, destination, index);
+      runtimes.set(worldPackage.id, runtime);
+    } else {
+      const sequence = worldPackage.lastEvent?.sequence ?? 0;
+      const rewound = sequence < runtime.lastSequence;
+      beginMarkerRoute(
+        runtime,
+        worldPackage.locationId,
+        destination,
+        worldPackage.id,
+        instant || rewound
+      );
+      runtime.lastSequence = sequence;
+    }
+    runtime.root.visible = true;
+    const color = packageStateColor(worldPackage.state);
+    runtime.coreMaterial.emissive.setHex(color);
+    runtime.halo.material.color.setHex(color);
+  });
 }
 
 function createLights(scene: THREE.Scene, qualityProfile: WorldQualityProfile) {
@@ -3263,8 +3587,15 @@ function isEditableTarget(target: EventTarget | null) {
   );
 }
 
-const occupancyFor = (id: BuildingId) =>
-  agents.filter((agent) => agent.building === id).length;
+const locationBuilding = new Map(
+  CITY_LOCATIONS.map((location) => [location.id, location.focusBuildingId] as const)
+);
+
+const occupancyFor = (id: BuildingId, worldAgents: readonly WorldAgent[]) =>
+  worldAgents.filter((agent) => {
+    const locationId = desiredAgentLocation(agent);
+    return locationId ? locationBuilding.get(locationId) === id : false;
+  }).length;
 
 export function ThreeCity({
   selectedBuilding,
@@ -3280,7 +3611,11 @@ export function ThreeCity({
   selectionRequestKey = 0,
   focusLocationId = null,
   focusRequestKey = 0,
-  showWorkflowAgents,
+  worldAgents = [],
+  worldTasks = [],
+  worldPackages = [],
+  selectedAgentId = null,
+  onSelectAgent,
   onLabelPositionsChange
 }: ThreeCityProps) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -3298,7 +3633,11 @@ export function ThreeCity({
   const animationRef = useRef({ paused, reducedMotion, speed });
   const viewModeRef = useRef(viewMode);
   const activeLayerRef = useRef(activeLayer);
-  const showWorkflowAgentsRef = useRef(showWorkflowAgents);
+  const worldAgentsRef = useRef(worldAgents);
+  const worldTasksRef = useRef(worldTasks);
+  const worldPackagesRef = useRef(worldPackages);
+  const selectedAgentRef = useRef<AgentId | null>(selectedAgentId);
+  const selectAgentRef = useRef(onSelectAgent);
   const labelPositionsChangeRef = useRef(onLabelPositionsChange);
   const pressedKeysRef = useRef(new Set<string>());
   const firstPersonLookRef = useRef<FirstPersonLook>({ yaw: 0, pitch: 0 });
@@ -3310,7 +3649,11 @@ export function ThreeCity({
   animationRef.current = { paused, reducedMotion, speed };
   viewModeRef.current = viewMode;
   activeLayerRef.current = activeLayer;
-  showWorkflowAgentsRef.current = showWorkflowAgents;
+  worldAgentsRef.current = worldAgents;
+  worldTasksRef.current = worldTasks;
+  worldPackagesRef.current = worldPackages;
+  selectedAgentRef.current = selectedAgentId;
+  selectAgentRef.current = onSelectAgent;
   labelPositionsChangeRef.current = onLabelPositionsChange;
 
   useEffect(() => {
@@ -3328,6 +3671,7 @@ export function ThreeCity({
     let detachLabelListener: (() => void) | null = null;
     let pointerStart: Point2 | null = null;
     const pickable: THREE.Mesh[] = [];
+    const agentPickable: THREE.Mesh[] = [];
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
 
@@ -3476,7 +3820,8 @@ export function ThreeCity({
       }
       runtimesRef.current = runtimes;
       setSelected(runtimes, selectedRef.current);
-      const agentMarkers = createAgentMarkers(scene, palette);
+      const agentMarkers = new Map<AgentId, AgentRuntime>();
+      const packageMarkers = new Map<PackageId, PackageRuntime>();
       const vehicleLife = createVehicleLife(
         scene,
         palette,
@@ -3509,12 +3854,22 @@ export function ThreeCity({
         pointer.x = ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * 2 - 1;
         pointer.y = -((event.clientY - bounds.top) / Math.max(1, bounds.height)) * 2 + 1;
       };
-      const pickBuilding = (event: PointerEvent) => {
+      const pickTarget = (event: PointerEvent):
+        | { readonly agentId: AgentId }
+        | { readonly buildingId: BuildingId }
+        | undefined => {
         if (viewModeRef.current !== "overview") return undefined;
         updatePointer(event);
         raycaster.setFromCamera(pointer, camera);
+        const agentHit = raycaster.intersectObjects(agentPickable, false).find((hit) => {
+          const agentId = hit.object.userData.agentId as AgentId | undefined;
+          return agentId ? agentMarkers.get(agentId)?.root.visible : false;
+        });
+        const agentId = agentHit?.object.userData.agentId as AgentId | undefined;
+        if (agentId) return { agentId };
         const hit = raycaster.intersectObjects(pickable, false)[0];
-        return hit?.object.userData.buildingId as BuildingId | undefined;
+        const buildingId = hit?.object.userData.buildingId as BuildingId | undefined;
+        return buildingId ? { buildingId } : undefined;
       };
       const onPointerDown = (event: PointerEvent) => {
         if (viewModeRef.current === "first-person") {
@@ -3540,8 +3895,8 @@ export function ThreeCity({
           renderer!.domElement.style.cursor = "grabbing";
           return;
         }
-        const buildingId = pickBuilding(event);
-        renderer!.domElement.style.cursor = buildingId
+        const target = pickTarget(event);
+        renderer!.domElement.style.cursor = target
           ? "pointer"
           : "grab";
       };
@@ -3555,15 +3910,16 @@ export function ThreeCity({
           renderer!.domElement.style.cursor = "grab";
           return;
         }
-        const buildingId = pickBuilding(event);
-        renderer!.domElement.style.cursor = buildingId ? "pointer" : "grab";
+        const target = pickTarget(event);
+        renderer!.domElement.style.cursor = target ? "pointer" : "grab";
         const movement = Math.hypot(
           event.clientX - pointerStart[0],
           event.clientY - pointerStart[1]
         );
         pointerStart = null;
         if (movement > 7) return;
-        if (buildingId) selectRef.current(buildingId);
+        if (target && "agentId" in target) selectAgentRef.current?.(target.agentId);
+        else if (target && "buildingId" in target) selectRef.current(target.buildingId);
       };
       const onPointerLeave = () => {
         pointerStart = null;
@@ -3680,6 +4036,8 @@ export function ThreeCity({
       const firstPersonForward = new THREE.Vector3();
       const firstPersonRight = new THREE.Vector3();
       const firstPersonMovement = new THREE.Vector3();
+      let workflowAgentSignature = "";
+      let workflowPackageSignature = "";
       const render = (timestamp?: number) => {
         if (disposed || !renderer || !scene || !controls) return;
         frame = window.requestAnimationFrame(render);
@@ -3694,6 +4052,55 @@ export function ThreeCity({
         timer.update(timestamp);
         const delta = Math.min(timer.getDelta(), 0.05);
         const state = animationRef.current;
+        const nextAgentSignature = [
+          selectedAgentRef.current ?? "",
+          ...worldAgentsRef.current.map((agent) =>
+            [
+              agent.id,
+              agent.lastEvent.sequence,
+              agent.locationId ?? "",
+              agent.targetLocationId ?? "",
+              agent.status,
+              agent.taskId ?? ""
+            ].join(":")
+          ),
+          ...worldTasksRef.current.map((task) =>
+            `${task.id}:${task.lastEvent.sequence}:${task.status}`
+          )
+        ].join("|");
+        if (nextAgentSignature !== workflowAgentSignature) {
+          syncAgentMarkers(
+            scene,
+            palette,
+            agentMarkers,
+            agentPickable,
+            worldAgentsRef.current,
+            worldTasksRef.current,
+            selectedAgentRef.current,
+            state.reducedMotion || state.paused
+          );
+          workflowAgentSignature = nextAgentSignature;
+        }
+        const nextPackageSignature = worldPackagesRef.current
+          .map((worldPackage) =>
+            [
+              worldPackage.id,
+              worldPackage.lastEvent?.sequence ?? 0,
+              worldPackage.locationId ?? "",
+              worldPackage.state,
+              worldPackage.artifactCount
+            ].join(":")
+          )
+          .join("|");
+        if (nextPackageSignature !== workflowPackageSignature) {
+          syncPackageMarkers(
+            scene,
+            packageMarkers,
+            worldPackagesRef.current,
+            state.reducedMotion || state.paused
+          );
+          workflowPackageSignature = nextPackageSignature;
+        }
         const firstPersonActive = viewModeRef.current === "first-person";
         controls.enabled = !firstPersonActive;
         controls.enableDamping = !state.reducedMotion;
@@ -3756,11 +4163,8 @@ export function ThreeCity({
             firstPersonCamera.position.y = FIRST_PERSON_START[1];
           }
         }
-        agentMarkers.forEach((marker) => {
-          marker.root.visible = showWorkflowAgentsRef.current;
-        });
+        const lifeDelta = delta * Math.max(0.1, state.speed);
         if (!state.paused && !state.reducedMotion) {
-          const lifeDelta = delta * Math.max(0.1, state.speed);
           animationElapsed += lifeDelta;
           updateVehicleLife(vehicleLife, lifeDelta);
           updatePedestrianLife(pedestrianLife, lifeDelta, animationElapsed);
@@ -3773,23 +4177,65 @@ export function ThreeCity({
             0.56 + Math.sin(animationElapsed * 0.61 + 1.7) * 0.05;
           palette.glassPurple.emissiveIntensity =
             0.6 + Math.sin(animationElapsed * 0.67 + 3.1) * 0.05;
-          agentMarkers.forEach((marker) => {
-            const wave = Math.sin(animationElapsed * 2.1 + marker.phase);
-            marker.root.position.y = marker.baseY + wave * 0.075;
-            const scale = 1 + (wave + 1) * 0.14;
-            marker.halo.scale.setScalar(scale);
-            marker.halo.material.opacity = 0.35 + (wave + 1) * 0.2;
-          });
         } else {
           palette.glassCyan.emissiveIntensity = 0.64;
           palette.glassOrange.emissiveIntensity = 0.56;
           palette.glassPurple.emissiveIntensity = 0.6;
-          agentMarkers.forEach((marker) => {
-            marker.root.position.y = marker.baseY;
-            marker.halo.scale.setScalar(1);
-            marker.halo.material.opacity = 0.56;
-          });
         }
+        agentMarkers.forEach((marker) => {
+          if (!marker.root.visible) return;
+          if (state.reducedMotion && marker.routeTravelled < marker.routeLength) {
+            marker.routeTravelled = marker.routeLength;
+          } else if (!state.paused && marker.routeTravelled < marker.routeLength) {
+            marker.routeTravelled = Math.min(
+              marker.routeLength,
+              marker.routeTravelled + lifeDelta * 32
+            );
+          }
+          if (marker.routeLength > 0) {
+            const point = pointAlongRoute(
+              marker.route,
+              marker.routeTravelled / marker.routeLength
+            );
+            marker.root.position.x = point[0];
+            marker.root.position.z = point[1];
+          }
+          const wave = state.paused || state.reducedMotion
+            ? 0
+            : Math.sin(animationElapsed * 2.1 + marker.phase);
+          marker.root.position.y = marker.baseY + wave * 0.075;
+          const selected = selectedAgentRef.current === marker.id;
+          const scale = selected ? 1.5 : 1 + (wave + 1) * 0.14;
+          marker.halo.scale.setScalar(scale);
+          marker.halo.material.opacity = selected ? 0.92 : 0.35 + (wave + 1) * 0.2;
+          marker.workPackage.rotation.y += state.paused || state.reducedMotion ? 0 : lifeDelta * 1.8;
+        });
+        packageMarkers.forEach((marker) => {
+          if (!marker.root.visible) return;
+          if (state.reducedMotion && marker.routeTravelled < marker.routeLength) {
+            marker.routeTravelled = marker.routeLength;
+          } else if (!state.paused && marker.routeTravelled < marker.routeLength) {
+            marker.routeTravelled = Math.min(
+              marker.routeLength,
+              marker.routeTravelled + lifeDelta * 25
+            );
+          }
+          if (marker.routeLength > 0) {
+            const point = pointAlongRoute(
+              marker.route,
+              marker.routeTravelled / marker.routeLength
+            );
+            marker.root.position.x = point[0];
+            marker.root.position.z = point[1];
+          }
+          const wave = state.paused || state.reducedMotion
+            ? 0
+            : Math.sin(animationElapsed * 1.55 + marker.phase);
+          marker.root.position.y = marker.baseY + wave * 0.055;
+          marker.halo.scale.setScalar(1 + (wave + 1) * 0.1);
+          marker.halo.material.opacity = 0.34 + (wave + 1) * 0.12;
+          marker.root.rotation.y += state.paused || state.reducedMotion ? 0 : lifeDelta * 0.24;
+        });
         renderer.render(scene, firstPersonActive ? firstPersonCamera : camera);
       };
       render();
@@ -4053,7 +4499,7 @@ export function ThreeCity({
       >
         {buildings.map((building) => {
           const selected = selectedBuilding === building.id;
-          const occupancy = showWorkflowAgents ? occupancyFor(building.id) : 0;
+          const occupancy = occupancyFor(building.id, worldAgents);
           return (
             <button
               key={building.id}

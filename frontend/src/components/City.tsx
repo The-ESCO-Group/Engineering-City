@@ -12,21 +12,43 @@ import {
   ZoomOut
 } from "lucide-react";
 import { useEngineeringData } from "../api/live";
+import type { EventEnvelope } from "../api/types";
 import { useUI } from "../store";
-import type { CityLocation } from "../world/locations";
+import type { AgentId } from "../world/ids";
+import { CITY_LOCATIONS, type CityLocation } from "../world/locations";
 import {
   selectWorldQuality,
   type WorldHardwareHints,
   type WorldQualityMode
 } from "../world/quality";
+import { deriveWorldReplayView } from "../world/replay";
+import { AgentInspector } from "./AgentInspector";
 import { CityDirectory } from "./CityDirectory";
 import { CityHomeChrome, type CityHomeLayer, type CityViewMode } from "./CityHomeChrome";
 import { CityLayerLegend } from "./CityLayerLegend";
 import { CityMapHud } from "./CityMapHud";
 import { ThreeCity, type CityLabelPositions } from "./ThreeCity";
+import {
+  WorldTimeline,
+  type WorldTimelinePlaybackRate,
+  type WorldTimelinePlaybackState,
+  type WorldTimelineStreamStatus
+} from "./WorldTimeline";
 import { WorldQualityControl } from "./WorldQualityControl";
+import { WorkflowAgentDock } from "./WorkflowAgentDock";
 
 const WORLD_QUALITY_STORAGE_KEY = "esco.world-quality";
+
+function eventLabel(event: EventEnvelope) {
+  const payload = event.payload;
+  const detail = [payload.title, payload.name, payload.display_name]
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0);
+  const action = event.event_type
+    .split(".")
+    .map((part) => part.replaceAll("_", " "))
+    .join(" · ");
+  return detail ? `${action} — ${detail}` : action;
+}
 
 function initialWorldQualityMode(): WorldQualityMode {
   if (typeof window === "undefined") return "auto";
@@ -75,13 +97,17 @@ export function City() {
   const [focusedLocation, setFocusedLocation] = useState<CityLocation | null>(null);
   const [focusRequestKey, setFocusRequestKey] = useState(0);
   const [selectionRequestKey, setSelectionRequestKey] = useState(0);
+  const [playbackState, setPlaybackState] = useState<WorldTimelinePlaybackState>("live");
+  const [timelineIndex, setTimelineIndex] = useState(-1);
+  const [selectedAgentId, setSelectedAgentId] = useState<AgentId | null>(null);
   const directoryTriggerRef = useRef<HTMLButtonElement>(null);
   const directoryDialogRef = useRef<HTMLDivElement>(null);
   const qualityTriggerRef = useRef<HTMLButtonElement>(null);
   const updateLabelPositions = useCallback((positions: CityLabelPositions) => {
     setLabelPositions(positions);
   }, []);
-  const { selectedBuilding, selectBuilding, paused, togglePause, reducedMotion, setReducedMotion, speed, setSpeed, zoom, setZoom } = useUI();
+  const { selectedBuilding, selectBuilding, reducedMotion, setReducedMotion, speed, setSpeed, zoom, setZoom } = useUI();
+  const paused = playbackState === "paused";
   const hardwareHints = useMemo(detectWorldHardware, []);
   const qualitySelection = useMemo(
     () => selectWorldQuality(qualityMode, hardwareHints, reducedMotion),
@@ -95,19 +121,114 @@ export function City() {
     return () => media.removeEventListener("change", syncPreference);
   }, [setReducedMotion]);
   const isWalking = viewMode === "first-person";
-  const liveActivityAgents = engineering.dataMode === "unavailable"
-    ? []
-    : engineering.agents.map((agent) => ({
-        id: agent.id,
-        name: agent.display_name,
-        state: agent.status === "working" || agent.status === "walking"
-          ? "active" as const
-          : agent.status === "waiting" || agent.status === "blocked"
-            ? "waiting" as const
-            : "complete" as const,
-        task: agent.current_activity || agent.location || "Ready"
-      }));
-  const activeReviewCount = liveActivityAgents?.filter((agent) => agent.state === "active").length ?? 3;
+  const playbackRate: WorldTimelinePlaybackRate = speed === 0.5 || speed === 2 ? speed : 1;
+  const projectId = engineering.projectId ?? engineering.project?.id ?? "unavailable-project";
+  const orderedEvents = useMemo(
+    () => [...engineering.events]
+      .filter((event) => event.project_id === projectId)
+      .sort((left, right) => left.seq - right.seq || left.id.localeCompare(right.id)),
+    [engineering.events, projectId]
+  );
+  const lastTimelineIndex = orderedEvents.length - 1;
+  useEffect(() => {
+    if (playbackState === "live") setTimelineIndex(lastTimelineIndex);
+    else setTimelineIndex((index) => Math.min(index, lastTimelineIndex));
+  }, [lastTimelineIndex, playbackState]);
+  useEffect(() => {
+    if (playbackState !== "playing" || orderedEvents.length === 0) return;
+    if (timelineIndex >= lastTimelineIndex) {
+      setPlaybackState("live");
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setTimelineIndex((index) => Math.min(index + 1, lastTimelineIndex)),
+      900 / playbackRate
+    );
+    return () => window.clearTimeout(timer);
+  }, [lastTimelineIndex, orderedEvents.length, playbackRate, playbackState, timelineIndex]);
+  const replayView = useMemo(() => {
+    const prefix = timelineIndex < 0 ? [] : orderedEvents.slice(0, timelineIndex + 1);
+    const firstSequence = prefix[0]?.seq ?? 1;
+    return deriveWorldReplayView(projectId, prefix, {
+      afterSequence: Math.max(0, firstSequence - 1)
+    });
+  }, [orderedEvents, projectId, timelineIndex]);
+  const timelinePoints = useMemo(
+    () => orderedEvents.map((event) => ({
+      sequence: event.seq,
+      label: eventLabel(event),
+      occurredAt: event.occurred_at
+    })),
+    [orderedEvents]
+  );
+  const streamStatus = useMemo<WorldTimelineStreamStatus>(() => {
+    if (replayView.sync.status === "waiting_for_gap") {
+      return {
+        state: "gap",
+        expectedSequence: replayView.sync.nextSequence,
+        firstBufferedSequence: replayView.sync.firstBufferedSequence,
+        detail: `${replayView.sync.bufferedCount} later event${replayView.sync.bufferedCount === 1 ? " is" : "s are"} buffered.`
+      };
+    }
+    if (replayView.sync.status === "resync_required") {
+      return { state: "stale", detail: replayView.sync.issue.message };
+    }
+    if (
+      engineering.dataMode === "unavailable" ||
+      engineering.connection === "offline" ||
+      engineering.connection === "incompatible" ||
+      engineering.connection === "authentication_required"
+    ) {
+      return { state: "offline", detail: engineering.fallbackReason };
+    }
+    if (engineering.connection === "connecting" || engineering.connection === "reconnecting") {
+      return { state: "stale", detail: "The local event transport is reconnecting." };
+    }
+    if ((orderedEvents[0]?.seq ?? 1) > 1) {
+      return {
+        state: "stale",
+        detail: `Replay begins at retained sequence ${orderedEvents[0].seq}; earlier events are outside this client window.`
+      };
+    }
+    return { state: "ready" };
+  }, [engineering.connection, engineering.dataMode, engineering.fallbackReason, orderedEvents, replayView.sync]);
+  const liveActivityAgents = replayView.agents.map((agent) => ({
+    id: agent.id,
+    name: agent.displayName,
+    state: agent.status === "working" || agent.status === "walking" || agent.status === "reviewing"
+      ? "active" as const
+      : agent.status === "waiting" || agent.status === "blocked" || agent.status === "awaiting_approval"
+        ? "waiting" as const
+        : "complete" as const,
+    task: agent.currentActivity || String(agent.locationId ?? "Ready")
+  }));
+  const activeReviewCount = liveActivityAgents.filter((agent) => agent.state === "active").length;
+  const selectedAgent = replayView.agents.find((agent) => agent.id === selectedAgentId) ?? null;
+  const selectedAgentTask = selectedAgent?.taskId
+    ? replayView.tasks.find((task) => task.id === selectedAgent.taskId) ?? null
+    : null;
+  const selectedLocation = selectedAgent?.locationId
+    ? CITY_LOCATIONS.find((location) => location.id === selectedAgent.locationId)
+    : null;
+  const selectedAgentEvents = selectedAgent
+    ? orderedEvents
+      .slice(0, timelineIndex + 1)
+      .filter((event) =>
+        event.agent_id === selectedAgent.id || event.payload.agent_id === selectedAgent.id
+      )
+      .slice(-5)
+      .reverse()
+      .map((event) => ({
+        id: event.id,
+        label: eventLabel(event),
+        detail: typeof event.payload.current_activity === "string"
+          ? event.payload.current_activity
+          : typeof event.payload.detail === "string"
+            ? event.payload.detail
+            : undefined,
+        occurredAt: event.occurred_at
+      }))
+    : [];
   const citySummary = {
     activeReviews: activeReviewCount,
     openFindings: engineering.dataMode === "demo"
@@ -122,6 +243,14 @@ export function City() {
   };
   const projectReference = engineering.project?.client_reference || "NO PROJECT";
   const projectName = engineering.project?.name || "Local project data unavailable";
+  const changePlaybackState = (nextState: WorldTimelinePlaybackState) => {
+    if (nextState === "live") setTimelineIndex(lastTimelineIndex);
+    if (nextState === "playing" && timelineIndex >= lastTimelineIndex) setTimelineIndex(0);
+    setPlaybackState(nextState);
+  };
+  const toggleTimelinePlayback = () => {
+    changePlaybackState(paused ? "live" : "paused");
+  };
   const resetCityView = () => {
     setZoom(1);
     setFocusedLocation(null);
@@ -245,7 +374,7 @@ export function City() {
               <Gauge />
             </button>
           )}
-          <button className="icon-button" onClick={togglePause} aria-label={paused ? "Play timeline" : "Pause timeline"}>{paused ? <Play /> : <Pause />}</button>
+          <button className="icon-button" onClick={toggleTimelinePlayback} aria-label={paused ? "Return timeline to live" : "Pause timeline"}>{paused ? <Play /> : <Pause />}</button>
           <button
             className="icon-button"
             onClick={() => setZoom(Math.max(0.82, zoom - 0.1))}
@@ -282,7 +411,11 @@ export function City() {
           selectionRequestKey={selectionRequestKey}
           focusLocationId={focusedLocation?.id ?? null}
           focusRequestKey={focusRequestKey}
-          showWorkflowAgents={engineering.dataMode === "demo"}
+          worldAgents={replayView.agents}
+          worldTasks={replayView.tasks}
+          worldPackages={replayView.packages}
+          selectedAgentId={selectedAgentId}
+          onSelectAgent={setSelectedAgentId}
           onLabelPositionsChange={updateLabelPositions}
         />
         {!isWalking && <CityLayerLegend activeLayer={activeLayer} />}
@@ -292,6 +425,33 @@ export function City() {
             <strong>{focusedLocation.displayName}</strong>
             <small>{focusedLocation.code}</small>
           </div>
+        )}
+        {!isWalking && (
+          <AgentInspector
+            open={selectedAgent !== null}
+            agent={selectedAgent}
+            task={selectedAgentTask}
+            project={engineering.project ? { id: engineering.project.id, name: engineering.project.name } : null}
+            supplemental={{
+              role: selectedAgent?.agentKind,
+              locationName: selectedLocation?.displayName,
+              blocker: selectedAgentTask?.status === "blocked" || selectedAgentTask?.status === "awaiting_approval"
+                ? selectedAgentTask.detail || selectedAgentTask.sourceStatus
+                : undefined,
+              recentEvents: selectedAgentEvents,
+              warnings: replayView.sync.status === "resync_required"
+                ? [replayView.sync.issue.message]
+                : undefined
+            }}
+            onClose={() => setSelectedAgentId(null)}
+          />
+        )}
+        {!isWalking && (
+          <WorkflowAgentDock
+            agents={replayView.agents}
+            selectedAgentId={selectedAgentId}
+            onSelectAgent={setSelectedAgentId}
+          />
         )}
         {!isWalking && (
           <CityMapHud
@@ -382,14 +542,25 @@ export function City() {
           paused={paused}
           dataMode={engineering.dataMode}
           activityAgents={liveActivityAgents}
+          onSelectAgent={(agentId) => setSelectedAgentId(agentId as AgentId)}
+          timeline={(
+            <WorldTimeline
+              className="world-timeline--city"
+              points={timelinePoints}
+              currentIndex={timelineIndex}
+              playbackState={playbackState}
+              playbackRate={playbackRate}
+              streamStatus={streamStatus}
+              disabled={!engineering.project}
+              onPlaybackStateChange={changePlaybackState}
+              onPlaybackRateChange={setSpeed}
+              onScrub={({ index }) => {
+                setTimelineIndex(index);
+                setPlaybackState("paused");
+              }}
+            />
+          )}
         />
-      </div>
-      <div className="timeline">
-        <button className="play-label" onClick={togglePause}>{paused ? <Play /> : <Pause />} {paused ? "Resume" : "Live"}</button>
-        <div className="timeline-track"><span style={{ width: "68%" }} /><i style={{ left: "68%" }} /></div>
-        <span>Event 42 / 61</span>
-        <label>Speed <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}><option value={0.5}>0.5×</option><option value={1}>1×</option><option value={2}>2×</option></select></label>
-        <label className="check"><input type="checkbox" checked={reducedMotion} onChange={(e) => setReducedMotion(e.target.checked)} /> Reduced motion</label>
       </div>
     </section>
   );

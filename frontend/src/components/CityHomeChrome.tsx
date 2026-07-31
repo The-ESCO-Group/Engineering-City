@@ -10,6 +10,7 @@ import {
   Zap,
   type LucideIcon
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { agents } from "../domain";
 import "./CityHomeChrome.css";
 
@@ -39,6 +40,8 @@ export interface CityHomeChromeProps {
   viewMode?: CityViewMode;
   paused?: boolean;
   dataMode?: "live" | "demo" | "unavailable";
+  timeline?: ReactNode;
+  onSelectAgent?: (agentId: string) => void;
   activityAgents?: Array<{
     id: string;
     name: string;
@@ -134,8 +137,9 @@ function CityMinimap({
 function CityActivityTicker({
   paused = false,
   dataMode = "demo",
-  activityAgents = agents
-}: Pick<CityHomeChromeProps, "paused" | "dataMode" | "activityAgents">) {
+  activityAgents = agents,
+  onSelectAgent
+}: Pick<CityHomeChromeProps, "paused" | "dataMode" | "activityAgents" | "onSelectAgent">) {
   const activeAgents = activityAgents.filter((agent) => agent.state === "active");
 
   return (
@@ -153,13 +157,19 @@ function CityActivityTicker({
       </header>
       <div className="city-home-chrome__activity-stream" role="list">
         {activeAgents.slice(0, 3).map((agent) => (
-          <article key={agent.id} role="listitem">
+          <button
+            key={agent.id}
+            type="button"
+            role="listitem"
+            aria-label={`Inspect ${agent.name}`}
+            onClick={() => onSelectAgent?.(agent.id)}
+          >
             <i aria-hidden="true" />
             <div>
               <strong>{agent.name}</strong>
               <span>{agent.task}</span>
             </div>
-          </article>
+          </button>
         ))}
       </div>
     </section>
@@ -176,7 +186,9 @@ export function CityHomeChrome({
   viewMode = "overview",
   paused = false,
   dataMode = "demo",
-  activityAgents = agents
+  activityAgents = agents,
+  timeline,
+  onSelectAgent
 }: CityHomeChromeProps) {
   const isWalking = viewMode === "first-person";
   const rootClassName = ["city-home-chrome", isWalking && "is-walking", className].filter(Boolean).join(" ");
@@ -186,11 +198,14 @@ export function CityHomeChrome({
       {!isWalking && (
         <div className="city-home-chrome__bottom-console">
           <CityMinimap onLocate={onLocate} onZoomIn={onZoomIn} onZoomOut={onZoomOut} dataMode={dataMode} />
-          <CityActivityTicker
-            paused={paused}
-            dataMode={dataMode}
-            activityAgents={activityAgents}
-          />
+          {timeline ?? (
+            <CityActivityTicker
+              paused={paused}
+              dataMode={dataMode}
+              activityAgents={activityAgents}
+              onSelectAgent={onSelectAgent}
+            />
+          )}
           <nav className="city-home-chrome__layer-dock" aria-label="Engineering city map layers">
             {LAYERS.map(({ id, label, icon: Icon }) => {
               const selected = id === activeLayer;

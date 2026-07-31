@@ -1,3 +1,5 @@
+import type { EventEnvelope as GeneratedEventEnvelope } from "../generated";
+
 export interface Page<T> {
   items: T[];
   total: number;
@@ -263,18 +265,9 @@ export interface ProviderCapability {
   detail: string;
 }
 
-export interface EventEnvelope {
-  id: string;
-  schema_version: number;
-  seq: number;
-  event_type: string;
-  project_id: string;
-  agent_id: string | null;
-  task_id: string | null;
-  actor_user_id: string | null;
-  occurred_at: string;
-  payload: Record<string, unknown>;
-}
+export type EventEnvelope = GeneratedEventEnvelope & {
+  readonly payload: Readonly<Record<string, unknown>>;
+};
 
 export interface WebSocketHello {
   type: "hello";

@@ -1,0 +1,126 @@
+.workflow-agent-dock {
+  position: absolute;
+  z-index: 27;
+  top: 148px;
+  left: 74px;
+  display: grid;
+  width: 38px;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid rgb(97 227 238 / 20%);
+  border-radius: 6px;
+  background: rgb(4 17 27 / 84%);
+  box-shadow: 0 14px 30px rgb(0 5 9 / 34%);
+  backdrop-filter: blur(12px);
+}
+
+.workflow-agent-dock__label {
+  overflow: hidden;
+  color: #7f9ca3;
+  font-size: 6px;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.workflow-agent-dock button {
+  position: relative;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgb(97 227 238 / 34%);
+  border-radius: 50%;
+  background: #0b2733;
+  color: #dffbfe;
+  cursor: pointer;
+}
+
+.workflow-agent-dock button::after {
+  position: absolute;
+  right: -1px;
+  bottom: 0;
+  width: 6px;
+  height: 6px;
+  border: 1px solid #07141b;
+  border-radius: 50%;
+  background: #54e6f2;
+  content: "";
+  box-shadow: 0 0 7px rgb(84 230 242 / 70%);
+}
+
+.workflow-agent-dock button.is-waiting::after,
+.workflow-agent-dock button.is-awaiting_approval::after {
+  background: #ffb84c;
+  box-shadow: 0 0 7px rgb(255 184 76 / 66%);
+}
+
+.workflow-agent-dock button.is-blocked::after {
+  background: #ff5f6d;
+  box-shadow: 0 0 7px rgb(255 95 109 / 66%);
+}
+
+.workflow-agent-dock button.is-completed::after {
+  background: #4ee58a;
+  box-shadow: 0 0 7px rgb(78 229 138 / 66%);
+}
+
+.workflow-agent-dock button[aria-pressed="true"] {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px rgb(97 227 238 / 35%), 0 0 15px rgb(97 227 238 / 22%);
+}
+
+.workflow-agent-dock button:focus-visible {
+  outline: 2px solid #61e3ee;
+  outline-offset: 2px;
+}
+
+.workflow-agent-dock button b {
+  font-size: 7px;
+  letter-spacing: .02em;
+}
+
+.workflow-agent-dock button span {
+  position: absolute;
+  left: calc(100% + 10px);
+  display: grid;
+  width: 188px;
+  padding: 7px 8px;
+  gap: 2px;
+  border: 1px solid rgb(97 227 238 / 24%);
+  border-radius: 4px;
+  background: rgb(4 17 27 / 96%);
+  color: #edf9fa;
+  text-align: left;
+  transform: translateX(-4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.workflow-agent-dock button:hover span,
+.workflow-agent-dock button:focus-visible span {
+  transform: none;
+  opacity: 1;
+}
+
+.workflow-agent-dock button span strong {
+  overflow: hidden;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-agent-dock button span small {
+  overflow: hidden;
+  color: #86a6ad;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workflow-agent-dock button span { transition: none; }
+}
