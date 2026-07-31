@@ -1,0 +1,28 @@
+# SYNTHETIC FIXTURE - Line 4 packaging conveyor upgrade I/O list. Invented data. Not a real project.
+Module,Slot,Channel,Address,Signal Type,Device Tag,Description,Engineering Units,Range,Status
+DI_401,1,0,Local:1:I.Data.0,DI 24VDC sinking,ESTOP_OK,Line 4 E-stop string healthy,,0 = tripped / 1 = healthy,Existing
+DI_401,1,1,Local:1:I.Data.1,DI 24VDC sinking,START_PB,Line start pushbutton,,0 = released / 1 = pressed,Existing
+DI_401,1,2,Local:1:I.Data.2,DI 24VDC sinking,STOP_PB,Line stop pushbutton (normally closed),,0 = pressed / 1 = released,Existing
+DI_401,1,3,Local:1:I.Data.3,DI 24VDC sinking,RESET_PB,Fault reset pushbutton,,0 = released / 1 = pressed,Existing
+DI_401,1,4,Local:1:I.Data.4,DI 24VDC sinking,MODE_SEL_MANUAL,Mode selector in Manual,,0 = not selected / 1 = selected,Existing
+DI_401,1,5,Local:1:I.Data.5,DI 24VDC sinking,MODE_SEL_AUTO,Mode selector in Auto,,0 = not selected / 1 = selected,Existing
+DI_401,1,6,Local:1:I.Data.6,DI 24VDC sinking,PE401_BLOCKED,PE401 upstream accumulation photo-eye blocked,,0 = clear / 1 = blocked,Existing
+DI_401,1,7,Local:1:I.Data.7,DI 24VDC sinking,PE402_BLOCKED,PE402 downstream accumulation photo-eye blocked,,0 = clear / 1 = blocked,Existing
+DI_401,1,8,Local:1:I.Data.8,DI 24VDC sinking,CYL401_EXT_PROX,CYL401 diverter extended proximity switch,,0 = not made / 1 = made,Existing
+DI_401,1,9,Local:1:I.Data.9,DI 24VDC sinking,CYL401_RET_PROX,CYL401 diverter retracted proximity switch,,0 = not made / 1 = made,Existing
+DI_401,1,10,Local:1:I.Data.10,DI 24VDC sinking,GD401_CLOSED,Divert-zone guard door closed and latched,,0 = open / 1 = closed,Existing
+DI_401,1,11,Local:1:I.Data.11,DI 24VDC sinking,REJECT_REQ,Case reject request from the upstream checkweigher,,0 = accept / 1 = reject,Existing
+DI_401,1,12,Local:1:I.Data.12,DI 24VDC sinking,PLT_CALL,Palletiser calling for product,,0 = no call / 1 = call,Existing
+DI_401,1,13,Local:1:I.Data.13,DI 24VDC sinking,MTR401_FAULT,CV401 infeed drive fault contact,,0 = healthy / 1 = faulted,Existing
+DI_401,1,14,Local:1:I.Data.14,DI 24VDC sinking,MTR402_FAULT,CV402 accumulation drive fault contact,,0 = healthy / 1 = faulted,Existing
+DI_401,1,10,Local:1:I.Data.10,DI 24VDC sinking,MTR403_FAULT,CV403 divert drive fault contact,,0 = healthy / 1 = faulted,Existing
+DI_401,1,15,Local:1:I.Data.15,DI 24VDC sinking,CYL402_OPEN_PROX,CV404 stop gate open proximity switch,,0 = not made / 1 = made,Existing
+DO_401,2,0,Local:2:O.Data.0,DO 24VDC sourcing,MTR401_RUN_CMD,CV401 infeed drive run command,,0 = stop / 1 = run,Existing
+DO_401,2,1,Local:2:O.Data.1,DO 24VDC sourcing,MTR402_RUN_CMD,CV402 accumulation drive run command,,0 = stop / 1 = run,Existing
+DO_401,2,2,Local:2:O.Data.2,DO 24VDC sourcing,MTR403_RUN_CMD,CV403 divert drive run command,,0 = stop / 1 = run,Existing
+DO_401,2,3,Local:2:O.Data.3,DO 24VDC sourcing,CYL401_SOL,CYL401 diverter solenoid (extends when energised),,0 = retract / 1 = extend,Existing
+DO_401,2,4,Local:2:O.Data.4,DO 24VDC sourcing,CYL402_SOL,CV404 stop gate solenoid (opens when energised),,0 = closed / 1 = open,Existing
+AI_401,3,0,Local:3:I.Ch0Data,AI 4-20 mA,AIR_PRESS_PSI,PT401 plant air header pressure at the Line 4 FRL,psi,0 to 150,New (this upgrade)
+AO_401,4,0,Local:4:O.Ch0Data,AO 4-20 mA,MTR401_SPEED_REF,CV401 drive speed reference,ft/min,0 to 120,Existing
+AO_401,4,1,Local:4:O.Ch1Data,AO 4-20 mA,MTR402_SPEED_REF,CV402 drive speed reference,ft/min,0 to 120,Existing
+AO_401,4,2,Local:4:O.Ch2Data,AO 4-20 mA,MTR403_SPEED_REF,CV403 drive speed reference,ft/min,0 to 120,Existing

@@ -1,0 +1,48 @@
+ESCO Standard Template Approval - Line 4 Packaging Conveyor Upgrade
+==================================================================
+
+SYNTHETIC FIXTURE. Invented content for testing the review platform. Not a real
+project, not a real customer, and not real plant data.
+
+Document SYN-L4-TPL-001 Rev A, issued with purchase order SYN-PO-4471.
+
+Approved for use on this job
+----------------------------
+
+ESCO-TPL-CONV-VFD-002    VFD-driven belt conveyor start and stop, with seal-in,
+                         a drive fault contact and a permissive break.
+ESCO-TPL-CYL-SGL-004     Single-solenoid pneumatic cylinder with extend and
+                         retract proximity confirmation and a fail-to-move
+                         timer.
+ESCO-TPL-MODE-SEL-001    Three-position Off, Manual and Auto mode selection from
+                         two discrete selector inputs.
+ESCO-TPL-ALM-STD-003     Standard latched alarm, unlatched by the reset
+                         pushbutton in Manual mode only.
+ESCO-TPL-PERM-LINE-001   Master line permissive built from de-energise to trip
+                         safety contacts.
+ESCO-TPL-HMI-ME-006      FactoryTalk View ME screen set for a single line, with
+                         an overview, a machine detail screen and an alarm
+                         summary.
+
+Not approved for this job
+-------------------------
+
+ESCO-TPL-CONV-SOFT-005   Controller-side soft-start ramp profile. The drives
+                         ramp in the drive, and the customer has asked that the
+                         ramp stay there.
+ESCO-TPL-ACCUM-ZONE-007  Zero-pressure accumulation with per-zone release. The
+                         line has a single accumulation zone and per-zone
+                         release has not been approved for it.
+ESCO-TPL-SAFETY-GM-011   Safety-instruction guard monitoring. The guard and the
+                         emergency stop string stay hard-wired on this line and
+                         are out of scope.
+
+Conditions of approval
+----------------------
+
+- Templates are approved as written. Any deviation needs written agreement from
+  the controls engineer named on the purchase order before it goes into a
+  release.
+- Alarm messages must use the wording already in the terminal application. New
+  alarms are added to that application; no new terminal is supplied.
+- Tag names in generated logic follow the device tags in the issued I/O list.

@@ -1,0 +1,373 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<RSLogix5000Content SchemaRevision="1.0" SoftwareRevision="33.00"
+    TargetName="Line4_Packaging" TargetType="Controller" ContainsContext="false"
+    ExportDate="Mon Mar 02 09:00:00 2026" ExportOptions="References DecoratedData Context">
+<Controller Use="Target" Name="Line4_Packaging" ProcessorType="5069-L330ER"
+    MajorRev="33" MinorRev="11" TimeSlice="20"
+    ProjectCreationDate="Tue Apr 16 07:30:00 2019"
+    LastModifiedDate="Mon Mar 02 08:55:00 2026">
+  <Description><![CDATA[SYNTHETIC FIXTURE - Line 4 packaging conveyors, as installed. Invented data; not a real project.]]></Description>
+
+  <Modules Use="Context">
+    <Module Name="Local" CatalogNumber="5069-L330ER" Vendor="1"
+        ParentModule="Local" Inhibited="false" MajorFault="false">
+      <Description><![CDATA[CompactLogix 5380 controller, Line 4 packaging panel.]]></Description>
+    </Module>
+    <Module Name="DI_401" CatalogNumber="5069-IB16" Vendor="1"
+        ParentModule="Local" Inhibited="false" MajorFault="false">
+      <Description><![CDATA[Slot 1 digital input card. All 16 channels are assigned.]]></Description>
+    </Module>
+    <Module Name="DO_401" CatalogNumber="5069-OB16" Vendor="1"
+        ParentModule="Local" Inhibited="false" MajorFault="false">
+      <Description><![CDATA[Slot 2 digital output card. Drive run commands and solenoids.]]></Description>
+    </Module>
+    <Module Name="AI_401" CatalogNumber="5069-IF8" Vendor="1"
+        ParentModule="Local" Inhibited="false" MajorFault="false">
+      <Description><![CDATA[Slot 3 analog input card. Spare; no channel is wired today.]]></Description>
+    </Module>
+    <Module Name="AO_401" CatalogNumber="5069-OF4" Vendor="1"
+        ParentModule="Local" Inhibited="false" MajorFault="false">
+      <Description><![CDATA[Slot 4 analog output card. Drive speed references.]]></Description>
+    </Module>
+  </Modules>
+
+  <Tags Use="Context">
+    <Tag Name="ESTOP_OK" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Line 4 E-stop string healthy. De-energises on trip.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="START_PB" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Line start pushbutton. DI_401 channel 1.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="STOP_PB" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Line stop pushbutton, wired normally closed. DI_401 channel 2.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="1"/></Data>
+    </Tag>
+    <Tag Name="RESET_PB" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Fault reset pushbutton. DI_401 channel 3.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="MODE_SEL_MANUAL" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Mode selector in the Manual position.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="MODE_SEL_AUTO" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Mode selector in the Auto position.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="PE401_BLOCKED" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[PE401 upstream accumulation photo-eye blocked.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="CYL401_EXT_PROX" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CYL401 diverter extended proximity switch.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="CYL401_RET_PROX" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CYL401 diverter retracted proximity switch.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="GD401_CLOSED" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Divert-zone guard door closed and latched.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="REJECT_REQ" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Case reject request from the upstream checkweigher.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="PLT_CALL" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Palletiser calling for product.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="MTR401_FAULT" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV401 infeed drive fault contact.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="MTR402_FAULT" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV402 accumulation drive fault contact.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="MTR403_FAULT" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV403 divert drive fault contact.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="CYL402_OPEN_PROX" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV404 stop gate open proximity switch.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="CV401_Run_Output" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV401 infeed drive run command. Wired to DO_401 channel 0 (Local:2:O.Data.0).]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="MTR402_RUN_CMD" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV402 accumulation drive run command. DO_401 channel 1.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="MTR403_RUN_CMD" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV403 divert drive run command. DO_401 channel 2.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="CYL401_SOL" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CYL401 diverter solenoid. Extends when energised.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="CYL402_SOL" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV404 stop gate solenoid. Opens the gate when energised.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="CYL402_OPEN" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV404 stop gate confirmed open. Indication only.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="MTR401_SPEED_REF" TagType="Base" DataType="REAL" Radix="Float"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV401 drive speed reference, ft/min.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="REAL" Radix="Float" Value="0.0"/></Data>
+    </Tag>
+    <Tag Name="MTR402_SPEED_REF" TagType="Base" DataType="REAL" Radix="Float"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV402 drive speed reference, ft/min.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="REAL" Radix="Float" Value="0.0"/></Data>
+    </Tag>
+    <Tag Name="MTR403_SPEED_REF" TagType="Base" DataType="REAL" Radix="Float"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CV403 drive speed reference, ft/min.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="REAL" Radix="Float" Value="0.0"/></Data>
+    </Tag>
+    <Tag Name="Line_Speed_SP" TagType="Base" DataType="REAL" Radix="Float"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Line speed setpoint, ft/min.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="REAL" Radix="Float" Value="90.0"/></Data>
+    </Tag>
+    <Tag Name="LINE_PERMISSIVE" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Master permissive for every Line 4 conveyor.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="LINE_RUNNING" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Line start command sealed in.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="CYL401_Extend_TMR" TagType="Base" DataType="TIMER"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[CYL401 diverter extend confirmation timer.]]></Description>
+    </Tag>
+    <Tag Name="ALM_ESTOP" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Alarm: emergency stop actuated.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="ALM_GD401_OPEN" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Alarm: divert-zone guard door open.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="ALM_CYL401_FAIL" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Alarm: CYL401 diverter failed to extend.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="ALM_MTR401_FAULT" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Alarm: CV401 drive fault.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="ALM_MTR402_FAULT" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Alarm: CV402 drive fault.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="ALM_MTR403_FAULT" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Alarm: CV403 drive fault.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+    <Tag Name="ALM_CYL402_FAIL" TagType="Base" DataType="BOOL" Radix="Decimal"
+        Constant="false" ExternalAccess="Read/Write">
+      <Description><![CDATA[Alarm: CV404 stop gate failed to open.]]></Description>
+      <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+    </Tag>
+  </Tags>
+
+  <Programs Use="Context">
+    <Program Name="Line4_Control" TestEdits="false" MainRoutineName="MainRoutine"
+        Disabled="false" UseAsFolder="false">
+      <Description><![CDATA[Line 4 packaging conveyor control.]]></Description>
+      <Tags>
+        <Tag Name="ManualMode" TagType="Base" DataType="BOOL" Radix="Decimal"
+            Constant="false" ExternalAccess="Read/Write">
+          <Description><![CDATA[Manual mode active.]]></Description>
+          <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+        </Tag>
+        <Tag Name="AutoMode" TagType="Base" DataType="BOOL" Radix="Decimal"
+            Constant="false" ExternalAccess="Read/Write">
+          <Description><![CDATA[Auto mode active.]]></Description>
+          <Data Format="Decorated"><DataValue DataType="BOOL" Radix="Decimal" Value="0"/></Data>
+        </Tag>
+      </Tags>
+      <Routines>
+        <Routine Name="MainRoutine" Type="RLL">
+          <Description><![CDATA[Scheduler for the Line 4 packaging conveyors.]]></Description>
+          <RLLContent>
+            <Rung Number="0" Type="N">
+              <Comment><![CDATA[Mode selection first.]]></Comment>
+              <Text><![CDATA[JSR(Mode_Logic,0);]]></Text>
+            </Rung>
+            <Rung Number="1" Type="N">
+              <Comment><![CDATA[Then the permissives, which gate every run command.]]></Comment>
+              <Text><![CDATA[JSR(Permissives,0);]]></Text>
+            </Rung>
+            <Rung Number="2" Type="N">
+              <Comment><![CDATA[Then the conveyor run logic.]]></Comment>
+              <Text><![CDATA[JSR(Conveyor_Control,0);]]></Text>
+            </Rung>
+            <Rung Number="3" Type="N">
+              <Comment><![CDATA[Then the diverter.]]></Comment>
+              <Text><![CDATA[JSR(Diverter_Control,0);]]></Text>
+            </Rung>
+            <Rung Number="4" Type="N">
+              <Comment><![CDATA[Alarms last so they reflect this scan.]]></Comment>
+              <Text><![CDATA[JSR(Alarms,0);]]></Text>
+            </Rung>
+          </RLLContent>
+        </Routine>
+        <Routine Name="Mode_Logic" Type="RLL">
+          <Description><![CDATA[Operating mode selection from the three-position selector.]]></Description>
+          <RLLContent>
+            <Rung Number="0" Type="N">
+              <Comment><![CDATA[Manual mode while the selector is in the Manual position.]]></Comment>
+              <Text><![CDATA[XIC(MODE_SEL_MANUAL)XIO(MODE_SEL_AUTO)OTE(ManualMode);]]></Text>
+            </Rung>
+            <Rung Number="1" Type="N">
+              <Comment><![CDATA[Auto mode while the selector is in the Auto position.]]></Comment>
+              <Text><![CDATA[XIC(MODE_SEL_AUTO)XIO(MODE_SEL_MANUAL)OTE(AutoMode);]]></Text>
+            </Rung>
+          </RLLContent>
+        </Routine>
+        <Routine Name="Permissives" Type="RLL">
+          <Description><![CDATA[Master line permissive and the line start/stop seal-in.]]></Description>
+          <RLLContent>
+            <Rung Number="0" Type="N">
+              <Comment><![CDATA[ILK-401 emergency stop, ILK-402 divert-zone guard door and ILK-407 conveyor drive faults. ESTOP_OK and GD401_CLOSED are both de-energise-to-trip, so the permissive drops on loss of either circuit.]]></Comment>
+              <Text><![CDATA[XIC(ESTOP_OK)XIC(GD401_CLOSED)XIO(MTR401_FAULT)XIO(MTR402_FAULT)XIO(MTR403_FAULT)OTE(LINE_PERMISSIVE);]]></Text>
+            </Rung>
+            <Rung Number="1" Type="N">
+              <Comment><![CDATA[Line start/stop seal-in. STOP_PB is wired normally closed, so the seal breaks on a broken wire.]]></Comment>
+              <Text><![CDATA[XIC(LINE_PERMISSIVE)XIC(STOP_PB)[XIC(START_PB),XIC(LINE_RUNNING)]OTE(LINE_RUNNING);]]></Text>
+            </Rung>
+          </RLLContent>
+        </Routine>
+        <Routine Name="Conveyor_Control" Type="RLL">
+          <Description><![CDATA[Run commands and speed references for CV401 to CV403, and the CV404 stop gate.]]></Description>
+          <RLLContent>
+            <Rung Number="0" Type="N">
+              <Comment><![CDATA[CV401 infeed run command.]]></Comment>
+              <Text><![CDATA[XIC(LINE_RUNNING)XIC(LINE_PERMISSIVE)XIO(MTR401_FAULT)OTE(CV401_Run_Output);]]></Text>
+            </Rung>
+            <Rung Number="1" Type="N">
+              <Comment><![CDATA[CV402 accumulation conveyor. Runs while PE401 sees product at the zone entry.]]></Comment>
+              <Text><![CDATA[XIC(LINE_RUNNING)XIC(LINE_PERMISSIVE)XIO(MTR402_FAULT)XIC(PE401_BLOCKED)OTE(MTR402_RUN_CMD);]]></Text>
+            </Rung>
+            <Rung Number="2" Type="N">
+              <Comment><![CDATA[CV403 divert conveyor. A latched diverter fault stops it, per ILK-403.]]></Comment>
+              <Text><![CDATA[XIC(LINE_RUNNING)XIC(LINE_PERMISSIVE)XIO(MTR403_FAULT)XIO(ALM_CYL401_FAIL)OTE(MTR403_RUN_CMD);]]></Text>
+            </Rung>
+            <Rung Number="3" Type="N">
+              <Comment><![CDATA[All three drives take the same line speed reference.]]></Comment>
+              <Text><![CDATA[XIC(LINE_RUNNING)MOV(Line_Speed_SP,MTR401_SPEED_REF)MOV(Line_Speed_SP,MTR402_SPEED_REF)MOV(Line_Speed_SP,MTR403_SPEED_REF);]]></Text>
+            </Rung>
+            <Rung Number="4" Type="N">
+              <Comment><![CDATA[CV404 stop gate. The gate is held open while the palletiser call is present.]]></Comment>
+              <Text><![CDATA[XIC(LINE_RUNNING)XIC(LINE_PERMISSIVE)XIC(PLT_CALL)OTE(CYL402_SOL);]]></Text>
+            </Rung>
+          </RLLContent>
+        </Routine>
+        <Routine Name="Diverter_Control" Type="RLL">
+          <Description><![CDATA[CYL401 reject diverter: extend, confirm, fault and reset.]]></Description>
+          <RLLContent>
+            <Rung Number="0" Type="N">
+              <Comment><![CDATA[CYL401 extends on a reject request while the line is running and no diverter fault is latched.]]></Comment>
+              <Text><![CDATA[XIC(LINE_RUNNING)XIC(LINE_PERMISSIVE)XIC(REJECT_REQ)XIO(ALM_CYL401_FAIL)OTE(CYL401_SOL);]]></Text>
+            </Rung>
+            <Rung Number="1" Type="N">
+              <Comment><![CDATA[ILK-403 the diverter must confirm extension within 1.5 s of the solenoid being energised.]]></Comment>
+              <Text><![CDATA[XIC(CYL401_SOL)XIO(CYL401_EXT_PROX)TON(CYL401_Extend_TMR,1500,0);]]></Text>
+            </Rung>
+            <Rung Number="2" Type="N">
+              <Comment><![CDATA[ILK-403 timer done latches the diverter fault, which drops the solenoid on rung 0 and stops CV403 in Conveyor_Control rung 2.]]></Comment>
+              <Text><![CDATA[XIC(CYL401_Extend_TMR.DN)OTL(ALM_CYL401_FAIL);]]></Text>
+            </Rung>
+            <Rung Number="3" Type="N">
+              <Comment><![CDATA[ILK-403 reset. The diverter fault clears only in Manual, with the reset pushbutton, and only once the retract proximity switch confirms the diverter is home.]]></Comment>
+              <Text><![CDATA[XIC(RESET_PB)XIC(ManualMode)XIC(CYL401_RET_PROX)OTU(ALM_CYL401_FAIL);]]></Text>
+            </Rung>
+          </RLLContent>
+        </Routine>
+        <Routine Name="Alarms" Type="RLL">
+          <Description><![CDATA[Alarm bits for the FactoryTalk View ME terminal.]]></Description>
+          <RLLContent>
+            <Rung Number="0" Type="N">
+              <Comment><![CDATA[ILK-401 emergency stop alarm.]]></Comment>
+              <Text><![CDATA[XIO(ESTOP_OK)OTE(ALM_ESTOP);]]></Text>
+            </Rung>
+            <Rung Number="1" Type="N">
+              <Comment><![CDATA[ILK-402 divert-zone guard door alarm.]]></Comment>
+              <Text><![CDATA[XIO(GD401_CLOSED)OTE(ALM_GD401_OPEN);]]></Text>
+            </Rung>
+            <Rung Number="2" Type="N">
+              <Comment><![CDATA[ILK-407 CV401 drive fault alarm.]]></Comment>
+              <Text><![CDATA[XIC(MTR401_FAULT)OTE(ALM_MTR401_FAULT);]]></Text>
+            </Rung>
+            <Rung Number="3" Type="N">
+              <Comment><![CDATA[ILK-407 CV402 drive fault alarm.]]></Comment>
+              <Text><![CDATA[XIC(MTR402_FAULT)OTE(ALM_MTR402_FAULT);]]></Text>
+            </Rung>
+            <Rung Number="4" Type="N">
+              <Comment><![CDATA[ILK-407 CV403 drive fault alarm.]]></Comment>
+              <Text><![CDATA[XIC(MTR403_FAULT)OTE(ALM_MTR403_FAULT);]]></Text>
+            </Rung>
+            <Rung Number="5" Type="N">
+              <Comment><![CDATA[CV404 stop gate confirmed open, for indication on the overview screen.]]></Comment>
+              <Text><![CDATA[XIC(CYL402_SOL)XIC(CYL402_OPEN_PROX)OTE(CYL402_OPEN);]]></Text>
+            </Rung>
+          </RLLContent>
+        </Routine>
+      </Routines>
+    </Program>
+  </Programs>
+
+  <Tasks Use="Context">
+    <Task Name="MainTask" Type="CONTINUOUS" Priority="10" Watchdog="500"
+        DisableUpdateOutputs="false" InhibitTask="false">
+      <Description><![CDATA[Continuous task for the Line 4 packaging conveyors.]]></Description>
+      <ScheduledPrograms>
+        <ScheduledProgram Name="Line4_Control"/>
+      </ScheduledPrograms>
+    </Task>
+  </Tasks>
+</Controller>
+</RSLogix5000Content>

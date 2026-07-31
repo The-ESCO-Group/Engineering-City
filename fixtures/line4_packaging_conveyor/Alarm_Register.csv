@@ -1,0 +1,9 @@
+# SYNTHETIC FIXTURE - alarm register from the existing FactoryTalk View ME application. Invented data. Not a real project.
+Alarm ID,Trigger Tag,Message,Severity,Group,Latched,Ack Required,Associated Display,Interlock ID
+ALM-401-01,ALM_ESTOP,Line 4 emergency stop actuated - all conveyors stopped,Critical,Safety,Yes,Yes,Line4_Alarms,ILK-401
+ALM-401-02,ALM_GD401_OPEN,Divert-zone guard door open - line permissive dropped,Critical,Safety,Yes,Yes,Line4_Alarms,ILK-402
+ALM-401-03,ALM_MTR401_FAULT,CV401 infeed drive fault,High,Drives,Yes,Yes,Line4_Alarms,ILK-407
+ALM-401-04,ALM_MTR402_FAULT,CV402 accumulation drive fault,High,Drives,Yes,Yes,Line4_Alarms,ILK-407
+ALM-401-05,ALM_MTR403_FAULT,CV403 divert drive fault,High,Drives,Yes,Yes,Line4_Alarms,ILK-407
+ALM-401-06,ALM_CYL401_FAIL,CV403 diverter failed to extend within 1.5 s - CV403 stopped,High,Machine,Yes,Yes,Line4_Diverter,ILK-403
+ALM-401-07,ALM_CYL402_FAIL,CV404 stop gate failed to open,Medium,Machine,Yes,Yes,Line4_Alarms,

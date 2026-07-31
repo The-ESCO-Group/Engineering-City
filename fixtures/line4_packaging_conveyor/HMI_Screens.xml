@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FactoryTalkViewMEProject Name="Line4_Packaging_HMI" ProductVersion="14.00"
+    Terminal="PanelView Plus 7 Standard 1000" ExportFormat="GraphicDisplayXML">
+  <Description>SYNTHETIC FIXTURE. Invented content for testing the review platform. Not a real project, not a real customer, and not real plant data.</Description>
+  <RSLinxShortcuts>
+    <Shortcut Name="Line4" Processor="5069-L330ER" Path="AB_ETHIP-1\192.0.2.20\Backplane\0"/>
+  </RSLinxShortcuts>
+  <Displays>
+    <Display Name="Line4_Overview" Number="10" Width="800" Height="600" Type="Replace">
+      <Description>Line 4 packaging conveyor overview.</Description>
+      <GraphicElements>
+        <MultiStateIndicator Name="ind_LineRunning" Left="20" Top="60" Width="240" Height="30">
+          <Caption>Line running</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]LINE_RUNNING}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_LinePermissive" Left="20" Top="94" Width="240" Height="30">
+          <Caption>Permissive</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]LINE_PERMISSIVE}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_EstopHealthy" Left="20" Top="128" Width="240" Height="30">
+          <Caption>E-stop healthy</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]ESTOP_OK}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_GuardClosed" Left="20" Top="162" Width="240" Height="30">
+          <Caption>Guard closed</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]GD401_CLOSED}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_ModeManual" Left="20" Top="196" Width="240" Height="30">
+          <Caption>Manual</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]Program:Line4_Control.ManualMode}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_ModeAuto" Left="20" Top="230" Width="240" Height="30">
+          <Caption>Auto</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]Program:Line4_Control.AutoMode}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_CV401Run" Left="20" Top="264" Width="240" Height="30">
+          <Caption>CV401 running</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]CV401_Run_Output}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_CV402Run" Left="20" Top="298" Width="240" Height="30">
+          <Caption>CV402 running</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]MTR402_RUN_CMD}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_CV403Run" Left="20" Top="332" Width="240" Height="30">
+          <Caption>CV403 running</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]MTR403_RUN_CMD}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_PE401" Left="20" Top="366" Width="240" Height="30">
+          <Caption>PE401 blocked</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]PE401_BLOCKED}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_GateOpen" Left="20" Top="400" Width="240" Height="30">
+          <Caption>Stop gate open</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]CYL402_OPEN}"/>
+        </MultiStateIndicator>
+        <NumericDisplay Name="num_LineSpeed" Left="20" Top="434" Width="240" Height="30">
+          <Caption>Line speed ft/min</Caption>
+          <Connection Name="Value" Expression="{::[Line4]Line_Speed_SP}"/>
+        </NumericDisplay>
+        <NumericDisplay Name="num_CasesAccumulated" Left="20" Top="468" Width="240" Height="30">
+          <Caption>Cases accumulated</Caption>
+          <Connection Name="Value" Expression="{::[Line4]Accum_Case_Count}"/>
+        </NumericDisplay>
+        <MomentaryPushButton Name="btn_Start" Left="20" Top="502" Width="240" Height="30">
+          <Caption>Start</Caption>
+          <Connection Name="Value" Expression="{::[Line4]START_PB}"/>
+        </MomentaryPushButton>
+        <MomentaryPushButton Name="btn_Stop" Left="20" Top="536" Width="240" Height="30">
+          <Caption>Stop</Caption>
+          <Connection Name="Value" Expression="{::[Line4]STOP_PB}"/>
+        </MomentaryPushButton>
+        <MomentaryPushButton Name="btn_Reset" Left="20" Top="570" Width="240" Height="30">
+          <Caption>Reset</Caption>
+          <Connection Name="Value" Expression="{::[Line4]RESET_PB}"/>
+        </MomentaryPushButton>
+      </GraphicElements>
+    </Display>
+    <Display Name="Line4_Diverter" Number="20" Width="800" Height="600" Type="Replace">
+      <Description>CYL401 reject diverter detail.</Description>
+      <GraphicElements>
+        <MultiStateIndicator Name="ind_DiverterSolenoid" Left="20" Top="60" Width="240" Height="30">
+          <Caption>Solenoid energised</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]CYL401_SOL}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_DiverterExtended" Left="20" Top="94" Width="240" Height="30">
+          <Caption>Extended</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]CYL401_EXT_PROX}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_DiverterRetracted" Left="20" Top="128" Width="240" Height="30">
+          <Caption>Retracted</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]CYL401_RET_PROX}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_DiverterFault" Left="20" Top="162" Width="240" Height="30">
+          <Caption>Diverter fault</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]ALM_CYL401_FAIL}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_RejectRequest" Left="20" Top="196" Width="240" Height="30">
+          <Caption>Reject requested</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]REJECT_REQ}"/>
+        </MultiStateIndicator>
+        <NumericDisplay Name="num_ExtendElapsed" Left="20" Top="230" Width="240" Height="30">
+          <Caption>Extend elapsed ms</Caption>
+          <Connection Name="Value" Expression="{::[Line4]CYL401_Extend_TMR.ACC}"/>
+        </NumericDisplay>
+      </GraphicElements>
+    </Display>
+    <Display Name="Line4_Alarms" Number="30" Width="800" Height="600" Type="Replace">
+      <Description>Line 4 alarm summary.</Description>
+      <GraphicElements>
+        <MultiStateIndicator Name="ind_AlmEstop" Left="20" Top="60" Width="240" Height="30">
+          <Caption>Emergency stop</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]ALM_ESTOP}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_AlmGuard" Left="20" Top="94" Width="240" Height="30">
+          <Caption>Guard door open</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]ALM_GD401_OPEN}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_AlmMtr401" Left="20" Top="128" Width="240" Height="30">
+          <Caption>CV401 drive fault</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]ALM_MTR401_FAULT}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_AlmMtr402" Left="20" Top="162" Width="240" Height="30">
+          <Caption>CV402 drive fault</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]ALM_MTR402_FAULT}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_AlmMtr403" Left="20" Top="196" Width="240" Height="30">
+          <Caption>CV403 drive fault</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]ALM_MTR403_FAULT}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_AlmDiverter" Left="20" Top="230" Width="240" Height="30">
+          <Caption>Diverter fault</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]ALM_CYL401_FAIL}"/>
+        </MultiStateIndicator>
+        <MultiStateIndicator Name="ind_AlmStopGate" Left="20" Top="264" Width="240" Height="30">
+          <Caption>Stop gate fault</Caption>
+          <Connection Name="Indicator" Expression="{::[Line4]ALM_CYL402_FAIL}"/>
+        </MultiStateIndicator>
+      </GraphicElements>
+    </Display>
+  </Displays>
+</FactoryTalkViewMEProject>
