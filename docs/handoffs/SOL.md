@@ -6,6 +6,7 @@
 - Milestone 0 commit: `5cf531c`
 - Milestone 1 commit: `7a2f4d2`
 - Milestone 2 commit: `676a8e0`
+- Milestone 3 commit: `d8a77c2`
 - Product world commit: `fae0776`
 - Contract version consumed: `1.0.0`
 - Backend application version: `0.1.0`
@@ -181,6 +182,46 @@ Milestone 3 validation:
 - 1440×900 Chromium visual QA passed for the live state, 40-event timeline,
   first-event scrub, return-to-live, five-agent accessible dock, and populated
   inspector
+
+## Milestone 4 traceable engineering workspace
+
+The product shell now opens a single review workspace for project intake,
+canonical engineering records, planning, changes, evidence, and human
+decisions. The workspace consumes the existing engineering context through a
+small adapter and keeps unsupported backend capabilities explicit:
+
+- five-step guided intake persists a local draft, validates required fields,
+  classifies uploads by role, records the selected project type, target,
+  standards, restricted domains, and safety confirmation, and starts the live
+  workflow only when the backend accepts every upload
+- Files and Tasks views expose backend-shaped records, published task progress,
+  blockers, assignment, and semantic city locations; a task can focus its
+  district in the 3D city without coupling backend data to scene coordinates
+- Requirements, Devices & I/O, Tags, and PLC views provide searchable,
+  traceable Project Core records with exact source references, cross-links,
+  coverage, confidence/provenance, and honest unavailable states
+- Planning, Change Sets, and Revisions distinguish proposals from accepted
+  revisions and show structured before/after impact across PLC, HMI, alarms,
+  tests, and documentation without claiming that generated changes were applied
+- Findings preserve fact, inference, discrepancy, parser warnings,
+  limitations, confidence, linked records, and typed on-demand evidence; exact
+  L5X locations and source metadata remain visible
+- Approvals enforce the locally published decision/rationale policy, make live
+  support for only Approve/Reject explicit, and keep broader demonstration
+  decisions confined to the synthetic session
+- every synthetic record is prominently labelled demo data and the workspace
+  repeats the safety boundary: no direct PLC control, online editing,
+  controller mode changes, forces, or live equipment actions
+
+Milestone 4 validation:
+
+- generated contract drift check passed
+- frontend lint and strict typecheck passed
+- full frontend unit suite passed: 89/89
+- frontend production build passed: 1,696 modules
+- 1440×900 Chromium visual QA passed for the corrected full-height workspace,
+  Requirements, Devices & I/O, Tags, PLC, Change Sets, Findings, Approvals,
+  Tasks, and the task-to-city semantic deep link
 
 ## Milestone 0 audit
 

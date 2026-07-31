@@ -142,3 +142,7 @@
 .sidebar-logout:hover{border-color:var(--line);color:#fff}
 .settings-page{align-items:stretch;background:linear-gradient(160deg,#0b1d26,#0b1015 60%)}
 .settings-page>.connection-center{margin:0 auto}
+
+.app.engineering-workspace-shell{grid-template-columns:208px minmax(0,1fr) 0}
+.engineering-workspace-shell>main{grid-column:2/4;min-width:0;overflow:hidden}
+.engineering-workspace-shell .eng-workspace-main{grid-column:auto;grid-row:auto;display:block}

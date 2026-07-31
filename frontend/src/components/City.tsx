@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Footprints,
   Gauge,
@@ -87,6 +88,8 @@ function detectWorldHardware(): WorldHardwareHints {
 
 export function City() {
   const engineering = useEngineeringData();
+  const [searchParams] = useSearchParams();
+  const requestedLocationId = searchParams.get("location");
   const [viewResetKey, setViewResetKey] = useState(0);
   const [activeLayer, setActiveLayer] = useState<CityHomeLayer>("overview");
   const [viewMode, setViewMode] = useState<CityViewMode>("overview");
@@ -103,6 +106,7 @@ export function City() {
   const directoryTriggerRef = useRef<HTMLButtonElement>(null);
   const directoryDialogRef = useRef<HTMLDivElement>(null);
   const qualityTriggerRef = useRef<HTMLButtonElement>(null);
+  const appliedDeepLinkRef = useRef<string | null>(null);
   const updateLabelPositions = useCallback((positions: CityLabelPositions) => {
     setLabelPositions(positions);
   }, []);
@@ -296,6 +300,21 @@ export function City() {
     selectBuilding(buildingId);
     closeDirectory(false);
   };
+  useEffect(() => {
+    if (!requestedLocationId) {
+      appliedDeepLinkRef.current = null;
+      return;
+    }
+    if (appliedDeepLinkRef.current === requestedLocationId) return;
+    const location = CITY_LOCATIONS.find((candidate) => candidate.id === requestedLocationId);
+    if (!location) return;
+    appliedDeepLinkRef.current = requestedLocationId;
+    setDirectoryOpen(false);
+    setQualityOpen(false);
+    setFocusedLocation(location);
+    setFocusRequestKey((key) => key + 1);
+    selectBuilding(location.focusBuildingId);
+  }, [requestedLocationId, selectBuilding]);
   return (
     <section
       className={`city-panel${isWalking ? " is-first-person" : ""}`}

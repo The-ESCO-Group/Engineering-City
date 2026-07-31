@@ -1,80 +1,20 @@
-import { useState } from "react";
-import { NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { useMemo } from "react";
+import { NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Activity, AlertTriangle, Archive, Bell, Bot, Building2, ChevronDown, ClipboardCheck, Clock3, FileText, Filter, FolderKanban, ListChecks, LogOut, Menu, Plus, Search, Settings, ShieldAlert, Wifi } from "lucide-react";
 import { reportDownloadUrl } from "./api/client";
-import { useApprovalDecision, useEngineeringData, useFindingDetail } from "./api/live";
-import type { FindingDetail as ApiFindingDetail, FindingRead } from "./api/types";
+import { useEngineeringData } from "./api/live";
 import { City } from "./components/City";
 import { ConnectionCenter } from "./components/ConnectionCenter";
-import { agents as demoAgents, findings as demoFindings, projects, tasks, type Finding } from "./domain";
-import { useUI } from "./store";
-
-type DisplayFinding = Finding & {
-  fact: string;
-  inference: string;
-  limitations: string;
-  citations: string[];
-  requiresApproval: boolean;
-  isAccepted: boolean;
-};
+import { agents as demoAgents, findings as demoFindings, projects } from "./domain";
+import {
+  EngineeringWorkspace,
+  workspaceOperationsFromEngineering,
+  workspaceSourceFromEngineering,
+  type WorkspaceView
+} from "./features/workspace";
 
 function titleCase(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function demoFinding(finding: Finding): DisplayFinding {
-  return {
-    ...finding,
-    fact: finding.evidence,
-    inference: finding.risk,
-    limitations: "Synthetic demonstration record; no live backend evidence was queried.",
-    citations: [finding.location],
-    requiresApproval: finding.approval === "Required" || finding.approval === "Pending",
-    isAccepted: finding.status.toLowerCase() === "accepted"
-  };
-}
-
-function liveFinding(finding: FindingRead): DisplayFinding {
-  const severity = titleCase(finding.severity) as DisplayFinding["severity"];
-  return {
-    id: finding.id,
-    severity,
-    category: titleCase(finding.category),
-    title: finding.title,
-    status: titleCase(finding.status),
-    source: `${finding.evidence_count} evidence citation${finding.evidence_count === 1 ? "" : "s"}`,
-    location: "Open finding to resolve exact citation locations",
-    agent: titleCase(finding.created_by_agent_kind || "Review agent"),
-    confidence: finding.confidence,
-    reviewer: finding.is_reviewed ? "Senior reviewed" : "Awaiting senior review",
-    approval: finding.requires_approval && finding.status !== "accepted" ? "Required" : "Released",
-    evidence: finding.fact,
-    requirement: finding.inference,
-    suggestion: finding.suggested_review_action,
-    risk: finding.inference,
-    fact: finding.fact,
-    inference: finding.inference,
-    limitations: finding.limitations || "No limitations were stated by the reviewing agent.",
-    citations: [],
-    requiresApproval: finding.requires_approval,
-    isAccepted: finding.status === "accepted"
-  };
-}
-
-function applyFindingDetail(finding: DisplayFinding, detail?: ApiFindingDetail): DisplayFinding {
-  if (!detail) return finding;
-  return {
-    ...finding,
-    fact: detail.fact,
-    inference: detail.inference,
-    limitations: detail.limitations || "No limitations were stated by the reviewing agent.",
-    suggestion: detail.suggested_review_action,
-    citations: detail.evidence
-      .map((item) => item.anchor?.display_location || "")
-      .filter(Boolean),
-    source: detail.evidence[0]?.anchor?.source_label || finding.source,
-    location: detail.evidence[0]?.anchor?.display_location || finding.location
-  };
 }
 
 const nav = [
@@ -85,6 +25,11 @@ const nav = [
 function Shell() {
   const location = useLocation();
   const isCityHome = location.pathname === "/";
+  const isWorkspaceShell = location.pathname.startsWith("/workspace/") ||
+    location.pathname === "/workspace" ||
+    location.pathname === "/tasks" ||
+    location.pathname === "/findings" ||
+    location.pathname === "/approvals";
   const engineering = useEngineeringData();
   const projectReference = engineering.project?.client_reference || "NO PROJECT";
   const projectName = engineering.project?.name || "Select an authorized workspace";
@@ -108,7 +53,7 @@ function Shell() {
     .slice(0, 2)
     .toUpperCase() || (engineering.dataMode === "demo" ? "DM" : "--");
   const connectionLabel = titleCase(engineering.connection);
-  return <div className={`app${isCityHome ? " city-home" : ""}`}>
+  return <div className={`app${isCityHome ? " city-home" : ""}${isWorkspaceShell ? " engineering-workspace-shell" : ""}`}>
     <header className="topbar">
       <button className="menu"><Menu /></button>
       <div className="brand-mark">E</div><div className="brand"><strong>ESCO</strong><span>ENGINEERING CITY</span></div>
@@ -127,27 +72,75 @@ function Shell() {
       <Routes>
         <Route path="/" element={<City />} />
         <Route path="/projects" element={<Projects />} />
-        <Route path="/tasks" element={<Tasks />} />
-        <Route path="/findings" element={<Findings />} />
-        <Route path="/approvals" element={<Approvals />} />
+        <Route path="/tasks" element={<EngineeringWorkspacePage initialView="tasks" />} />
+        <Route path="/findings" element={<EngineeringWorkspacePage initialView="findings" />} />
+        <Route path="/approvals" element={<EngineeringWorkspacePage initialView="approvals" />} />
+        <Route path="/workspace" element={<EngineeringWorkspacePage initialView="requirements" />} />
+        <Route path="/workspace/:view" element={<WorkspaceRoute />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<SimplePage />} />
       </Routes>
     </main>
-    {!isCityHome && <ActivityPanel />}
+    {!isCityHome && !isWorkspaceShell && <ActivityPanel />}
   </div>;
+}
+
+const WORKSPACE_VIEWS = new Set<WorkspaceView>([
+  "intake",
+  "files",
+  "tasks",
+  "requirements",
+  "devices",
+  "tags",
+  "plc",
+  "planning",
+  "changesets",
+  "revisions",
+  "findings",
+  "approvals"
+]);
+
+function WorkspaceRoute() {
+  const { view } = useParams();
+  const initialView = view && WORKSPACE_VIEWS.has(view as WorkspaceView)
+    ? view as WorkspaceView
+    : "requirements";
+  return <EngineeringWorkspacePage key={initialView} initialView={initialView} />;
+}
+
+function EngineeringWorkspacePage({ initialView }: { initialView: WorkspaceView }) {
+  const engineering = useEngineeringData();
+  const navigate = useNavigate();
+  const source = useMemo(() => workspaceSourceFromEngineering(engineering), [engineering]);
+  const operations = useMemo(
+    () => workspaceOperationsFromEngineering(engineering, {
+      openCityLocation: (semanticLocation) => {
+        navigate(`/?location=${encodeURIComponent(semanticLocation)}`);
+      }
+    }),
+    [engineering, navigate]
+  );
+  return (
+    <EngineeringWorkspace
+      source={source}
+      initialView={initialView}
+      operations={operations}
+      onReturnToCity={() => navigate("/")}
+    />
+  );
 }
 
 function SettingsPage() {
   return <section className="page settings-page"><PageHeader eyebrow="LOCAL OPERATIONS" title="Settings" /><ConnectionCenter /></section>;
 }
 
-function PageHeader({ eyebrow, title, action }: { eyebrow: string; title: string; action?: string }) {
-  return <div className="page-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1></div>{action && <button className="primary"><Plus />{action}</button>}</div>;
+function PageHeader({ eyebrow, title, action, onAction }: { eyebrow: string; title: string; action?: string; onAction?: () => void }) {
+  return <div className="page-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1></div>{action && <button className="primary" type="button" onClick={onAction} disabled={!onAction}><Plus />{action}</button>}</div>;
 }
 function Projects() {
   const engineering = useEngineeringData();
+  const navigate = useNavigate();
   const liveProject = engineering.project;
   const liveProgress = liveProject?.counts.tasks
     ? Math.round((liveProject.counts.tasks_completed / liveProject.counts.tasks) * 100)
@@ -166,55 +159,7 @@ function Projects() {
       }]
     : [];
   const unsupported = engineering.parsers.filter((parser) => !parser.available);
-  return <section className="page"><PageHeader eyebrow="PORTFOLIO" title="Engineering projects" action="New project" /><div className="filters"><div className="search"><Search /><input aria-label="Search projects" placeholder="Search projects" /></div><button type="button"><Filter /> Filters</button></div>{engineering.dataMode === "live" && <p className="advisory wide"><ShieldAlert />{engineering.parsers.length - unsupported.length} parser kinds available. {unsupported.length ? `${unsupported.length} unsupported kind(s): ${unsupported.map((item) => item.file_kind).join(", ")}.` : "Uploaded formats can be checked locally before review."}</p>}<div className="project-grid">{displayedProjects.map(p => <article className="project-card" key={p.id}><div className="project-card-head"><span>{p.id}</span><em className={p.progress === 100 ? "done" : ""}>{p.status}</em></div><h3>{p.name}</h3><p>{p.customer}</p><div className="progress"><i style={{ width: `${p.progress}%` }} /></div><div className="card-stats"><span><b>{p.progress}%</b> complete</span><span><b>{p.openFindings}</b> findings</span><span><b>{p.pendingApprovals}</b> approvals</span></div><footer><Clock3 /> Updated {p.lastActivity}<button type="button">Open workspace →</button></footer></article>)}</div>{displayedProjects.length === 0 && <div className="empty-state"><FolderKanban /><h2>No project data available</h2><p>{engineering.fallbackReason}</p></div>}</section>;
-}
-function Tasks() {
-  const engineering = useEngineeringData();
-  const displayedTasks = engineering.dataMode === "demo" ? tasks : engineering.tasks.map((task) => ({
-    name: task.title,
-    owner: titleCase(task.agent_kind || "Unassigned"),
-    state: titleCase(task.status) as (typeof tasks)[number]["state"],
-    progress: task.status === "completed" ? 100 : task.status === "running" ? 50 : 0
-  }));
-  return <section className="page"><PageHeader eyebrow="WORKFLOW" title="Task board" /><div className="task-board">{["Queued","Running","Blocked","Awaiting approval","Completed"].map(state => <div className="task-column" key={state}><h3>{state}<span>{displayedTasks.filter(t=>t.state===state).length}</span></h3>{displayedTasks.filter(t=>t.state===state).map(t=><article key={t.name}><div className={`status-bar ${t.state.toLowerCase().replace(" ","-")}`} /><h4>{t.name}</h4><p><Bot />{t.owner}</p><div className="progress"><i style={{width:`${t.progress}%`}} /></div></article>)}</div>)}</div>{displayedTasks.length === 0 && <div className="empty-state"><ListChecks /><h2>No workflow tasks available</h2><p>{engineering.fallbackReason}</p></div>}</section>;
-}
-function Findings() {
-  const engineering = useEngineeringData();
-  const { selectedFinding, selectFinding } = useUI();
-  const displayedFindings = engineering.dataMode === "demo"
-    ? demoFindings.map(demoFinding)
-    : engineering.findings.map(liveFinding);
-  const selected = displayedFindings.find((finding) => finding.id === selectedFinding)
-    || displayedFindings[0];
-  const detailQuery = useFindingDetail(selected?.id || null, engineering.dataMode === "live");
-  const detailed = selected ? applyFindingDetail(selected, detailQuery.data) : null;
-  if (!detailed) {
-    return <section className="page"><PageHeader eyebrow="ENGINEERING REVIEW" title="Findings & evidence" /><div className="empty-state"><ShieldAlert /><h2>No findings recorded</h2><p>The review has not produced any findings for this project.</p></div></section>;
-  }
-  return <section className="page findings-page"><PageHeader eyebrow="ENGINEERING REVIEW" title="Findings & evidence" /><div className="findings-layout"><div className="table-wrap"><div className="filters"><div className="search"><Search /><input placeholder="Search findings" /></div><button><Filter /> Severity: All</button></div><table><thead><tr><th>Severity</th><th>Finding</th><th>Evidence</th><th>Agent</th><th>Confidence</th><th>Release state</th></tr></thead><tbody>{displayedFindings.map(f=><tr key={f.id} className={detailed.id===f.id?"selected":""} onClick={()=>selectFinding(f.id)}><td><span className={`severity ${f.severity.toLowerCase()}`}>{f.severity}</span></td><td><b>{f.id.slice(0, 8)} · {f.title}</b><small>{f.category} · {f.status}</small></td><td>{f.source}<small>{f.location}</small></td><td>{f.agent}</td><td>{Math.round(f.confidence*100)}%</td><td>{f.requiresApproval && !f.isAccepted ? "Decision required" : f.isAccepted ? "Accepted" : "Advisory"}</td></tr>)}</tbody></table></div><FindingDetail finding={detailed} /></div></section>;
-}
-function FindingDetail({ finding: f }: { finding: DisplayFinding }) {
-  const unreleased = f.requiresApproval && !f.isAccepted;
-  return <aside className="detail-panel"><div className="detail-title"><span className={`severity ${f.severity.toLowerCase()}`}>{f.severity}</span><span>{f.id}</span></div><h2>{f.title}</h2>{unreleased && <p className="risk"><AlertTriangle />Proposed finding — human approval is required. This is not a released engineering result.</p>}<Detail label="Observed fact" text={f.fact || "No fact was recorded."} /><Detail label="Engineering inference" text={f.inference || "No inference was recorded."} /><Detail label="Limitations" text={f.limitations} /><div className="detail"><span className="eyebrow">Evidence citations</span>{f.citations.length ? f.citations.map((citation) => <p key={citation}>{citation}</p>) : <p>{f.location}</p>}</div><Detail label="Suggested review action" text={f.suggestion || "No review action was recorded."} /><div className="confidence"><span>Agent confidence</span><b>{Math.round(f.confidence*100)}%</b><div className="progress"><i style={{width:`${f.confidence*100}%`}} /></div></div><p className="advisory"><ShieldAlert />AI output is advisory. Engineering responsibility remains with the authorized human reviewer.</p><div className="button-row"><button>Request clarification</button><button className="primary">{unreleased ? "Open approval decision" : "Review record"}</button></div></aside>;
-}
-function Detail({label,text}:{label:string;text:string}) { return <div className="detail"><span className="eyebrow">{label}</span><p>{text}</p></div>; }
-function Approvals() {
-  const engineering = useEngineeringData();
-  const pending = engineering.approvals.filter((approval) => approval.status === "pending");
-  const approval = pending[0];
-  const [decision, setDecision] = useState("");
-  const [notes, setNotes] = useState("");
-  const mutation = useApprovalDecision(engineering.projectId);
-  if (engineering.dataMode !== "demo" && !approval) {
-    return <section className="page"><PageHeader eyebrow="HUMAN AUTHORITY" title="Approval inbox" /><div className="empty-state"><ClipboardCheck /><h2>No decisions waiting</h2><p>Every approval currently has a recorded human decision.</p></div></section>;
-  }
-  const title = approval?.title || "Corrective action for guard reset logic";
-  const question = approval?.question || "The proposed change affects a safety-related reset sequence. Confirm the evidence and validation plan before deciding.";
-  const submit = () => {
-    if (!approval || !decision || !notes.trim()) return;
-    mutation.mutate({ approvalId: approval.id, approved: decision === "Accept", notes: notes.trim() });
-  };
-  return <section className="page"><PageHeader eyebrow="HUMAN AUTHORITY" title="Approval inbox" /><div className="approval-layout"><article className="approval-list"><span className="severity critical">Decision</span><h3>{title}</h3><p>{engineering.project?.client_reference || "PRJ-0241"} · {approval?.finding_id ? `Finding ${approval.finding_id.slice(0, 8)}` : "Synthetic finding F-104"} · Requested by {titleCase(approval?.requested_by_agent_kind || "Senior Review")}</p><div><Clock3 /> {approval?.requested_at ? new Date(approval.requested_at).toLocaleString() : "Due today"} <span>Authorized reviewer required</span></div></article><article className="approval-decision"><span className="eyebrow">DECISION REQUIRED</span><h2>{title}</h2><p>{question}</p><label>Decision<select value={decision} onChange={e=>setDecision(e.target.value)}><option value="">Select decision…</option><option>Accept</option><option>Reject</option></select></label><label>Engineering rationale (required)<textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder="Record the evidence considered and basis for this decision…" /></label><button className="primary" disabled={!decision || !notes.trim() || mutation.isPending} onClick={submit}>{mutation.isPending ? "Recording decision…" : "Submit signed decision"}</button>{mutation.isError && <p className="risk"><AlertTriangle />{mutation.error.message}</p>}<p className="advisory"><ShieldAlert />This decision is recorded in the audit trail. AI analysis does not constitute engineering approval.</p></article></div></section>;
+  return <section className="page"><PageHeader eyebrow="PORTFOLIO" title="Engineering projects" action="New project" onAction={() => navigate("/workspace/intake")} /><div className="filters"><div className="search"><Search /><input aria-label="Search projects" placeholder="Search projects" /></div><button type="button"><Filter /> Filters</button></div>{engineering.dataMode === "live" && <p className="advisory wide"><ShieldAlert />{engineering.parsers.length - unsupported.length} parser kinds available. {unsupported.length ? `${unsupported.length} unsupported kind(s): ${unsupported.map((item) => item.file_kind).join(", ")}.` : "Uploaded formats can be checked locally before review."}</p>}<div className="project-grid">{displayedProjects.map(p => <article className="project-card" key={p.id}><div className="project-card-head"><span>{p.id}</span><em className={p.progress === 100 ? "done" : ""}>{p.status}</em></div><h3>{p.name}</h3><p>{p.customer}</p><div className="progress"><i style={{ width: `${p.progress}%` }} /></div><div className="card-stats"><span><b>{p.progress}%</b> complete</span><span><b>{p.openFindings}</b> findings</span><span><b>{p.pendingApprovals}</b> approvals</span></div><footer><Clock3 /> Updated {p.lastActivity}<button type="button" onClick={() => navigate("/workspace/requirements")}>Open workspace →</button></footer></article>)}</div>{displayedProjects.length === 0 && <div className="empty-state"><FolderKanban /><h2>No project data available</h2><p>{engineering.fallbackReason}</p></div>}</section>;
 }
 function Reports() {
   const engineering = useEngineeringData();
