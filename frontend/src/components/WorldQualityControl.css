@@ -1,0 +1,161 @@
+.world-quality-control {
+  display: grid;
+  min-width: 218px;
+  grid-template-columns: minmax(94px, 0.78fr) minmax(116px, 1.22fr);
+  gap: 9px;
+  align-items: center;
+  padding: 8px 9px;
+  border: 1px solid var(--esco-line, rgb(97 227 238 / 22%));
+  border-radius: var(--esco-radius-md, 7px);
+  color: var(--esco-text, #edf9fa);
+  background: rgb(4 20 31 / 88%);
+  box-shadow: 0 10px 28px rgb(0 6 12 / 32%);
+  font-family: var(--esco-font-ui, "Segoe UI", sans-serif);
+  backdrop-filter: blur(12px);
+}
+
+.city-quality-trigger[aria-expanded="true"] {
+  color: #7de8f6;
+  border-color: #45bad0 !important;
+  background: #0b3542 !important;
+  box-shadow: 0 0 14px #1fcbe735;
+}
+
+.world-quality-panel {
+  position: absolute;
+  z-index: 32;
+  top: 150px;
+  left: 78px;
+}
+
+.world-quality-control.is-city-hud {
+  width: 330px;
+}
+
+.world-quality-control__field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.world-quality-control__field label {
+  color: var(--esco-text-muted, #88a7ae);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.world-quality-control__field select {
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 24px 4px 7px;
+  border: 1px solid var(--esco-line-strong, rgb(113 214 228 / 38%));
+  border-radius: var(--esco-radius-sm, 3px);
+  color: var(--esco-text, #edf9fa);
+  background: #071923;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.world-quality-control__field select:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.world-quality-control__field select:focus-visible {
+  outline: 2px solid var(--esco-cyan, #61e3ee);
+  outline-offset: 2px;
+}
+
+.world-quality-control__status {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: 9px;
+  line-height: 1.25;
+}
+
+.world-quality-control__resolved {
+  overflow: hidden;
+  color: var(--esco-text, #edf9fa);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-quality-control__profile-summary,
+.world-quality-control__budget {
+  overflow: hidden;
+  color: var(--esco-text-muted, #88a7ae);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-quality-control__fps {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--esco-text-muted, #88a7ae);
+  font-family: var(--esco-font-mono, "Cascadia Code", monospace);
+}
+
+.world-quality-control__fps i {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border: 1px solid currentcolor;
+  border-radius: 50%;
+}
+
+.world-quality-control[data-fps-state="target"] .world-quality-control__fps {
+  color: var(--esco-green, #46d38d);
+}
+
+.world-quality-control[data-fps-state="fallback"] .world-quality-control__fps {
+  color: var(--esco-warning, #ffb84c);
+}
+
+.world-quality-control[data-fps-state="below-fallback"] .world-quality-control__fps {
+  color: var(--esco-danger, #ff6464);
+}
+
+@media (max-width: 720px) {
+  .world-quality-control {
+    min-width: 190px;
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .world-quality-control,
+  .world-quality-control * {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .world-quality-control,
+  .world-quality-control__field select {
+    border-color: currentcolor;
+  }
+}
+
+@media (forced-colors: active) {
+  .world-quality-control {
+    border-color: CanvasText;
+    color: CanvasText;
+    background: Canvas;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .world-quality-control__field select {
+    color: FieldText;
+    background: Field;
+  }
+}

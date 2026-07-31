@@ -18,17 +18,17 @@ export interface Project {
 
 export const buildings: Array<{ id: BuildingId; name: string; x: number; y: number; short: string }> = [
   { id: "intake", name: "Project Intake", x: 15, y: 38, short: "INTAKE" },
-  { id: "automation", name: "Automation Engineering", x: 39, y: 32, short: "PLC" },
-  { id: "hmi", name: "HMI Development", x: 65, y: 36, short: "HMI" },
-  { id: "electrical", name: "Electrical Engineering", x: 84, y: 61, short: "ELEC" },
-  { id: "qa", name: "QA and Testing", x: 65, y: 78, short: "QA" },
-  { id: "documentation", name: "Documentation", x: 39, y: 82, short: "DOCS" },
-  { id: "approval", name: "Approval Office", x: 15, y: 70, short: "APPROVAL" },
-  { id: "release", name: "Release Center", x: 85, y: 87, short: "RELEASE" }
+  { id: "automation", name: "Automation Core", x: 39, y: 32, short: "PLC" },
+  { id: "hmi", name: "HMI District", x: 65, y: 36, short: "HMI" },
+  { id: "electrical", name: "Electrical Works", x: 84, y: 61, short: "ELEC" },
+  { id: "qa", name: "QA Campus", x: 65, y: 78, short: "QA" },
+  { id: "documentation", name: "Documentation Quarter", x: 39, y: 82, short: "DOCS" },
+  { id: "approval", name: "Approval Plaza", x: 15, y: 70, short: "APPROVAL" },
+  { id: "release", name: "Release Logistics", x: 85, y: 87, short: "RELEASE" }
 ];
 
 export const projects: Project[] = [
-  { id: "PRJ-0241", name: "Line 4 Cartoner Upgrade", customer: "Internal · Packaging", status: "Engineering review", progress: 68, openFindings: 12, pendingApprovals: 2, lastActivity: "2 min ago" },
+  { id: "PRJ-0241", name: "Line 4 Packaging Conveyor Upgrade", customer: "Internal · Packaging", status: "Engineering review", progress: 68, openFindings: 12, pendingApprovals: 2, lastActivity: "2 min ago" },
   { id: "PRJ-0238", name: "Utility Skid Controls Review", customer: "Internal · Process", status: "Awaiting approval", progress: 86, openFindings: 5, pendingApprovals: 3, lastActivity: "18 min ago" },
   { id: "PRJ-0229", name: "Palletizer FAT Package", customer: "Internal · Material Handling", status: "Completed", progress: 100, openFindings: 0, pendingApprovals: 0, lastActivity: "Yesterday" }
 ];

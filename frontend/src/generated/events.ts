@@ -6,6 +6,12 @@ export type paths = Record<string, never>;
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
+        /**
+         * AgentKind
+         * @description Stable identifier for an agent definition.
+         * @enum {string}
+         */
+        readonly AgentKind: "project_manager" | "plc_review" | "interlock_review" | "senior_review" | "delivery" | "requirements_planning" | "tag_architecture" | "plc_logic";
         /** AgentLocationEventPayload */
         readonly AgentLocationEventPayload: {
             /**
@@ -104,6 +110,230 @@ export type components = {
             readonly title: string;
         };
         /**
+         * ApprovalGateKey
+         * @description The six configurable gates a project passes through.
+         * @enum {string}
+         */
+        readonly ApprovalGateKey: "project_profile" | "devices_io_tags" | "logic_and_delivery" | "qa_and_risk" | "import_verification" | "release";
+        /**
+         * ChangeOperationType
+         * @enum {string}
+         */
+        readonly ChangeOperationType: "create_object" | "update_field" | "delete_object" | "link_objects" | "unlink_objects" | "rename_tag" | "assign_io" | "create_logic" | "update_logic" | "create_finding" | "resolve_finding" | "create_export" | "request_clarification";
+        /**
+         * ChangeSetEventPayload
+         * @description A proposed, scoped batch of changes to the canonical model.
+         *
+         *     Counts and scope, never the operations: a change set may carry two thousand
+         *     of them, and inlining them would put a document on the wire. ``confidence``,
+         *     ``assumption_count`` and ``warning_count`` are here because a proposal that
+         *     states no uncertainty is more suspicious than one that does.
+         */
+        readonly ChangeSetEventPayload: {
+            /** Allowed Object Types */
+            readonly allowed_object_types?: readonly components["schemas"]["ObjectType"][];
+            /**
+             * Assumption Count
+             * @default 0
+             */
+            readonly assumption_count?: number;
+            /** @default null */
+            readonly author_agent_kind?: components["schemas"]["AgentKind"] | null;
+            /**
+             * Author User Id
+             * @default null
+             */
+            readonly author_user_id?: string | null;
+            /** Base Revision Number */
+            readonly base_revision_number: number;
+            /**
+             * Changeset Id
+             * Format: uuid
+             */
+            readonly changeset_id: string;
+            /**
+             * Confidence
+             * @default 0
+             */
+            readonly confidence?: number;
+            readonly location: components["schemas"]["SemanticLocation"];
+            /**
+             * Operation Count
+             * @default 0
+             */
+            readonly operation_count?: number;
+            /**
+             * Requires Human Approval
+             * @default false
+             */
+            readonly requires_human_approval?: boolean;
+            /** Restricted Domains */
+            readonly restricted_domains?: readonly components["schemas"]["RestrictedDomain"][];
+            readonly status: components["schemas"]["ChangeSetStatus"];
+            /** Title */
+            readonly title: string;
+            /**
+             * Warning Count
+             * @default 0
+             */
+            readonly warning_count?: number;
+        };
+        /**
+         * ChangeSetMergedEventPayload
+         * @description A change set applied to the canonical model in one transaction.
+         *
+         *     ``operation_counts_by_type`` is the point of the shape. A merge reported as
+         *     "38 operations" hides whether it created a tag or deleted thirty of them,
+         *     and the city cannot animate what it cannot tell apart.
+         */
+        readonly ChangeSetMergedEventPayload: {
+            /** Base Revision Number */
+            readonly base_revision_number: number;
+            /**
+             * Changeset Id
+             * Format: uuid
+             */
+            readonly changeset_id: string;
+            readonly location: components["schemas"]["SemanticLocation"];
+            /**
+             * Merge Result Id
+             * @default null
+             */
+            readonly merge_result_id?: string | null;
+            /**
+             * Merged By User Id
+             * @default null
+             */
+            readonly merged_by_user_id?: string | null;
+            /** Object Counts By Type */
+            readonly object_counts_by_type?: {
+                readonly [key: string]: number;
+            };
+            /** Operation Counts By Type */
+            readonly operation_counts_by_type?: {
+                readonly [key: string]: number;
+            };
+            /**
+             * Operations Applied
+             * @default 0
+             */
+            readonly operations_applied?: number;
+            /**
+             * Operations Skipped
+             * @default 0
+             */
+            readonly operations_skipped?: number;
+            /** Resulting Revision Number */
+            readonly resulting_revision_number: number;
+            /**
+             * Summary
+             * @default
+             */
+            readonly summary?: string;
+        };
+        /**
+         * ChangeSetReviewedEventPayload
+         * @description A review verdict on a change set.
+         *
+         *     The concerns ride along as short lines rather than as a bare count. A
+         *     rejection the author cannot act on is the failure this event exists to
+         *     prevent; ``concern_count`` is the true total, since the list is capped.
+         */
+        readonly ChangeSetReviewedEventPayload: {
+            /**
+             * Adjusted Confidence
+             * @default null
+             */
+            readonly adjusted_confidence?: number | null;
+            /**
+             * Changeset Id
+             * Format: uuid
+             */
+            readonly changeset_id: string;
+            /**
+             * Concern Count
+             * @default 0
+             */
+            readonly concern_count?: number;
+            /** Concerns */
+            readonly concerns?: readonly string[];
+            readonly location: components["schemas"]["SemanticLocation"];
+            /** @default null */
+            readonly reviewed_by_agent_kind?: components["schemas"]["AgentKind"] | null;
+            /**
+             * Reviewed By User Id
+             * @default null
+             */
+            readonly reviewed_by_user_id?: string | null;
+            readonly status: components["schemas"]["ChangeSetStatus"];
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            readonly verdict: "approve" | "request_changes" | "reject";
+        };
+        /**
+         * ChangeSetStatus
+         * @enum {string}
+         */
+        readonly ChangeSetStatus: "draft" | "submitted" | "validating" | "validation_failed" | "in_review" | "awaiting_approval" | "approved" | "rejected" | "merged" | "conflicted" | "superseded" | "abandoned";
+        /**
+         * ChangeSetValidationFailedEventPayload
+         * @description A change set the deterministic validators refused.
+         *
+         *     Actionable by construction: ``reason`` says what was wrong in a sentence,
+         *     the counts are per severity so nobody has to guess how much of it blocks,
+         *     and the failing operation is named where the failure was attributable to
+         *     one.
+         */
+        readonly ChangeSetValidationFailedEventPayload: {
+            /**
+             * Changeset Id
+             * Format: uuid
+             */
+            readonly changeset_id: string;
+            /**
+             * Error Count
+             * @default 0
+             */
+            readonly error_count?: number;
+            /**
+             * Failed Object Label
+             * @default
+             */
+            readonly failed_object_label?: string;
+            /** @default null */
+            readonly failed_object_type?: components["schemas"]["ObjectType"] | null;
+            /**
+             * Failed Operation Id
+             * @default null
+             */
+            readonly failed_operation_id?: string | null;
+            /**
+             * Human Review Count
+             * @default 0
+             */
+            readonly human_review_count?: number;
+            readonly location: components["schemas"]["SemanticLocation"];
+            /** Reason */
+            readonly reason: string;
+            /**
+             * Unsupported Count
+             * @default 0
+             */
+            readonly unsupported_count?: number;
+            /**
+             * Warning Count
+             * @default 0
+             */
+            readonly warning_count?: number;
+        };
+        /**
+         * ClarificationStatus
+         * @enum {string}
+         */
+        readonly ClarificationStatus: "open" | "answered" | "deferred" | "dismissed" | "obsolete";
+        /**
          * EventEnvelope
          * @description One entry in a project's ordered event stream.
          */
@@ -164,6 +394,110 @@ export type components = {
          * @enum {string}
          */
         readonly EventType: "project.created" | "project.updated" | "project.completed" | "project.failed" | "file.uploaded" | "file.parsing_started" | "file.parsed" | "file.parse_failed" | "file.deleted" | "workflow.started" | "workflow.paused" | "workflow.resumed" | "workflow.cancelled" | "task.created" | "task.started" | "task.completed" | "task.failed" | "task.blocked" | "agent.status_changed" | "agent.location_changed" | "agent.message_created" | "finding.created" | "finding.reviewed" | "finding.updated" | "approval.requested" | "approval.decided" | "report.created" | "project.question_created" | "project.question_resolved" | "requirement.created" | "workflow.planned" | "workflow.failed" | "task.assigned" | "changeset.created" | "changeset.validation_failed" | "changeset.submitted" | "changeset.reviewed" | "changeset.merged" | "revision.created" | "gate.status_changed" | "validation.started" | "validation.completed" | "export.started" | "export.artifact_created" | "release.candidate_created" | "release.ready";
+        /**
+         * ExportArtifactCreatedEventPayload
+         * @description One generated file inside a release package.
+         *
+         *     ``validation_level`` rather than a boolean, and per file rather than rolled
+         *     up to the candidate: files do not all reach the same level, and labelling
+         *     the weakest one with the strength of the strongest would claim something
+         *     nobody proved. ``is_produced_by_plugin`` is carried for the same reason —
+         *     we do not warrant code we did not generate.
+         */
+        readonly ExportArtifactCreatedEventPayload: {
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            readonly artifact_id: string;
+            /** Filename */
+            readonly filename: string;
+            /**
+             * Import Order
+             * @default 0
+             */
+            readonly import_order?: number;
+            /**
+             * Is Produced By Plugin
+             * @default false
+             */
+            readonly is_produced_by_plugin?: boolean;
+            readonly kind: components["schemas"]["ExportArtifactKind"];
+            readonly location: components["schemas"]["SemanticLocation"];
+            /**
+             * Plugin Name
+             * @default
+             */
+            readonly plugin_name?: string;
+            /**
+             * Relative Path
+             * @default
+             */
+            readonly relative_path?: string;
+            /**
+             * Release Candidate Id
+             * Format: uuid
+             */
+            readonly release_candidate_id: string;
+            /**
+             * Sha256
+             * @default
+             */
+            readonly sha256?: string;
+            /**
+             * Size Bytes
+             * @default 0
+             */
+            readonly size_bytes?: number;
+            readonly validation_level: components["schemas"]["ValidationLevel"];
+            /**
+             * Warning Count
+             * @default 0
+             */
+            readonly warning_count?: number;
+        };
+        /**
+         * ExportArtifactKind
+         * @enum {string}
+         */
+        readonly ExportArtifactKind: "controller_project_l5x" | "program_l5x" | "routine_l5x" | "udt_l5x" | "aoi_l5x" | "tag_csv" | "comment_csv" | "cross_reference_csv" | "import_order" | "limitations" | "target_profile" | "validation_summary" | "manifest" | "checksums" | "change_log" | "approval_log" | "evidence_index" | "hmi_display_xml" | "hmi_tag_csv" | "alarm_import" | "test_plan" | "report";
+        /**
+         * ExportStartedEventPayload
+         * @description Generation of a release package beginning.
+         *
+         *     The artifact kinds the run intends to produce are named up front, so a
+         *     package that ends up missing one is visible as a gap rather than as an
+         *     absence nobody expected.
+         */
+        readonly ExportStartedEventPayload: {
+            /** Artifact Kinds */
+            readonly artifact_kinds?: readonly components["schemas"]["ExportArtifactKind"][];
+            /** Candidate Number */
+            readonly candidate_number: number;
+            /**
+             * Expected Artifact Count
+             * @default 0
+             */
+            readonly expected_artifact_count?: number;
+            /**
+             * Export Profile Id
+             * @default null
+             */
+            readonly export_profile_id?: string | null;
+            /**
+             * Export Profile Key
+             * @default
+             */
+            readonly export_profile_key?: string;
+            readonly location: components["schemas"]["SemanticLocation"];
+            /**
+             * Release Candidate Id
+             * Format: uuid
+             */
+            readonly release_candidate_id: string;
+            /** Revision Number */
+            readonly revision_number: number;
+        };
         /** FileEventPayload */
         readonly FileEventPayload: {
             /**
@@ -235,6 +569,91 @@ export type components = {
             /** Title */
             readonly title: string;
         };
+        /**
+         * GateStatus
+         * @enum {string}
+         */
+        readonly GateStatus: "not_ready" | "ready" | "awaiting_decision" | "passed" | "failed" | "skipped";
+        /**
+         * GateStatusChangedEventPayload
+         * @description One of the six approval gates moving between states.
+         *
+         *     The unmet criteria are carried, not just the status. A gate that says "not
+         *     ready" without saying what is missing gives a UI nothing to render and an
+         *     engineer nothing to do, so ``unmet_criteria`` is non-empty whenever the gate
+         *     is not passable and ``unmet_criteria_count`` is the true total behind the
+         *     capped list. ``is_enabled`` and ``disabled_reason`` keep a gate an
+         *     administrator switched off visible instead of silently passing.
+         */
+        readonly GateStatusChangedEventPayload: {
+            /**
+             * Approval Id
+             * @default null
+             */
+            readonly approval_id?: string | null;
+            /**
+             * Criteria Count
+             * @default 0
+             */
+            readonly criteria_count?: number;
+            /**
+             * Decided By Id
+             * @default null
+             */
+            readonly decided_by_id?: string | null;
+            /**
+             * Decided Revision Number
+             * @default null
+             */
+            readonly decided_revision_number?: number | null;
+            /**
+             * Decision Comment
+             * @default
+             */
+            readonly decision_comment?: string;
+            /**
+             * Disabled Reason
+             * @default
+             */
+            readonly disabled_reason?: string;
+            readonly gate_key: components["schemas"]["ApprovalGateKey"];
+            /**
+             * Is Enabled
+             * @default true
+             */
+            readonly is_enabled?: boolean;
+            readonly location: components["schemas"]["SemanticLocation"];
+            readonly previous_status: components["schemas"]["GateStatus"];
+            readonly status: components["schemas"]["GateStatus"];
+            /**
+             * Title
+             * @default
+             */
+            readonly title?: string;
+            /** Unmet Criteria */
+            readonly unmet_criteria?: readonly string[];
+            /**
+             * Unmet Criteria Count
+             * @default 0
+             */
+            readonly unmet_criteria_count?: number;
+        };
+        /**
+         * ImportVerificationStatus
+         * @enum {string}
+         */
+        readonly ImportVerificationStatus: "not_attempted" | "unavailable" | "queued" | "running" | "passed" | "failed" | "error";
+        /**
+         * ObjectType
+         * @description Stable names for canonical objects.
+         *
+         *     Used wherever a reference has to be polymorphic — evidence links, change
+         *     operations, impact analysis. A string rather than a foreign key per target
+         *     so that adding an object type does not require a schema change everywhere
+         *     it could be cited.
+         * @enum {string}
+         */
+        readonly ObjectType: "project_profile" | "project_question" | "project_decision" | "requirement" | "acceptance_criterion" | "assumption" | "constraint" | "clarification" | "area" | "unit" | "equipment_module" | "device" | "device_type" | "network_node" | "module" | "io_point" | "signal" | "address_assignment" | "tag" | "tag_alias" | "tag_group" | "data_type_definition" | "udt_definition" | "aoi_reference" | "controller_task" | "program" | "routine" | "logic_network" | "logic_rung" | "logic_instruction" | "interlock" | "permissive" | "cause_effect_entry" | "mode_definition" | "state_definition" | "transition_definition" | "sequence_step" | "fault_definition" | "reset_behavior" | "hmi_screen" | "hmi_binding" | "alarm_definition" | "test_case" | "finding" | "export_artifact" | "release_candidate";
         /** ProjectEventPayload */
         readonly ProjectEventPayload: {
             /**
@@ -251,6 +670,214 @@ export type components = {
             readonly project_id: string;
             /** Status */
             readonly status: string;
+        };
+        /**
+         * ProjectQuestionEventPayload
+         * @description A clarification the platform needs answered, raised or closed.
+         *
+         *     ``is_blocking`` and ``blocks_task_kinds`` travel with the event because the
+         *     city has to show what has stopped: without them a question that holds up
+         *     nothing looks exactly like one holding up the whole project.
+         */
+        readonly ProjectQuestionEventPayload: {
+            /**
+             * Answer Summary
+             * @default
+             */
+            readonly answer_summary?: string;
+            /**
+             * Answered By Id
+             * @default null
+             */
+            readonly answered_by_id?: string | null;
+            /** Blocks Task Kinds */
+            readonly blocks_task_kinds?: readonly components["schemas"]["TaskKind"][];
+            readonly category: components["schemas"]["QuestionCategory"];
+            /**
+             * Decision Id
+             * @default null
+             */
+            readonly decision_id?: string | null;
+            /**
+             * Is Blocking
+             * @default false
+             */
+            readonly is_blocking?: boolean;
+            /**
+             * Is Mandatory
+             * @default true
+             */
+            readonly is_mandatory?: boolean;
+            readonly location: components["schemas"]["SemanticLocation"];
+            /**
+             * Question
+             * @default
+             */
+            readonly question?: string;
+            /**
+             * Question Id
+             * Format: uuid
+             */
+            readonly question_id: string;
+            /** Reference */
+            readonly reference: string;
+            readonly status: components["schemas"]["ClarificationStatus"];
+            /**
+             * Why It Matters
+             * @default
+             */
+            readonly why_it_matters?: string;
+        };
+        /**
+         * QuestionCategory
+         * @description What a clarification is about. Drives who should answer it.
+         * @enum {string}
+         */
+        readonly QuestionCategory: "target_platform" | "requirement_ambiguity" | "scope" | "device_or_equipment" | "io_assignment" | "tag_naming" | "interlock" | "sequence_or_mode" | "alarm" | "hmi" | "testing" | "template_selection" | "restricted_domain" | "other";
+        /**
+         * ReleaseCandidateCreatedEventPayload
+         * @description A newly assembled package, at the level it has actually attained.
+         *
+         *     ``limitation_count`` and ``unsupported_item_count`` are on the event rather
+         *     than only inside the package: a limitation the customer first meets at the
+         *     import dialog is a limitation we hid.
+         */
+        readonly ReleaseCandidateCreatedEventPayload: {
+            /**
+             * Artifact Count
+             * @default 0
+             */
+            readonly artifact_count?: number;
+            /** Candidate Number */
+            readonly candidate_number: number;
+            /**
+             * Export Profile Id
+             * @default null
+             */
+            readonly export_profile_id?: string | null;
+            /**
+             * Generator Version
+             * @default
+             */
+            readonly generator_version?: string;
+            /**
+             * Limitation Count
+             * @default 0
+             */
+            readonly limitation_count?: number;
+            readonly location: components["schemas"]["SemanticLocation"];
+            /**
+             * Name
+             * @default
+             */
+            readonly name?: string;
+            /**
+             * Package Bytes
+             * @default 0
+             */
+            readonly package_bytes?: number;
+            /**
+             * Package Sha256
+             * @default
+             */
+            readonly package_sha256?: string;
+            /**
+             * Release Candidate Id
+             * Format: uuid
+             */
+            readonly release_candidate_id: string;
+            /** Revision Number */
+            readonly revision_number: number;
+            readonly status: components["schemas"]["ReleaseCandidateStatus"];
+            /**
+             * Unsupported Item Count
+             * @default 0
+             */
+            readonly unsupported_item_count?: number;
+            readonly validation_level: components["schemas"]["ValidationLevel"];
+            /**
+             * Validation Run Id
+             * @default null
+             */
+            readonly validation_run_id?: string | null;
+        };
+        /**
+         * ReleaseCandidateStatus
+         * @enum {string}
+         */
+        readonly ReleaseCandidateStatus: "draft" | "generating" | "generated" | "validation_failed" | "awaiting_approval" | "approved" | "released" | "superseded" | "failed";
+        /**
+         * ReleaseReadyEventPayload
+         * @description A package that has cleared its gates and is ready to hand over.
+         *
+         *     Ready to *export* is not a release Studio 5000 has accepted, so both facts
+         *     are carried and neither is collapsed into a flag: ``validation_level`` says
+         *     how far the package was actually proved, and ``import_verification_status``
+         *     says whether a licensed workstation has ever imported it —
+         *     ``not_attempted`` being the normal end state, because most deployments have
+         *     no workstation adapter at all. ``is_import_ready_candidate_only`` is the
+         *     claim the UI, the manifest and the covering email must all repeat while it
+         *     is true.
+         */
+        readonly ReleaseReadyEventPayload: {
+            /**
+             * Approved By Id
+             * @default null
+             */
+            readonly approved_by_id?: string | null;
+            /**
+             * Artifact Count
+             * @default 0
+             */
+            readonly artifact_count?: number;
+            /** Candidate Number */
+            readonly candidate_number: number;
+            /**
+             * Import Verification Detail
+             * @default
+             */
+            readonly import_verification_detail?: string;
+            readonly import_verification_status: components["schemas"]["ImportVerificationStatus"];
+            /**
+             * Is Import Ready Candidate Only
+             * @default true
+             */
+            readonly is_import_ready_candidate_only?: boolean;
+            /**
+             * Limitation Count
+             * @default 0
+             */
+            readonly limitation_count?: number;
+            readonly location: components["schemas"]["SemanticLocation"];
+            /**
+             * Manifest Sha256
+             * @default
+             */
+            readonly manifest_sha256?: string;
+            /**
+             * Package Bytes
+             * @default 0
+             */
+            readonly package_bytes?: number;
+            /**
+             * Package Sha256
+             * @default
+             */
+            readonly package_sha256?: string;
+            /**
+             * Release Candidate Id
+             * Format: uuid
+             */
+            readonly release_candidate_id: string;
+            /** Revision Number */
+            readonly revision_number: number;
+            readonly status: components["schemas"]["ReleaseCandidateStatus"];
+            /**
+             * Unsupported Item Count
+             * @default 0
+             */
+            readonly unsupported_item_count?: number;
+            readonly validation_level: components["schemas"]["ValidationLevel"];
         };
         /** ReportEventPayload */
         readonly ReportEventPayload: {
@@ -270,6 +897,172 @@ export type components = {
             readonly report_type: string;
             /** Status */
             readonly status: string;
+            /** Title */
+            readonly title: string;
+        };
+        /**
+         * RequirementEventPayload
+         * @description One requirement the platform extracted from the brief.
+         *
+         *     ``is_inferred`` is carried rather than looked up: a requirement the platform
+         *     derived is a proposal, and a feed that renders it identically to one the
+         *     customer wrote is misreporting what happened.
+         */
+        readonly RequirementEventPayload: {
+            /**
+             * Acceptance Criteria Count
+             * @default 0
+             */
+            readonly acceptance_criteria_count?: number;
+            /**
+             * Confidence
+             * @default 0
+             */
+            readonly confidence?: number;
+            /**
+             * Is Inferred
+             * @default false
+             */
+            readonly is_inferred?: boolean;
+            readonly kind: components["schemas"]["RequirementKind"];
+            readonly location: components["schemas"]["SemanticLocation"];
+            /**
+             * Parent Id
+             * @default null
+             */
+            readonly parent_id?: string | null;
+            readonly priority: components["schemas"]["RequirementPriority"];
+            /** Reference */
+            readonly reference: string;
+            /**
+             * Requirement Id
+             * Format: uuid
+             */
+            readonly requirement_id: string;
+            /**
+             * Source Label
+             * @default
+             */
+            readonly source_label?: string;
+            readonly status: components["schemas"]["RequirementStatus"];
+            /** Title */
+            readonly title: string;
+        };
+        /**
+         * RequirementKind
+         * @enum {string}
+         */
+        readonly RequirementKind: "functional" | "performance" | "safety" | "interface" | "operational" | "regulatory" | "constraint" | "other";
+        /**
+         * RequirementPriority
+         * @enum {string}
+         */
+        readonly RequirementPriority: "mandatory" | "expected" | "optional";
+        /**
+         * RequirementStatus
+         * @enum {string}
+         */
+        readonly RequirementStatus: "proposed" | "accepted" | "rejected" | "superseded" | "implemented" | "verified";
+        /**
+         * RestrictedDomain
+         * @description Engineering domains this platform will not generate for by default.
+         *
+         *     Each is a domain where a plausible-looking generated artifact could cause
+         *     injury or major equipment damage, and where the competence to review it is
+         *     a formal qualification rather than general controls experience.
+         * @enum {string}
+         */
+        readonly RestrictedDomain: "motion" | "safety_logic" | "burner_management" | "process_safety" | "high_energy" | "electrical_power_distribution" | "robotics";
+        /**
+         * RevisionCreatedEventPayload
+         * @description A new numbered point on the project's timeline.
+         *
+         *     A revision is a label rather than a copy, so the payload names what produced
+         *     it and how far it moved the model. ``is_release_baseline`` is carried
+         *     because a baseline must never be the base for an in-place edit.
+         */
+        readonly RevisionCreatedEventPayload: {
+            /**
+             * Changeset Id
+             * @default null
+             */
+            readonly changeset_id?: string | null;
+            /** @default null */
+            readonly created_by_agent_kind?: components["schemas"]["AgentKind"] | null;
+            /**
+             * Created By Id
+             * @default null
+             */
+            readonly created_by_id?: string | null;
+            /**
+             * Is Release Baseline
+             * @default false
+             */
+            readonly is_release_baseline?: boolean;
+            readonly location: components["schemas"]["SemanticLocation"];
+            /** Number */
+            readonly number: number;
+            /** Object Counts By Type */
+            readonly object_counts_by_type?: {
+                readonly [key: string]: number;
+            };
+            /**
+             * Operation Count
+             * @default 0
+             */
+            readonly operation_count?: number;
+            /**
+             * Parent Revision Number
+             * @default null
+             */
+            readonly parent_revision_number?: number | null;
+            /**
+             * Revision Id
+             * Format: uuid
+             */
+            readonly revision_id: string;
+            /**
+             * Summary
+             * @default
+             */
+            readonly summary?: string;
+        };
+        /**
+         * SemanticLocation
+         * @description Where in the city an agent is working.
+         *
+         *     The backend broadcasts these names and never pixel coordinates: where a
+         *     district *is* on screen is the frontend's business, and coupling the
+         *     backend to a layout would make moving a building a backend change.
+         * @enum {string}
+         */
+        readonly SemanticLocation: "project_intake" | "requirements_hall" | "project_core" | "tag_foundry" | "automation_core" | "ladder_logic_lab" | "electrical_works" | "hmi_district" | "alarm_center" | "qa_campus" | "testing_grounds" | "approval_plaza" | "documentation_quarter" | "release_logistics" | "template_library" | "data_center";
+        /**
+         * TaskAssignedEventPayload
+         * @description A queued task handed to an agent.
+         *
+         *     Distinct from ``task.started``: assignment is what sends an agent across the
+         *     city, so the destination is on the event rather than derived from the kind.
+         */
+        readonly TaskAssignedEventPayload: {
+            /**
+             * Agent Id
+             * @default null
+             */
+            readonly agent_id?: string | null;
+            readonly agent_kind: components["schemas"]["AgentKind"];
+            /**
+             * Attempt
+             * @default 1
+             */
+            readonly attempt?: number;
+            readonly kind: components["schemas"]["TaskKind"];
+            readonly location: components["schemas"]["SemanticLocation"];
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            readonly task_id: string;
             /** Title */
             readonly title: string;
         };
@@ -301,6 +1094,135 @@ export type components = {
             readonly task_id: string;
             /** Title */
             readonly title: string;
+        };
+        /**
+         * TaskKind
+         * @description Identifies the handler that executes a task.
+         * @enum {string}
+         */
+        readonly TaskKind: "intake" | "inventory_files" | "parse_file" | "build_evidence_graph" | "plan_project" | "review_plc" | "review_interlocks" | "senior_review" | "request_approvals" | "delivery" | "finalize_project" | "extract_requirements" | "resolve_clarifications" | "design_tags" | "design_plc_architecture" | "generate_logic" | "validate_cross_discipline" | "evaluate_approval_gate" | "generate_release_candidate" | "verify_import" | "assemble_package";
+        /**
+         * ValidationCompletedEventPayload
+         * @description What a validation run found, counted per severity.
+         *
+         *     A single total invites the reader to guess how much of it blocks, so the
+         *     counts are broken out; ``checks_run`` sits beside them because a run that
+         *     found nothing because it ran nothing must not look like a clean one, and
+         *     ``is_blocking`` states the consequence rather than leaving it to be inferred
+         *     from the numbers. ``summary`` and ``first_error_result_id`` make a failing
+         *     run name something the reader can open.
+         */
+        readonly ValidationCompletedEventPayload: {
+            /**
+             * Checks Run
+             * @default 0
+             */
+            readonly checks_run?: number;
+            /** Disciplines */
+            readonly disciplines?: readonly components["schemas"]["ValidationDiscipline"][];
+            /**
+             * Error Count
+             * @default 0
+             */
+            readonly error_count?: number;
+            /**
+             * First Error Object Label
+             * @default
+             */
+            readonly first_error_object_label?: string;
+            /**
+             * First Error Result Id
+             * @default null
+             */
+            readonly first_error_result_id?: string | null;
+            /**
+             * Human Review Count
+             * @default 0
+             */
+            readonly human_review_count?: number;
+            /**
+             * Information Count
+             * @default 0
+             */
+            readonly information_count?: number;
+            /**
+             * Is Blocking
+             * @default false
+             */
+            readonly is_blocking?: boolean;
+            readonly location: components["schemas"]["SemanticLocation"];
+            /** Revision Number */
+            readonly revision_number: number;
+            readonly status: components["schemas"]["ValidationRunStatus"];
+            /** Summary */
+            readonly summary: string;
+            /**
+             * Unsupported Count
+             * @default 0
+             */
+            readonly unsupported_count?: number;
+            /**
+             * Validation Run Id
+             * Format: uuid
+             */
+            readonly validation_run_id: string;
+            /**
+             * Warning Count
+             * @default 0
+             */
+            readonly warning_count?: number;
+        };
+        /**
+         * ValidationDiscipline
+         * @enum {string}
+         */
+        readonly ValidationDiscipline: "requirements" | "tags" | "io" | "plc_logic" | "interlocks" | "hmi" | "alarms" | "testing" | "documentation" | "release" | "cross_discipline";
+        /**
+         * ValidationLevel
+         * @description How far an artifact has actually been proved.
+         *
+         *     Strictly ordered, and never collapsed to a boolean. Everything this backend
+         *     can do offline stops at ``ROUND_TRIP_PARSED``: we can prove our own output
+         *     parses back into the same model, which is not the same as proving Studio
+         *     5000 will import it.
+         * @enum {string}
+         */
+        readonly ValidationLevel: "generated" | "schema_validated" | "internal_semantic_validated" | "round_trip_parsed" | "rockwell_import_verified" | "human_approved" | "released";
+        /**
+         * ValidationRunStatus
+         * @enum {string}
+         */
+        readonly ValidationRunStatus: "running" | "completed" | "failed" | "cancelled";
+        /**
+         * ValidationStartedEventPayload
+         * @description A validation run beginning over one revision.
+         *
+         *     ``disciplines`` is on the event because a clean result across three
+         *     disciplines must never be read as a clean result across all of them, and
+         *     ``revision_number`` because a run is a statement about a specific state of
+         *     the model rather than about the project as it is now.
+         */
+        readonly ValidationStartedEventPayload: {
+            /** Disciplines */
+            readonly disciplines?: readonly components["schemas"]["ValidationDiscipline"][];
+            readonly location: components["schemas"]["SemanticLocation"];
+            /** Revision Number */
+            readonly revision_number: number;
+            /**
+             * Triggered By Id
+             * @default null
+             */
+            readonly triggered_by_id?: string | null;
+            /**
+             * Triggered By Task Id
+             * @default null
+             */
+            readonly triggered_by_task_id?: string | null;
+            /**
+             * Validation Run Id
+             * Format: uuid
+             */
+            readonly validation_run_id: string;
         };
         /**
          * WebSocketError
@@ -365,6 +1287,83 @@ export type components = {
              */
             readonly task_count?: number;
         };
+        /**
+         * WorkflowFailedEventPayload
+         * @description A run that stopped and will not continue on its own.
+         *
+         *     ``reason`` is required and ``failed_task_id`` names the task that produced
+         *     it where one did. A failure broadcast as a status word tells a reader that
+         *     something is wrong and nothing about what to do next.
+         */
+        readonly WorkflowFailedEventPayload: {
+            /**
+             * Failed Task Id
+             * @default null
+             */
+            readonly failed_task_id?: string | null;
+            /** @default null */
+            readonly failed_task_kind?: components["schemas"]["TaskKind"] | null;
+            readonly location: components["schemas"]["SemanticLocation"];
+            /** Reason */
+            readonly reason: string;
+            /**
+             * Run Id
+             * @default null
+             */
+            readonly run_id?: string | null;
+            /**
+             * Tasks Completed
+             * @default 0
+             */
+            readonly tasks_completed?: number;
+            /**
+             * Tasks Remaining
+             * @default 0
+             */
+            readonly tasks_remaining?: number;
+        };
+        /**
+         * WorkflowPlannedEventPayload
+         * @description The plan a Project Manager agent produced for a run.
+         *
+         *     Task counts by kind rather than the tasks themselves: the plan is a
+         *     document, and the feed only needs how much work was scheduled and what
+         *     already holds it up.
+         */
+        readonly WorkflowPlannedEventPayload: {
+            /** Blocked By Question References */
+            readonly blocked_by_question_references?: readonly string[];
+            readonly location: components["schemas"]["SemanticLocation"];
+            /**
+             * Out Of Scope Count
+             * @default 0
+             */
+            readonly out_of_scope_count?: number;
+            /**
+             * Risk Count
+             * @default 0
+             */
+            readonly risk_count?: number;
+            /**
+             * Run Id
+             * @default null
+             */
+            readonly run_id?: string | null;
+            /**
+             * Summary
+             * @default
+             */
+            readonly summary?: string;
+            /**
+             * Task Count
+             * @default 0
+             */
+            readonly task_count?: number;
+            /** Task Counts By Kind */
+            readonly task_counts_by_kind?: {
+                readonly [key: string]: number;
+            };
+        };
     };
     responses: never;
     parameters: never;
@@ -376,17 +1375,54 @@ export type $defs = Record<string, never>;
 export type operations = Record<string, never>;
 
 export type EventComponents = components;
+export type AgentKind = components["schemas"]["AgentKind"];
 export type AgentLocationEventPayload = components["schemas"]["AgentLocationEventPayload"];
 export type AgentMessageEventPayload = components["schemas"]["AgentMessageEventPayload"];
 export type AgentStatusEventPayload = components["schemas"]["AgentStatusEventPayload"];
 export type ApprovalEventPayload = components["schemas"]["ApprovalEventPayload"];
+export type ApprovalGateKey = components["schemas"]["ApprovalGateKey"];
+export type ChangeOperationType = components["schemas"]["ChangeOperationType"];
+export type ChangeSetEventPayload = components["schemas"]["ChangeSetEventPayload"];
+export type ChangeSetMergedEventPayload = components["schemas"]["ChangeSetMergedEventPayload"];
+export type ChangeSetReviewedEventPayload = components["schemas"]["ChangeSetReviewedEventPayload"];
+export type ChangeSetStatus = components["schemas"]["ChangeSetStatus"];
+export type ChangeSetValidationFailedEventPayload = components["schemas"]["ChangeSetValidationFailedEventPayload"];
+export type ClarificationStatus = components["schemas"]["ClarificationStatus"];
 export type EventEnvelope = components["schemas"]["EventEnvelope"];
 export type EventType = components["schemas"]["EventType"];
+export type ExportArtifactCreatedEventPayload = components["schemas"]["ExportArtifactCreatedEventPayload"];
+export type ExportArtifactKind = components["schemas"]["ExportArtifactKind"];
+export type ExportStartedEventPayload = components["schemas"]["ExportStartedEventPayload"];
 export type FileEventPayload = components["schemas"]["FileEventPayload"];
 export type FindingEventPayload = components["schemas"]["FindingEventPayload"];
+export type GateStatus = components["schemas"]["GateStatus"];
+export type GateStatusChangedEventPayload = components["schemas"]["GateStatusChangedEventPayload"];
+export type ImportVerificationStatus = components["schemas"]["ImportVerificationStatus"];
+export type ObjectType = components["schemas"]["ObjectType"];
 export type ProjectEventPayload = components["schemas"]["ProjectEventPayload"];
+export type ProjectQuestionEventPayload = components["schemas"]["ProjectQuestionEventPayload"];
+export type QuestionCategory = components["schemas"]["QuestionCategory"];
+export type ReleaseCandidateCreatedEventPayload = components["schemas"]["ReleaseCandidateCreatedEventPayload"];
+export type ReleaseCandidateStatus = components["schemas"]["ReleaseCandidateStatus"];
+export type ReleaseReadyEventPayload = components["schemas"]["ReleaseReadyEventPayload"];
 export type ReportEventPayload = components["schemas"]["ReportEventPayload"];
+export type RequirementEventPayload = components["schemas"]["RequirementEventPayload"];
+export type RequirementKind = components["schemas"]["RequirementKind"];
+export type RequirementPriority = components["schemas"]["RequirementPriority"];
+export type RequirementStatus = components["schemas"]["RequirementStatus"];
+export type RestrictedDomain = components["schemas"]["RestrictedDomain"];
+export type RevisionCreatedEventPayload = components["schemas"]["RevisionCreatedEventPayload"];
+export type SemanticLocation = components["schemas"]["SemanticLocation"];
+export type TaskAssignedEventPayload = components["schemas"]["TaskAssignedEventPayload"];
 export type TaskEventPayload = components["schemas"]["TaskEventPayload"];
+export type TaskKind = components["schemas"]["TaskKind"];
+export type ValidationCompletedEventPayload = components["schemas"]["ValidationCompletedEventPayload"];
+export type ValidationDiscipline = components["schemas"]["ValidationDiscipline"];
+export type ValidationLevel = components["schemas"]["ValidationLevel"];
+export type ValidationRunStatus = components["schemas"]["ValidationRunStatus"];
+export type ValidationStartedEventPayload = components["schemas"]["ValidationStartedEventPayload"];
 export type WebSocketError = components["schemas"]["WebSocketError"];
 export type WebSocketHello = components["schemas"]["WebSocketHello"];
 export type WorkflowEventPayload = components["schemas"]["WorkflowEventPayload"];
+export type WorkflowFailedEventPayload = components["schemas"]["WorkflowFailedEventPayload"];
+export type WorkflowPlannedEventPayload = components["schemas"]["WorkflowPlannedEventPayload"];

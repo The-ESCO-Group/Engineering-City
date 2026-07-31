@@ -4,6 +4,7 @@
 
 - Branch: `master`
 - Milestone 0 commit: `5cf531c`
+- Milestone 1 commit: `7a2f4d2`
 - Product world commit: `fae0776`
 - Contract version consumed: `1.0.0`
 - Backend application version: `0.1.0`
@@ -82,6 +83,57 @@ Milestone 1 validation:
 - frontend unit tests passed: 12/12
 - frontend production build passed: 1,660 modules
 
+## Milestone 2 expanded 3D world
+
+The main route is the city itself. The existing large procedural campus now has
+an explicit semantic world index and materially functional map controls:
+
+- all 18 core destinations and all 11 expansion zones are listed in the City
+  Directory; semantic IDs are stable lowercase slugs and never renderer
+  coordinates
+- the 16 backend-enabled destinations are compile-time exhaustive against the
+  generated `SemanticLocation` union; the remaining two core landmarks and all
+  expansion zones stay explicitly visual-only
+- each directory destination has a deterministic client-owned camera node and
+  maps to one of the eight stable selectable world anchors, with direct and
+  nearest-anchor relationships labelled separately
+- expansion zones are marked “Mapped visual only” and do not pretend to expose
+  unsupported backend workflows
+- district/building selection runs a smooth, interruptible overview-camera
+  flight; reduced motion jumps directly and reset restores the exact saved
+  overview
+- Infrastructure, Utilities, Environment, Security, and Mobility layers each
+  change multiple real scene signals, including overlays and ambient channels;
+  the current signals are explained by a compact live legend
+- Auto, High, Balanced, and Performance quality modes control pixel ratio,
+  shadows, frame budget, ambient-life density, label density, and tone-mapping
+  policy; Auto resolves from local hardware hints
+- High targets 60 FPS with a 30 FPS fallback, Balanced targets 45/30, and
+  Performance targets 30/24. Browser automation retains a deliberately low
+  headless frame budget for repeatable visual tests
+- map orbit, pan, 360-degree inspection, zoom, reset, and optional bounded Walk
+  mode remain available; Walk mouse-look has a keyboard-operable activation
+  path, and City Directory provides a complete keyboard-accessible, non-3D way
+  to inspect and focus destinations
+- operating-system reduced-motion changes stop ambient travel and camera easing;
+  modal/popover focus is moved, contained, and restored predictably
+
+Ambient vehicles and pedestrians remain deterministic scene life rather than
+engineering agents. They are filtered by quality and layer and never count as
+workflow progress. Event-driven agent movement is Milestone 3.
+
+Milestone 2 validation:
+
+- generated contract drift check passed
+- frontend lint passed
+- frontend strict typecheck passed
+- frontend unit tests passed: 44/44
+- frontend production build passed: 1,670 modules
+- 1440×900 and 1366×768 Chromium visual QA passed for overview, quality settings,
+  functional Utilities layer, district focus, semantic directory search/focus,
+  camera preservation across quality changes, focus containment/restoration,
+  camera reset, and Walk-mode entry/exit
+
 ## Milestone 0 audit
 
 ### Contract and backend surface
@@ -122,33 +174,30 @@ with a reason, or removed before final acceptance.
 ### Districts implemented
 
 The current world contains 26 procedural district specifications, eight
-selectable workflow anchors, and 15 additional spatial labels. It provides a
+selectable workflow anchors, and 22 additional spatial labels. It provides a
 dense central skyline, low-rise perimeter, roads, bridges, canals, utilities,
 renewable energy, water treatment, testing, data-center, logistics, maintenance,
 harbor, park, traffic, pedestrians, map orbit/zoom/reset, and bounded first-person
 inspection.
 
-The following canonical semantic destinations still need explicit client nodes:
-
-- Requirements Hall
-- ESCO Project Core
-- Template Library
-- Tag Foundry
-- Ladder Logic Lab
-- Alarm Center
-- Port Terminal
+The directory now names every required destination. Requirements Hall, ESCO
+Project Core, Template Library, Tag Foundry, Ladder Logic Lab, Alarm Center, and
+Port Terminal have explicit projected labels plus deterministic focus mappings.
 
 ### Semantic location mapping
 
-The current `BuildingId` union contains only:
+The stable selectable `BuildingId` anchor union remains intentionally small:
 
 `intake`, `automation`, `hmi`, `electrical`, `qa`, `documentation`, `approval`,
 and `release`.
 
-Agent markers, occupancy, and route animation in the Three.js scene still read
-the synthetic domain records directly. Live agents currently affect the activity
-strip only. Backend semantic locations have not yet been mapped to deterministic
-world nodes and `agent.location_changed` currently has no backend caller.
+The product-owned directory maps 29 lowercase semantic location IDs to exact
+client-owned scene nodes and these stable selection anchors without storing
+model- or backend-supplied coordinates. Agent markers,
+occupancy, and route animation in the Three.js scene still read the synthetic
+domain records directly. Live agents currently affect the activity strip only,
+and `agent.location_changed` still has no backend caller. Connecting reducer
+state and deterministic paths is Milestone 3.
 
 ### Event types consumed
 
@@ -235,25 +284,29 @@ Missing or incomplete:
 
 ### Performance baseline
 
-- The world uses instanced/merged repeated geometry and static shadow updates.
-- The current city has a clean production bundle and a headless automation
-  quality fallback.
-- `ThreeCity.tsx` is 3,545 lines and constructs the world synchronously.
-- There is no LOD, progressive loading, runtime quality selection, or formal FPS
-  instrumentation.
-- The interactive runtime is currently capped at 30 FPS instead of targeting 60
-  with a measured fallback.
+- The world uses instanced/merged repeated geometry and quality-scaled ambient
+  instance counts.
+- Runtime quality selection controls pixel ratio, shadows, label density,
+  ambient-life density, tone mapping, and the render-frame budget.
+- Auto resolves to High on a typical capable workstation and targets 60 FPS;
+  weaker hardware resolves to Balanced or Performance with a graceful 30 FPS
+  class fallback.
+- The city still constructs most static world geometry synchronously. Formal FPS
+  sampling, progressive loading, and camera-distance LOD remain future
+  optimization work.
 
 ### Accessibility baseline
 
 Present: semantic native controls, visible city focus styles, screen-reader
 labels, reduced motion, an accessible building selection layer, camera reset,
-and a non-required Walk mode.
+a non-required Walk mode, a searchable/filterable non-3D City Directory with
+arrow/Home/End navigation, and high-contrast/forced-color treatment for the new
+directory and quality controls.
 
-Missing: high-contrast mode, scalable HUD text, a complete non-3D city list,
-keyboard-only approval coverage, motion-sickness controls, and automated
-accessibility checks. Some HUD copy is smaller than the 1440×900 readability
-target, and the legacy shell enforces an 1180-pixel minimum body width.
+Missing: keyboard-only approval coverage, motion-sickness presets beyond reduced
+motion, and automated accessibility checks. Legacy shell areas outside the city
+still contain small fixed typography, and the shell enforces an 1180-pixel
+minimum body width.
 
 ## Baseline validation
 

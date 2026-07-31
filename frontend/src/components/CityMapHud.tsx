@@ -31,11 +31,12 @@ export interface CityMapHudProps {
   summary?: Partial<CityOperationsSummary>;
   dataMode?: "demo" | "live" | "unavailable";
   className?: string;
+  labelDensity?: number;
   labelPositions?: Record<string, { deltaX: number; deltaY: number; visible: boolean }>;
 }
 
 const districts: DistrictLabel[] = [
-  { id: "intake", label: "North Review", detail: "Project intake · 1 queued", x: "28.6%", y: "37.4%" },
+  { id: "intake", label: "Project Intake", detail: "Arrival gate · 1 queued", x: "28.6%", y: "37.4%" },
   { id: "automation", label: "Automation Core", detail: "Logic review · 1 active", x: "41.8%", y: "33.4%" },
   { id: "hmi", label: "HMI District", detail: "Tag review · 1 active", x: "64.8%", y: "35%" },
   { id: "electrical", label: "Electrical Works", detail: "I/O review · 1 active", x: "76.7%", y: "40.7%" },
@@ -48,9 +49,15 @@ const districts: DistrictLabel[] = [
 const scenicLabels: ScenicLabel[] = [
   { label: "North Gateway", x: "17.9%", y: "21.7%" },
   { label: "Research Park", x: "30.9%", y: "23.6%" },
+  { label: "Template Library", x: "34.1%", y: "27.3%" },
+  { label: "Requirements Hall", x: "33.4%", y: "32.1%" },
   { label: "Innovation District", x: "45.4%", y: "20%" },
+  { label: "Tag Foundry", x: "48.2%", y: "27.1%" },
+  { label: "Ladder Logic Lab", x: "52.6%", y: "32.2%" },
+  { label: "ESCO Project Core", x: "50.5%", y: "43.8%" },
   { label: "Energy Plant", x: "65.3%", y: "20.4%" },
   { label: "Water Treatment", x: "85.6%", y: "22.7%" },
+  { label: "Alarm Center", x: "75.4%", y: "43.8%" },
   { label: "Industrial Zone", x: "89.7%", y: "36.2%" },
   { label: "South Gateway", x: "96.2%", y: "49.8%", align: "right" },
   { label: "Central Park", x: "51.8%", y: "59.9%" },
@@ -61,6 +68,25 @@ const scenicLabels: ScenicLabel[] = [
   { label: "Wind Farm", x: "5%", y: "68%" },
   { label: "Testing Grounds", x: "29.5%", y: "75.4%" },
   { label: "Data Center", x: "52.8%", y: "79.7%" },
+  { label: "Port Terminal", x: "79.6%", y: "82.1%" },
+];
+
+const coreScenicLabelNames = new Set([
+  "Template Library",
+  "Requirements Hall",
+  "Tag Foundry",
+  "Ladder Logic Lab",
+  "ESCO Project Core",
+  "Alarm Center",
+  "Central Park",
+  "Training Academy",
+  "Testing Grounds",
+  "Data Center"
+]);
+
+const prioritizedScenicLabels = [
+  ...scenicLabels.filter((label) => coreScenicLabelNames.has(label.label)),
+  ...scenicLabels.filter((label) => !coreScenicLabelNames.has(label.label))
 ];
 
 const defaultSummary: CityOperationsSummary = {
@@ -88,6 +114,7 @@ export function CityMapHud({
   summary,
   dataMode = "demo",
   className,
+  labelDensity = 1,
   labelPositions,
 }: CityMapHudProps) {
   const operations = dataMode === "demo"
@@ -95,6 +122,10 @@ export function CityMapHud({
     : { activeReviews: 0, openFindings: 0, pendingApprovals: 0, releaseReadiness: null, ...summary };
   const hasProjectData = dataMode !== "unavailable";
   const rootClassName = ["city-map-hud", className].filter(Boolean).join(" ");
+  const scenicLabelCount = Math.max(
+    coreScenicLabelNames.size,
+    Math.min(scenicLabels.length, Math.round(scenicLabels.length * labelDensity))
+  );
 
   return (
     <div className={rootClassName} role="group" aria-label="Engineering city map controls">
@@ -134,7 +165,7 @@ export function CityMapHud({
       </nav>
 
       <div className="city-map-hud__regions" aria-hidden="true">
-        {scenicLabels.map((region) => {
+        {prioritizedScenicLabels.slice(0, scenicLabelCount).map((region) => {
           const projection = labelPositions?.[region.label];
           return (
             <span

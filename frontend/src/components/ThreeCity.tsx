@@ -2,6 +2,16 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { agents, buildings, type BuildingId } from "../domain";
+import type { LocationId } from "../world/ids";
+import {
+  WORLD_QUALITY_PROFILES,
+  type WorldQualityProfile
+} from "../world/quality";
+import {
+  getSceneLocationNode,
+  type SceneLocationNode
+} from "../world/sceneLocations";
+import type { CityHomeLayer } from "./CityHomeChrome";
 
 export interface ThreeCityProps {
   selectedBuilding: BuildingId | null;
@@ -12,6 +22,11 @@ export interface ThreeCityProps {
   zoom: number;
   resetKey: number;
   viewMode: "overview" | "first-person";
+  activeLayer?: CityHomeLayer;
+  qualityProfile?: WorldQualityProfile;
+  selectionRequestKey?: number;
+  focusLocationId?: LocationId | null;
+  focusRequestKey?: number;
   showWorkflowAgents: boolean;
   onLabelPositionsChange?: (positions: CityLabelPositions) => void;
 }
@@ -27,6 +42,7 @@ export type CityLabelPositions = Record<string, CityLabelProjection>;
 type Vec3 = readonly [number, number, number];
 type Point2 = readonly [number, number];
 type DistrictAccent = "cyan" | "orange" | "purple";
+type CityOverlayLayer = Exclude<CityHomeLayer, "overview">;
 
 interface AnchorSpec {
   id: BuildingId;
@@ -145,6 +161,31 @@ interface SignalRuntime {
   dummy: THREE.Object3D;
 }
 
+interface LayerSceneRuntime {
+  scene: THREE.Scene;
+  overlays: Record<CityOverlayLayer, THREE.Group>;
+  vehicleLife: VehicleRuntime;
+  pedestrianLife: PedestrianRuntime;
+  waterPulses: PulseRuntime;
+  routePulses: PulseRuntime;
+  rooftopSignals: SignalRuntime;
+}
+
+interface CameraFlight {
+  startedAt: number;
+  duration: number;
+  fromPosition: THREE.Vector3;
+  toPosition: THREE.Vector3;
+  fromTarget: THREE.Vector3;
+  toTarget: THREE.Vector3;
+}
+
+interface OverviewCameraSnapshot {
+  position: THREE.Vector3;
+  target: THREE.Vector3;
+  zoom: number;
+}
+
 interface RoadSegment {
   from: Point2;
   to: Point2;
@@ -253,7 +294,14 @@ const CITY_LABEL_ANCHORS: ReadonlyArray<{
   { key: "Supply Chain Hub", position: [62, 4, 86] },
   { key: "Wind Farm", position: [-106, 4, 121] },
   { key: "Testing Grounds", position: [-32, 3, 124] },
-  { key: "Data Center", position: [30, 3, 119] }
+  { key: "Data Center", position: [30, 3, 119] },
+  { key: "Requirements Hall", position: [-76, 6.5, -22] },
+  { key: "ESCO Project Core", position: [LANDMARK[0], 30, LANDMARK[1]] },
+  { key: "Template Library", position: [-82, 8, -72] },
+  { key: "Tag Foundry", position: [10, 7.5, -73] },
+  { key: "Ladder Logic Lab", position: [-27, 10, -53] },
+  { key: "Alarm Center", position: [67, 7, 4] },
+  { key: "Port Terminal", position: [96, 7, 126] }
 ];
 
 const DISTRICTS: DistrictSpec[] = [
@@ -628,7 +676,7 @@ const FIRST_PERSON_HUD_STYLE: CSSProperties = {
   fontWeight: 700,
   letterSpacing: ".65px",
   lineHeight: 1.4,
-  pointerEvents: "none"
+  pointerEvents: "auto"
 };
 
 const CROSSHAIR_STYLE: CSSProperties = {
@@ -823,6 +871,273 @@ function addCylinder(
   object.receiveShadow = true;
   parent.add(object);
   return object;
+}
+
+function addOverlayPath(
+  parent: THREE.Object3D,
+  points: ReadonlyArray<Point2>,
+  color: number,
+  opacity: number,
+  y = 0.72,
+  closed = false
+) {
+  const geometry = new THREE.BufferGeometry().setFromPoints(
+    points.map(([x, z]) => new THREE.Vector3(x, y, z))
+  );
+  const material = new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false
+  });
+  const line = closed
+    ? new THREE.LineLoop(geometry, material)
+    : new THREE.Line(geometry, material);
+  line.renderOrder = 18;
+  parent.add(line);
+  return line;
+}
+
+function addOverlayRing(
+  parent: THREE.Object3D,
+  center: Point2,
+  radius: number,
+  color: number,
+  opacity = 0.72,
+  y = 0.78
+) {
+  const material = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false
+  });
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(radius * 0.76, radius, 40),
+    material
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(center[0], y, center[1]);
+  ring.renderOrder = 19;
+  parent.add(ring);
+  return ring;
+}
+
+function addOverlayBeacon(
+  parent: THREE.Object3D,
+  center: Point2,
+  height: number,
+  color: number
+) {
+  const geometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(center[0], 0.72, center[1]),
+    new THREE.Vector3(center[0], height, center[1])
+  ]);
+  const material = new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.78,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false
+  });
+  const beacon = new THREE.Line(geometry, material);
+  beacon.renderOrder = 19;
+  parent.add(beacon);
+
+  const cap = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.46, 0),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.9,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false
+    })
+  );
+  cap.position.set(center[0], height, center[1]);
+  cap.renderOrder = 20;
+  parent.add(cap);
+}
+
+function addOverlayFootprint(
+  parent: THREE.Object3D,
+  center: Point2,
+  size: Point2,
+  color: number,
+  opacity = 0.72
+) {
+  const halfWidth = size[0] / 2 + 1.25;
+  const halfDepth = size[1] / 2 + 1.25;
+  addOverlayPath(
+    parent,
+    [
+      [center[0] - halfWidth, center[1] - halfDepth],
+      [center[0] + halfWidth, center[1] - halfDepth],
+      [center[0] + halfWidth, center[1] + halfDepth],
+      [center[0] - halfWidth, center[1] + halfDepth]
+    ],
+    color,
+    opacity,
+    0.74,
+    true
+  );
+}
+
+function createLayerOverlays(scene: THREE.Scene) {
+  const overlays = {
+    infrastructure: new THREE.Group(),
+    utilities: new THREE.Group(),
+    environment: new THREE.Group(),
+    security: new THREE.Group(),
+    mobility: new THREE.Group()
+  } satisfies Record<CityOverlayLayer, THREE.Group>;
+
+  Object.entries(overlays).forEach(([name, group]) => {
+    group.name = `city-layer-${name}`;
+    group.visible = false;
+    scene.add(group);
+  });
+
+  ANCHOR_SPECS.forEach((anchor, index) => {
+    addOverlayFootprint(
+      overlays.infrastructure,
+      anchor.position,
+      anchor.lot,
+      index % 2 === 0 ? 0x5ce8ff : 0xa4f4ff
+    );
+    addOverlayBeacon(
+      overlays.infrastructure,
+      anchor.position,
+      8 + (index % 3) * 2.2,
+      0x5ce8ff
+    );
+  });
+
+  const utilityNodes: ReadonlyArray<Point2> = [
+    LANDMARK,
+    ANCHOR_SPECS.find(({ id }) => id === "automation")!.position,
+    ANCHOR_SPECS.find(({ id }) => id === "hmi")!.position,
+    ANCHOR_SPECS.find(({ id }) => id === "electrical")!.position,
+    [29, -165],
+    [124, -168]
+  ];
+  utilityNodes.slice(1).forEach((node, index) => {
+    addOverlayPath(
+      overlays.utilities,
+      [utilityNodes[0], node],
+      index % 2 === 0 ? 0x42dfff : 0xae64ff,
+      0.78,
+      0.88
+    );
+    addOverlayRing(
+      overlays.utilities,
+      node,
+      index < 3 ? 3.4 : 5.2,
+      index % 2 === 0 ? 0x42dfff : 0xae64ff
+    );
+  });
+  addOverlayBeacon(overlays.utilities, LANDMARK, 24, 0x42dfff);
+
+  WATER_BANDS.forEach(({ center, size }, index) => {
+    addOverlayFootprint(
+      overlays.environment,
+      center,
+      size,
+      index % 2 === 0 ? 0x45e5ff : 0x4cff8b,
+      0.56
+    );
+  });
+  for (const [center, radius] of [
+    [PARK, 15.5],
+    [[-124, -98] as Point2, 10.5],
+    [[124, -168] as Point2, 9.5]
+  ] as ReadonlyArray<readonly [Point2, number]>) {
+    addOverlayRing(overlays.environment, center, radius, 0x4cff8b, 0.7);
+    addOverlayRing(overlays.environment, center, radius * 0.62, 0x45e5ff, 0.48, 0.8);
+  }
+
+  const securityAnchors = ANCHOR_SPECS.filter(({ id }) =>
+    (["intake", "qa", "approval", "release"] as BuildingId[]).includes(id)
+  );
+  addOverlayPath(
+    overlays.security,
+    securityAnchors.map(({ position }) => position),
+    0xb86cff,
+    0.82,
+    0.92,
+    true
+  );
+  securityAnchors.forEach((anchor, index) => {
+    addOverlayFootprint(overlays.security, anchor.position, anchor.lot, 0xb86cff, 0.82);
+    addOverlayRing(overlays.security, anchor.position, 4.2 + index * 0.45, 0xe9fbff, 0.62);
+    addOverlayBeacon(overlays.security, anchor.position, 10 + index * 1.4, 0xb86cff);
+  });
+
+  ROAD_SEGMENTS.forEach((segment, index) => {
+    addOverlayPath(
+      overlays.mobility,
+      [segment.from, segment.to],
+      index % 3 === 0 ? 0xffa14a : 0xff6a22,
+      0.62,
+      0.9
+    );
+  });
+  for (const node of [HUB, [-95, -9], [39, -57], [78, 40]] as Point2[]) {
+    addOverlayRing(overlays.mobility, node, node === HUB ? 6.5 : 4.2, 0xff8a32, 0.74);
+  }
+
+  return overlays;
+}
+
+const LAYER_SKY_COLORS: Record<CityHomeLayer, number> = {
+  overview: 0x4d8398,
+  infrastructure: 0x467a91,
+  utilities: 0x426f91,
+  environment: 0x4d857f,
+  security: 0x586f85,
+  mobility: 0x52798d
+};
+
+function applyCityLayer(runtime: LayerSceneRuntime, layer: CityHomeLayer) {
+  Object.entries(runtime.overlays).forEach(([overlayLayer, group]) => {
+    group.visible = overlayLayer === layer;
+  });
+
+  const showVehicles = layer === "overview" || layer === "mobility";
+  runtime.vehicleLife.body.visible = showVehicles;
+  runtime.vehicleLife.cabin.visible = showVehicles;
+  runtime.vehicleLife.lamps.visible = showVehicles;
+
+  const showPedestrians =
+    layer === "overview" || layer === "environment" || layer === "mobility";
+  runtime.pedestrianLife.bodies.visible = showPedestrians;
+  runtime.pedestrianLife.heads.visible = showPedestrians;
+
+  runtime.waterPulses.mesh.visible =
+    layer === "overview" || layer === "utilities" || layer === "environment";
+  runtime.routePulses.mesh.visible = layer === "overview" || layer === "mobility";
+  runtime.rooftopSignals.mesh.visible =
+    layer === "overview" ||
+    layer === "infrastructure" ||
+    layer === "utilities" ||
+    layer === "security";
+
+  const skyColor = LAYER_SKY_COLORS[layer];
+  if (runtime.scene.background instanceof THREE.Color) {
+    runtime.scene.background.setHex(skyColor);
+  }
+  if (runtime.scene.fog instanceof THREE.Fog) {
+    runtime.scene.fog.color.setHex(skyColor);
+  }
 }
 
 function addFacadeBands(
@@ -1511,7 +1826,11 @@ function setInstanceTransform(
   mesh.setMatrixAt(index, dummy.matrix);
 }
 
-function createVehicleLife(scene: THREE.Scene, palette: MaterialPalette): VehicleRuntime {
+function createVehicleLife(
+  scene: THREE.Scene,
+  palette: MaterialPalette,
+  density = 1
+): VehicleRuntime {
   const pathDefinitions: Array<RoadSegment & { surfaceY: number }> = [
     ...ROAD_SEGMENTS.map((segment) => ({ ...segment, surfaceY: 0.52 })),
     ...METRO_VERTICAL_STREETS.map((x) => ({
@@ -1545,6 +1864,7 @@ function createVehicleLife(scene: THREE.Scene, palette: MaterialPalette): Vehicl
       });
     }
   });
+  motions.splice(Math.max(8, Math.ceil(motions.length * density)));
 
   const geometry = new THREE.BoxGeometry(1, 1, 1);
   const bodyMaterial = new THREE.MeshStandardMaterial({
@@ -1633,23 +1953,28 @@ function updateVehicleLife(runtime: VehicleRuntime, delta: number) {
   runtime.lamps.instanceMatrix.needsUpdate = true;
 }
 
-function createPedestrianLife(scene: THREE.Scene): PedestrianRuntime {
+function createPedestrianLife(scene: THREE.Scene, density = 1): PedestrianRuntime {
   const random = seededRandom(32291);
   const motions: PedestrianMotion[] = [];
-  for (let index = 0; index < 84; index += 1) {
+  const pedestrianCount = Math.max(12, Math.round(84 * density));
+  const hubPedestrianCount = Math.max(4, Math.round(pedestrianCount * (30 / 84)));
+  const parkPedestrianCount = Math.max(4, Math.round(pedestrianCount * (36 / 84)));
+  for (let index = 0; index < pedestrianCount; index += 1) {
     let center: Point2;
     let radius: number;
     let groundY: number;
-    if (index < 30) {
+    if (index < hubPedestrianCount) {
       center = HUB;
       radius = 2.4 + random() * 7.4;
       groundY = 0.34;
-    } else if (index < 66) {
+    } else if (index < hubPedestrianCount + parkPedestrianCount) {
       center = PARK;
       radius = 2.2 + random() * 11.2;
       groundY = 0.3;
     } else {
-      const anchor = ANCHOR_SPECS[(index - 66) % ANCHOR_SPECS.length];
+      const anchor = ANCHOR_SPECS[
+        (index - hubPedestrianCount - parkPedestrianCount) % ANCHOR_SPECS.length
+      ];
       center = [
         anchor.position[0] + (random() - 0.5) * anchor.lot[0] * 0.74,
         anchor.position[1] + anchor.lot[1] * 0.56
@@ -2787,14 +3112,15 @@ function createAgentMarkers(scene: THREE.Scene, palette: MaterialPalette): Agent
   return markers;
 }
 
-function createLights(scene: THREE.Scene) {
+function createLights(scene: THREE.Scene, qualityProfile: WorldQualityProfile) {
   scene.add(new THREE.HemisphereLight(0xf4fbff, 0x24475a, 1.62));
   scene.add(new THREE.AmbientLight(0xb8d7df, 0.5));
 
   const key = new THREE.DirectionalLight(0xfffbed, 4.4);
   key.position.set(-95, 165, 95);
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
+  key.castShadow = qualityProfile.shadows !== "off";
+  const shadowMapSize = qualityProfile.shadowMapSize || 1024;
+  key.shadow.mapSize.set(shadowMapSize, shadowMapSize);
   key.shadow.camera.left = -240;
   key.shadow.camera.right = 240;
   key.shadow.camera.top = 205;
@@ -2893,6 +3219,40 @@ function resetFirstPersonCamera(camera: THREE.PerspectiveCamera): FirstPersonLoo
   return look;
 }
 
+function createCameraFlight(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+  focus: SceneLocationNode,
+  duration: number
+): CameraFlight {
+  const fromPosition = camera.position.clone();
+  const fromTarget = controls.target.clone();
+  const toTarget = new THREE.Vector3(
+    focus.position[0],
+    focus.targetY ?? 4.2,
+    focus.position[1]
+  );
+  const viewDirection = fromPosition.clone().sub(fromTarget);
+  if (viewDirection.lengthSq() < 0.001) {
+    viewDirection
+      .set(...OVERVIEW_POSITION)
+      .sub(new THREE.Vector3(...OVERVIEW_TARGET));
+  }
+  const focusDistance = THREE.MathUtils.clamp(viewDirection.length() * 0.58, 146, 188);
+  const toPosition = toTarget
+    .clone()
+    .add(viewDirection.normalize().multiplyScalar(focusDistance));
+
+  return {
+    startedAt: performance.now(),
+    duration,
+    fromPosition,
+    toPosition,
+    fromTarget,
+    toTarget
+  };
+}
+
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   return (
@@ -2915,6 +3275,11 @@ export function ThreeCity({
   zoom,
   resetKey,
   viewMode,
+  activeLayer = "overview",
+  qualityProfile = WORLD_QUALITY_PROFILES.high,
+  selectionRequestKey = 0,
+  focusLocationId = null,
+  focusRequestKey = 0,
   showWorkflowAgents,
   onLabelPositionsChange
 }: ThreeCityProps) {
@@ -2925,10 +3290,14 @@ export function ThreeCity({
   const controlsRef = useRef<OrbitControls | null>(null);
   const publishLabelsRef = useRef<() => void>(() => undefined);
   const runtimesRef = useRef<Map<BuildingId, BuildingRuntime>>(new Map());
+  const layerSceneRef = useRef<LayerSceneRuntime | null>(null);
+  const cameraFlightRef = useRef<CameraFlight | null>(null);
+  const overviewCameraSnapshotRef = useRef<OverviewCameraSnapshot | null>(null);
   const selectedRef = useRef<BuildingId | null>(selectedBuilding);
   const selectRef = useRef(selectBuilding);
   const animationRef = useRef({ paused, reducedMotion, speed });
   const viewModeRef = useRef(viewMode);
+  const activeLayerRef = useRef(activeLayer);
   const showWorkflowAgentsRef = useRef(showWorkflowAgents);
   const labelPositionsChangeRef = useRef(onLabelPositionsChange);
   const pressedKeysRef = useRef(new Set<string>());
@@ -2940,6 +3309,7 @@ export function ThreeCity({
   selectRef.current = selectBuilding;
   animationRef.current = { paused, reducedMotion, speed };
   viewModeRef.current = viewMode;
+  activeLayerRef.current = activeLayer;
   showWorkflowAgentsRef.current = showWorkflowAgents;
   labelPositionsChangeRef.current = onLabelPositionsChange;
 
@@ -2969,19 +3339,23 @@ export function ThreeCity({
       const automatedRuntime = navigator.webdriver;
 
       renderer = new THREE.WebGLRenderer({
-        antialias: !automatedRuntime,
+        antialias: !automatedRuntime && qualityProfile.mode !== "performance",
         alpha: false,
-        powerPreference: "high-performance"
+        powerPreference: qualityProfile.mode === "performance" ? "low-power" : "high-performance"
       });
       renderer.setPixelRatio(
-        automatedRuntime ? 0.65 : Math.min(window.devicePixelRatio || 1, 1.75)
+        automatedRuntime
+          ? 0.65
+          : Math.min(window.devicePixelRatio || 1, qualityProfile.pixelRatioCap)
       );
-      renderer.shadowMap.enabled = !automatedRuntime;
+      renderer.shadowMap.enabled = !automatedRuntime && qualityProfile.shadows !== "off";
       renderer.shadowMap.type = THREE.PCFShadowMap;
-      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.autoUpdate = qualityProfile.shadows === "dynamic";
       renderer.shadowMap.needsUpdate = true;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMapping = qualityProfile.postprocessing === "off"
+        ? THREE.NoToneMapping
+        : THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.03;
       renderer.domElement.className = "three-city-canvas pixi-city-canvas";
       renderer.domElement.setAttribute("aria-hidden", "true");
@@ -3009,9 +3383,10 @@ export function ThreeCity({
       controls.target.set(...OVERVIEW_TARGET);
       controls.enableDamping = !animationRef.current.reducedMotion;
       controls.dampingFactor = 0.075;
-      controls.enablePan = false;
+      controls.enablePan = true;
       controls.enableRotate = true;
       controls.enableZoom = true;
+      controls.panSpeed = 0.55;
       controls.rotateSpeed = 0.62;
       controls.zoomSpeed = 0.86;
       controls.screenSpacePanning = false;
@@ -3023,6 +3398,16 @@ export function ThreeCity({
       controls.maxDistance = 520;
       controls.enabled = viewModeRef.current === "overview";
       controls.update();
+      controls.saveState();
+      const savedCamera = overviewCameraSnapshotRef.current;
+      if (savedCamera) {
+        camera.position.copy(savedCamera.position);
+        camera.zoom = savedCamera.zoom;
+        camera.updateProjectionMatrix();
+        controls.target.copy(savedCamera.target);
+        controls.update();
+        overviewCameraSnapshotRef.current = null;
+      }
       controlsRef.current = controls;
 
       let lastLabelPublish = -Infinity;
@@ -3059,9 +3444,15 @@ export function ThreeCity({
       };
       publishLabelsRef.current = () => publishLabelPositions(true);
       const publishLabelsOnControlsChange = () => publishLabelPositions();
+      const cancelCameraFlightOnInteraction = () => {
+        cameraFlightRef.current = null;
+      };
       controls.addEventListener("change", publishLabelsOnControlsChange);
-      detachLabelListener = () =>
+      controls.addEventListener("start", cancelCameraFlightOnInteraction);
+      detachLabelListener = () => {
         controls?.removeEventListener("change", publishLabelsOnControlsChange);
+        controls?.removeEventListener("start", cancelCameraFlightOnInteraction);
+      };
       renderer.domElement.style.cursor =
         viewModeRef.current === "first-person" ? "crosshair" : "grab";
 
@@ -3086,12 +3477,31 @@ export function ThreeCity({
       runtimesRef.current = runtimes;
       setSelected(runtimes, selectedRef.current);
       const agentMarkers = createAgentMarkers(scene, palette);
-      const vehicleLife = createVehicleLife(scene, palette);
-      const pedestrianLife = createPedestrianLife(scene);
+      const vehicleLife = createVehicleLife(
+        scene,
+        palette,
+        qualityProfile.ambientLifeDensity
+      );
+      const pedestrianLife = createPedestrianLife(
+        scene,
+        qualityProfile.ambientLifeDensity
+      );
       const waterPulses = createWaterPulses(scene, palette);
       const routePulses = createRoutePulses(scene, palette);
       const rooftopSignals = createRooftopSignals(scene);
-      createLights(scene);
+      const layerOverlays = createLayerOverlays(scene);
+      const layerSceneRuntime: LayerSceneRuntime = {
+        scene,
+        overlays: layerOverlays,
+        vehicleLife,
+        pedestrianLife,
+        waterPulses,
+        routePulses,
+        rooftopSignals
+      };
+      layerSceneRef.current = layerSceneRuntime;
+      applyCityLayer(layerSceneRuntime, activeLayerRef.current);
+      createLights(scene, qualityProfile);
 
       const updatePointer = (event: PointerEvent) => {
         if (!renderer) return;
@@ -3264,8 +3674,9 @@ export function ThreeCity({
       const timer = new THREE.Timer();
       timer.connect(document);
       let animationElapsed = 0;
-      let lastFrameTimestamp = -Infinity;
-      const targetFrameRate = automatedRuntime ? 8 : 30;
+      let lastFrameTimestamp: number | null = null;
+      const targetFrameRate = automatedRuntime ? 8 : qualityProfile.targetFps;
+      const targetFrameInterval = 1000 / targetFrameRate;
       const firstPersonForward = new THREE.Vector3();
       const firstPersonRight = new THREE.Vector3();
       const firstPersonMovement = new THREE.Vector3();
@@ -3273,8 +3684,13 @@ export function ThreeCity({
         if (disposed || !renderer || !scene || !controls) return;
         frame = window.requestAnimationFrame(render);
         const frameTimestamp = timestamp ?? performance.now();
-        if (frameTimestamp - lastFrameTimestamp < 1000 / targetFrameRate) return;
-        lastFrameTimestamp = frameTimestamp;
+        if (lastFrameTimestamp !== null) {
+          const elapsedSinceFrame = frameTimestamp - lastFrameTimestamp;
+          if (elapsedSinceFrame + 0.05 < targetFrameInterval) return;
+          lastFrameTimestamp = frameTimestamp - (elapsedSinceFrame % targetFrameInterval);
+        } else {
+          lastFrameTimestamp = frameTimestamp;
+        }
         timer.update(timestamp);
         const delta = Math.min(timer.getDelta(), 0.05);
         const state = animationRef.current;
@@ -3282,6 +3698,28 @@ export function ThreeCity({
         controls.enabled = !firstPersonActive;
         controls.enableDamping = !state.reducedMotion;
         if (!firstPersonActive) {
+          const cameraFlight = cameraFlightRef.current;
+          if (cameraFlight) {
+            const progress = THREE.MathUtils.clamp(
+              (frameTimestamp - cameraFlight.startedAt) / cameraFlight.duration,
+              0,
+              1
+            );
+            const easedProgress = 1 - Math.pow(1 - progress, 3);
+            camera.position.lerpVectors(
+              cameraFlight.fromPosition,
+              cameraFlight.toPosition,
+              easedProgress
+            );
+            controls.target.lerpVectors(
+              cameraFlight.fromTarget,
+              cameraFlight.toTarget,
+              easedProgress
+            );
+            camera.lookAt(controls.target);
+            publishLabelPositions();
+            if (progress >= 1) cameraFlightRef.current = null;
+          }
           controls.update();
         } else {
           const keys = pressedKeys;
@@ -3367,8 +3805,17 @@ export function ThreeCity({
         if (document.pointerLockElement === renderer?.domElement) {
           document.exitPointerLock();
         }
+        if (controls && viewModeRef.current === "overview") {
+          overviewCameraSnapshotRef.current = {
+            position: camera.position.clone(),
+            target: controls.target.clone(),
+            zoom: camera.zoom
+          };
+        }
         controls?.dispose();
         controlsRef.current = null;
+        cameraFlightRef.current = null;
+        layerSceneRef.current = null;
         publishLabelsRef.current = () => undefined;
         cameraRef.current = null;
         firstPersonCameraRef.current = null;
@@ -3390,6 +3837,8 @@ export function ThreeCity({
       }
       controls?.dispose();
       controlsRef.current = null;
+      cameraFlightRef.current = null;
+      layerSceneRef.current = null;
       publishLabelsRef.current = () => undefined;
       cameraRef.current = null;
       firstPersonCameraRef.current = null;
@@ -3404,14 +3853,68 @@ export function ThreeCity({
           : "This device could not initialize the WebGL city renderer."
       );
     }
-  }, []);
+  }, [qualityProfile]);
 
   useEffect(() => {
     setSelected(runtimesRef.current, selectedBuilding);
-  }, [selectedBuilding]);
+    cameraFlightRef.current = null;
+    if (!selectedBuilding || viewModeRef.current !== "overview") return;
+
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    const anchor = ANCHOR_SPECS.find(({ id }) => id === selectedBuilding);
+    if (!camera || !controls || !anchor) return;
+
+    const flight = createCameraFlight(
+      camera,
+      controls,
+      { position: anchor.position },
+      animationRef.current.reducedMotion ? 1 : 720
+    );
+    if (animationRef.current.reducedMotion) {
+      camera.position.copy(flight.toPosition);
+      controls.target.copy(flight.toTarget);
+      camera.lookAt(controls.target);
+      controls.update();
+      publishLabelsRef.current();
+      return;
+    }
+    cameraFlightRef.current = flight;
+  }, [selectedBuilding, selectionRequestKey]);
+
+  useEffect(() => {
+    if (!focusLocationId || focusRequestKey === 0 || viewModeRef.current !== "overview") return;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+    const focus = getSceneLocationNode(focusLocationId);
+
+    const flight = createCameraFlight(
+      camera,
+      controls,
+      focus,
+      animationRef.current.reducedMotion ? 1 : 720
+    );
+    if (animationRef.current.reducedMotion) {
+      camera.position.copy(flight.toPosition);
+      controls.target.copy(flight.toTarget);
+      camera.lookAt(controls.target);
+      controls.update();
+      publishLabelsRef.current();
+      return;
+    }
+    cameraFlightRef.current = flight;
+  }, [focusLocationId, focusRequestKey]);
+
+  useEffect(() => {
+    activeLayerRef.current = activeLayer;
+    const runtime = layerSceneRef.current;
+    if (runtime) applyCityLayer(runtime, activeLayer);
+  }, [activeLayer]);
 
   useEffect(() => {
     viewModeRef.current = viewMode;
+    cameraFlightRef.current = null;
     pressedKeysRef.current.clear();
     const controls = controlsRef.current;
     const renderer = rendererRef.current;
@@ -3436,7 +3939,11 @@ export function ThreeCity({
   useEffect(() => {
     const camera = cameraRef.current;
     if (!camera) return;
-    camera.zoom = THREE.MathUtils.clamp(zoom, 0.72, 1.55);
+    const nextZoom = THREE.MathUtils.clamp(zoom, 0.72, 1.55);
+    if (Math.abs(camera.zoom - nextZoom) > 0.0001) {
+      cameraFlightRef.current = null;
+    }
+    camera.zoom = nextZoom;
     camera.updateProjectionMatrix();
     controlsRef.current?.update();
     publishLabelsRef.current();
@@ -3446,7 +3953,9 @@ export function ThreeCity({
     const camera = cameraRef.current;
     const firstPersonCamera = firstPersonCameraRef.current;
     const controls = controlsRef.current;
+    cameraFlightRef.current = null;
     if (camera && controls) {
+      controls.reset();
       camera.position.set(...OVERVIEW_POSITION);
       camera.zoom = 1;
       controls.target.set(...OVERVIEW_TARGET);
@@ -3479,14 +3988,39 @@ export function ThreeCity({
           <div
             className="three-city-first-person-hud"
             style={FIRST_PERSON_HUD_STYLE}
-            role="status"
-            aria-live="polite"
+            role="group"
+            aria-label="Walk inspection controls"
           >
-            <strong style={{ color: pointerLocked ? "#62e5ff" : "#ffad73" }}>
+            <strong
+              style={{ color: pointerLocked ? "#62e5ff" : "#ffad73" }}
+              aria-live="polite"
+            >
               {pointerLocked ? "MOUSE LOOK ACTIVE" : "CLICK CITY TO LOOK"}
             </strong>
             <span>WASD / ARROWS TO WALK · HOLD SHIFT TO MOVE FASTER</span>
             <span>{pointerLocked ? "PRESS ESC TO RELEASE CURSOR" : "ESC KEEPS WALK MODE ACTIVE"}</span>
+            {!pointerLocked && (
+              <button
+                type="button"
+                onClick={() => {
+                  const canvas = rendererRef.current?.domElement;
+                  if (canvas) void canvas.requestPointerLock().catch(() => setPointerLocked(false));
+                }}
+                style={{
+                  marginTop: 4,
+                  padding: "4px 9px",
+                  border: "1px solid rgba(98,229,255,.7)",
+                  borderRadius: 2,
+                  background: "rgba(14,57,71,.92)",
+                  color: "#e9fbff",
+                  fontSize: 8,
+                  fontWeight: 800,
+                  cursor: "pointer"
+                }}
+              >
+                Enable mouse look
+              </button>
+            )}
           </div>
           <div
             className="three-city-crosshair"
