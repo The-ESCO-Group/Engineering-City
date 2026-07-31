@@ -49,12 +49,91 @@ New packages with no pre-existing equivalent: `backend/app/engineering/`
 (revisions, change sets, merge, impact), `backend/app/generators/{plc,rockwell}/`,
 `backend/app/validation/`, `backend/app/adapters/`, and `templates/`.
 
+### ⚠ Breaking change for the frontend — semantic locations
+
+`AgentInstance.location` and `AgentSpec.home_location` now carry
+`SemanticLocation` values from the brief’s sixteen districts, replacing the four
+ad-hoc strings the review platform used. The backend broadcasts a district name
+and never a coordinate, so where a building sits on screen stays entirely
+yours.
+
+| Was | Is now |
+| --- | --- |
+| `intake_dock` | `project_intake` |
+| `logic_works` | `ladder_logic_lab` |
+| `safety_annex` | `automation_core` |
+| `review_hall` | `qa_campus` |
+
+The full set is `SemanticLocation` in `contracts/domain.schema.json`. Eleven of
+the sixteen districts have no agent standing in them yet; they fill up as the
+production agents land in Milestone 4.
+
+---
+
+## Milestone 1 — the canonical engineering model
+
+**103 tables**, of which 74 are canonical engineering objects. One migration,
+`792176727e30`, which round-trips (`upgrade` → `check` → `downgrade base` →
+`upgrade`) with no drift against the ORM.
+
+**Every engineering object shares a spine** (`app/models/core.py`). The two
+load-bearing columns:
+
+* `object_revision` — bumped on every update. It is both the optimistic
+  concurrency token and the unit of conflict detection, so a change set written
+  against revision 4 that arrives when the object is at 5 is a conflict
+  established by *comparison* rather than by guesswork.
+* `approval_state` — once `approved`, an object is protected. A later change
+  must supersede it explicitly and win a fresh approval, so an agent cannot
+  quietly edit something an engineer signed off.
+
+**Traceability is a table, not an aspiration.** `object_evidence_links` cites the
+basis for any object — a parsed document anchor, a requirement, an approved
+template rule, or a named human decision. Thirteen object kinds
+(`TRACEABLE_OBJECT_TYPES`) may not be created without one, and the rule is
+enforced twice: in the action schema, where it is cheapest to catch, and again
+at merge.
+
+Notably, a *parser warning* is not an acceptable basis. “The PDF had no text
+layer” is a fact worth recording; it is not a reason for a rung to exist.
+
+**Revisions** (`app/models/revision.py`) are current-state-plus-change-log, per
+ADR 0001. `ProjectRevision` is a numbered merge point, `ChangeSet` is a scoped
+proposal, and every `ChangeOperation` stores the value *before* as well as
+after — which is what makes a diff a query, a rollback data rather than a
+replay, and a merge dry-run meaningful rather than merely reassuring.
+
+**The action contract grew six members** (`app/agents/base/actions.py`), and the
+rules are in the schema rather than in prompt wording:
+
+| Refused | Why |
+| --- | --- |
+| Creating a tag, rung, alarm, HMI binding or test case with no basis | An object that exists for no stated reason cannot be reviewed |
+| An update or delete with no `based_on_object_revision` | A concurrent edit could not be detected, only overwritten |
+| A change set containing a rename, marked as needing no approval | A rename reaches into logic, HMI, alarms, tests and docs; the impact report exists so a reviewer sees that list first |
+| A rejected change set with no stated concern | A bare refusal leaves the author nothing to act on |
+| A plan whose task depends on a task the plan does not define | A dangling dependency leaves the task queued forever, silently |
+| “This is ambiguous” with exactly one reading named | Naming both readings is what makes it answerable |
+
+**Two things worth knowing if you touch the schema.**
+`backend/tests/test_project_core_schema.py` is structural: it checks every
+engineering object still carries the versioning columns, is project-scoped and
+indexed, and — the one that matters — that no `Mapped[SomeEnum]` column slipped
+onto a plain `String`. That last defect stores correctly and loads back as a
+`str`, silently breaking identity comparison on every row; it has bitten this
+repository once already.
+
+Alembic renders enum columns as `sa.String(length=n)`, via a `render_item` hook
+in `migrations/env.py`. Without it the generated migration is unimportable, and
+with it a historical migration is not pinned to a Python symbol a later refactor
+could rename.
+
 ### Production milestones
 
 | Milestone | Scope | State |
 | --- | --- | --- |
 | 0 | Repository audit, ownership map, ADR | ✅ complete |
-| 1 | Canonical project core, revisions, change sets | ⏳ |
+| 1 | Canonical project core, revisions, change sets | ✅ complete |
 | 2 | Change-set validation, conflicts, merge, rename impact | ⏳ |
 | 3 | Logic IR, template registry, cross-discipline validators | ⏳ |
 | 4 | Requirements / Tag Architecture / PLC Logic agents, approval gates | ⏳ |

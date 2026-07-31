@@ -1,0 +1,261 @@
+# Latched fault with a reset that cannot clear an active condition.
+# See templates/README.md for the file format and the versioning rule.
+id: esco.fault.reset
+version: 1.0.0
+category: fault_reset
+display_name: Latched fault and conditional reset
+description: >
+  Latches a fault while its condition is true, and clears it only on the rising
+  edge of an operator reset AND only while the condition is no longer true. A
+  reset attempted against a condition that is still present does nothing to the
+  fault and instead tells the operator why, so a machine can never be returned
+  to service by acknowledging a problem that has not been fixed.
+supported_families: [compactlogix, controllogix]
+approval_level: senior_review_required
+restricted_domains: []
+
+parameters:
+  - name: device_tag
+    type: identifier
+    required: true
+    description: Device or area tag stem the fault belongs to, e.g. MTR_101
+  - name: reset_blocked_hold_ms
+    type: integer
+    required: false
+    default: 3000
+    description: >
+      How long the "reset refused" indication is held after a blocked attempt,
+      so a momentary button press produces something the operator can actually
+      read.
+
+required_tags:
+  - role: status
+    suffix: _Fault_Condition
+    data_type: BOOL
+    description: >
+      TRUE while the condition that causes the fault is present. Built by the
+      expansion from the device's own fault sources; this is the tag the reset
+      is checked against, so it must be the live condition and never a copy of
+      the latch.
+  - role: status
+    suffix: _Sts_Faulted
+    data_type: BOOL
+    description: The latched fault. Drops the device's run permission.
+  - role: command
+    suffix: _Cmd_Reset
+    data_type: BOOL
+    description: Operator reset request, momentary, written by the HMI or a pushbutton
+  - role: status
+    suffix: _Reset_OneShot
+    data_type: BOOL
+    description: One-shot storage bit for the reset edge
+  - role: status
+    suffix: _Reset_Clear_OneShot
+    data_type: BOOL
+    description: One-shot storage bit used to clear the reset request after it is seen
+  - role: status
+    suffix: _Sts_Reset_Blocked
+    data_type: BOOL
+    description: >
+      A reset was attempted while the condition was still true and was refused.
+      Held so it is visible on an HMI rather than lasting one scan.
+  - role: status
+    suffix: _Tmr_Reset_Blocked
+    data_type: TIMER
+    description: Holds the refused-reset indication long enough to be read
+  - role: diagnostic
+    suffix: _Fault_Reset_Count
+    data_type: DINT
+    description: >
+      How many times this fault has been reset. A device being reset repeatedly
+      is a device nobody has fixed, and a count makes that visible instead of
+      anecdotal.
+
+generated_objects:
+  routines:
+    - name: R_Alarm_Latch
+      language: ladder
+      description: >
+        Fault latching, acknowledgement and reset. This pattern contributes one
+        block; the routine already exists in the ESCO controller layouts.
+
+  rungs:
+    - routine: R_Alarm_Latch
+      title: "{device_tag} latch fault"
+      comment: >
+        The condition latches the fault. Latched rather than followed so that a
+        fault which appears and disappears within one scan still stops the
+        device and still reaches an operator.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Fault_Condition", kind: condition}
+        - {instruction: OTL, operand: "{device_tag}_Sts_Faulted", kind: output}
+
+    - routine: R_Alarm_Latch
+      title: "{device_tag} reset fault"
+      comment: >
+        THE rung this template exists for. Three conditions in series, and each
+        one is load-bearing:
+
+        XIC _Cmd_Reset with ONS makes the reset edge-triggered, so a reset button
+        held down (or an HMI bit left set) cannot continuously clear faults as
+        fast as they latch.
+
+        XIO _Fault_Condition is the important one. The unlatch is only reached
+        while the condition is NO LONGER TRUE. A reset pressed against a live
+        condition does not clear the fault. Deleting this contact produces logic
+        that appears to work — the fault clears, the operator carries on — and
+        leaves the machine running with the original problem still present and
+        no indication of it anywhere.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Cmd_Reset", kind: condition}
+        - instruction: ONS
+          operand: "{device_tag}_Reset_OneShot"
+          kind: condition
+        - {instruction: XIO, operand: "{device_tag}_Fault_Condition", kind: condition}
+        - branch:
+            - - {instruction: OTU, operand: "{device_tag}_Sts_Faulted", kind: output}
+            - - instruction: ADD
+                operands:
+                  - "{device_tag}_Fault_Reset_Count"
+                  - "1"
+                  - "{device_tag}_Fault_Reset_Count"
+                kind: output
+
+    - routine: R_Alarm_Latch
+      title: "{device_tag} reset refused"
+      comment: >
+        The other half of the refusal. A reset that silently does nothing looks
+        to an operator like a broken button, and the usual next step is to press
+        it harder, then to find a way around it. Telling them the condition is
+        still present turns a refusal into information.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Cmd_Reset", kind: condition}
+        - {instruction: XIC, operand: "{device_tag}_Fault_Condition", kind: condition}
+        - instruction: TON
+          operands: ["{device_tag}_Tmr_Reset_Blocked", "{reset_blocked_hold_ms}", "0"]
+          kind: output
+
+    - routine: R_Alarm_Latch
+      title: "{device_tag} reset refused indication"
+      comment: >
+        Held for the configured time so a momentary press produces a readable
+        indication. Not latched: once the condition clears and a reset succeeds,
+        the refusal is history.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Tmr_Reset_Blocked.TT", kind: condition}
+        - {instruction: OTE, operand: "{device_tag}_Sts_Reset_Blocked", kind: output}
+
+    - routine: R_Alarm_Latch
+      title: "{device_tag} clear the reset request"
+      comment: >
+        The reset request is consumed after the rungs above have seen it, so an
+        HMI momentary bit does not stay set and reset the next fault to arrive.
+        This rung must stay LAST: clearing the request before the reset rung is
+        scanned means no reset is ever accepted.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Cmd_Reset", kind: condition}
+        - instruction: ONS
+          operand: "{device_tag}_Reset_Clear_OneShot"
+          kind: condition
+        - {instruction: OTU, operand: "{device_tag}_Cmd_Reset", kind: output}
+
+engineering_notes: >
+  A reset acknowledges that a fault has been dealt with. It is not a way of
+  making the fault go away. Everything in this pattern follows from that one
+  sentence: the condition is checked at the moment of reset, the reset is
+  edge-triggered so it cannot be held, and a refused reset is announced rather
+  than ignored.
+
+  _Fault_Condition must be the live condition, re-evaluated every scan. If an
+  expansion wires it to a copy of _Sts_Faulted, or to a latched summary bit, the
+  XIO becomes self-referential: the condition is true because the fault is
+  latched, the fault is latched because the condition is true, and nothing ever
+  resets. If it is wired to something that is only written when the fault
+  occurs, the check is against stale data and a reset succeeds against a live
+  problem. Both are worth checking for explicitly at review.
+
+  Rung order is behaviour. Latch, then reset, then the refusal indication, then
+  clear the request. Moving the request-clearing rung above the reset rung
+  produces a reset button that never works, and it is a hard fault to find by
+  reading logic because every individual rung looks correct.
+
+  The reset does not restart anything. It removes the fault, and the device's
+  own pattern still requires a fresh start command with its permissives
+  satisfied. A reset that also starts equipment is a machine that lurches into
+  motion when somebody clears an alarm.
+
+  _Fault_Reset_Count is cheap and worth having. A device reset forty times in a
+  shift is a maintenance problem being managed by an operator, and without a
+  count it stays invisible until something breaks.
+
+restrictions:
+  - >
+    The reset does not clear an active condition. While _Fault_Condition is
+    still true the fault stays latched, no matter how many times the reset is
+    pressed. This is the pattern's central guarantee, it is implemented by the
+    XIO _Fault_Condition contact in series with the unlatch, and removing that
+    contact produces logic that looks correct and returns a machine to service
+    with the original fault still present.
+  - >
+    Not a safety function. This does not reset a safety relay, a safety
+    controller, a safety-rated instruction, or any protective device. Those have
+    their own reset requirements, usually including a monitored manual reset,
+    and are outside this pattern entirely.
+  - >
+    Does not restart equipment. Clearing the fault restores permission to start;
+    a start still needs a fresh command with the permissives satisfied.
+  - >
+    Does not generate _Fault_Condition. The expansion builds it from the
+    device's fault sources, and this template cannot verify that it is the live
+    condition rather than a copy of the latch or a stale snapshot.
+  - >
+    Does not implement an alarm acknowledge, which is a different action: an
+    acknowledge silences an annunciation, a reset clears a latched fault. A
+    project that treats them as one has no way to silence a horn without
+    clearing the fault.
+  - Does not implement a first-out or fault-history record beyond the reset count.
+  - Does not enforce who may reset. Any operator with write access to _Cmd_Reset can attempt one.
+  - >
+    Does not survive a controller power cycle. _Sts_Faulted is a non-retentive
+    bit, so a power cycle clears the latch. Where a fault must survive one, the
+    condition itself has to be re-evaluated on first scan.
+
+tests:
+  - name: A reset against a live condition is refused
+    given: _Fault_Condition is true and _Sts_Faulted is latched
+    when: _Cmd_Reset is pulsed
+    then: >
+      _Sts_Faulted stays true, _Fault_Reset_Count is unchanged, and
+      _Sts_Reset_Blocked goes true for reset_blocked_hold_ms.
+  - name: A reset after the condition clears succeeds
+    given: _Sts_Faulted is latched and _Fault_Condition has gone false
+    when: _Cmd_Reset is pulsed
+    then: _Sts_Faulted goes false and _Fault_Reset_Count increments by one.
+  - name: A held reset button cannot clear repeated faults
+    given: _Cmd_Reset is forced true and held
+    when: A fault latches and its condition then clears
+    then: >
+      _Sts_Faulted stays latched, because the reset is edge-triggered and no new
+      rising edge has occurred.
+  - name: The reset does not start the device
+    given: A successful reset with every permissive satisfied
+    when: The device block is scanned
+    then: The run command stays false until a fresh start request is made.
+  - name: A momentary fault still latches
+    given: A healthy device
+    when: _Fault_Condition is true for a single scan
+    then: _Sts_Faulted is latched and stays latched.
+  - name: The refused indication is readable
+    given: A live fault condition
+    when: The reset button is pressed for 100 ms
+    then: _Sts_Reset_Blocked stays true for reset_blocked_hold_ms.
+  - name: The reset request does not persist
+    given: An HMI that sets _Cmd_Reset and does not clear it
+    when: The block is scanned
+    then: _Cmd_Reset is false again afterwards, so it cannot reset the next fault.
+  - name: Rung order is preserved
+    given: The expanded block
+    when: The rungs are read in order
+    then: >
+      The reset rung is scanned before the rung that clears _Cmd_Reset, and a
+      reset issued with the condition clear is accepted.

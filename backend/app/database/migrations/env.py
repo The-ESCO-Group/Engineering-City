@@ -17,6 +17,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
+from app.database.types import StrEnumType
 
 # Importing the package registers every table on Base.metadata, which is what
 # autogenerate diffs against.
@@ -42,6 +43,26 @@ def _include_object(
     return True
 
 
+def _render_item(type_: str, obj: object, autogen_context: object) -> str | bool:
+    """Render ``StrEnumType`` columns as the plain ``VARCHAR`` they actually are.
+
+    Two reasons, and the first is that the alternative does not work. Alembic
+    renders a custom type by inspecting its ``impl``, so a ``StrEnumType`` comes
+    out as ``StrEnumType(length=32)`` — missing the required ``enum_cls``
+    argument, and the generated migration raises on import.
+
+    The second reason is the one that would matter even if it did work. The DDL
+    for an enum column *is* ``VARCHAR(n)``; the enum only governs how Python
+    reads the value back. Writing the enum class into a migration would pin a
+    historical migration to a Python symbol that a later refactor could rename,
+    and a migration that stops running because an enum moved is a migration
+    that has captured the wrong thing.
+    """
+    if type_ == "type" and isinstance(obj, StrEnumType):
+        return f"sa.String(length={obj.length})"
+    return False
+
+
 def run_migrations_offline() -> None:
     """Emit SQL to stdout without connecting (``alembic upgrade head --sql``)."""
     context.configure(
@@ -53,6 +74,7 @@ def run_migrations_offline() -> None:
         compare_type=True,
         compare_server_default=True,
         include_object=_include_object,
+        render_item=_render_item,
         user_module_prefix="app.database.types.",
     )
     with context.begin_transaction():
@@ -79,6 +101,7 @@ def run_migrations_online() -> None:
             compare_type=True,
             compare_server_default=True,
             include_object=_include_object,
+            render_item=_render_item,
             user_module_prefix="app.database.types.",
         )
         with context.begin_transaction():

@@ -65,7 +65,11 @@ class AgentInstance(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
 
     status: Mapped[AgentStatus] = mapped_column(default=AgentStatus.IDLE, nullable=False)
-    #: Named place in the city ("intake_dock", "review_hall", ...).
+    #: Semantic district — a :class:`~app.core.enums.SemanticLocation` value such
+    #: as ``"tag_foundry"``. Stored as a string rather than the enum because
+    #: ``""`` is a legitimate "nowhere yet" that no member expresses, and a
+    #: strict enum column would refuse to load those rows. The backend never
+    #: sends pixel coordinates; where a district sits on screen is the frontend's.
     location: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     #: Short, human-readable statement of what the agent is doing right now.
     current_activity: Mapped[str] = mapped_column(String(255), default="", nullable=False)

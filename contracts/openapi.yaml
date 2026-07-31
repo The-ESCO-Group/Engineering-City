@@ -2274,6 +2274,12 @@ components:
       - pdf_page
       - pdf_text_range
       - xml_element
+      - description_paragraph
+      - requirement
+      - template
+      - human_decision
+      - generated_object
+      - validation_result
       - file_line
       - file_section
       - file_whole
@@ -2307,6 +2313,11 @@ components:
       - design_recommendation
       - finding_release
       - report_release
+      - gate_decision
+      - changeset_merge
+      - tag_rename
+      - restricted_domain
+      - release_candidate
       title: ApprovalKind
       description: Why a human decision is required.
     ApprovalRead:
@@ -2410,6 +2421,9 @@ components:
       - approved
       - rejected
       - cancelled
+      - changes_requested
+      - risk_accepted
+      - deferred
       title: ApprovalStatus
     Body_upload_files_api_projects__project_id__files_post:
       properties:
@@ -2642,6 +2656,25 @@ components:
       - approval.requested
       - approval.decided
       - report.created
+      - project.question_created
+      - project.question_resolved
+      - requirement.created
+      - workflow.planned
+      - workflow.failed
+      - task.assigned
+      - changeset.created
+      - changeset.validation_failed
+      - changeset.submitted
+      - changeset.reviewed
+      - changeset.merged
+      - revision.created
+      - gate.status_changed
+      - validation.started
+      - validation.completed
+      - export.started
+      - export.artifact_created
+      - release.candidate_created
+      - release.ready
       title: EventType
       description: 'Event types broadcast over the project WebSocket.
 
@@ -2712,6 +2745,10 @@ components:
       - missing_expected
       - parser_warning
       - unsupported_content
+      - template_rule
+      - human_decision
+      - generated_object
+      - validation_output
       title: EvidenceKind
       description: 'How strongly a piece of evidence supports a claim.
 
@@ -3719,7 +3756,30 @@ components:
       - completed
       - failed
       - archived
+      - clarification_required
+      - tag_and_io_design
+      - plc_architecture
+      - implementation
+      - cross_discipline_review
+      - test_development
+      - release_validation
+      - ready_for_export
+      - blocked
       title: ProjectStatus
+      description: 'Project lifecycle.
+
+
+        The first eight members predate the production platform and are kept because
+
+        they are persisted in existing rows and published in the contract. Two of
+
+        them are the brief''s phases under earlier names: ``INGESTING`` is the
+
+        brief''s ``INTAKE``, and ``AWAITING_REVIEW`` is its ``HUMAN_APPROVAL``.
+
+        Renaming either would break every stored row and the frontend, so the
+
+        remaining phases are added alongside instead.'
     RecommendationRead:
       properties:
         id:
@@ -4080,6 +4140,16 @@ components:
       - request_approvals
       - delivery
       - finalize_project
+      - extract_requirements
+      - resolve_clarifications
+      - design_tags
+      - design_plc_architecture
+      - generate_logic
+      - validate_cross_discipline
+      - evaluate_approval_gate
+      - generate_release_candidate
+      - verify_import
+      - assemble_package
       title: TaskKind
       description: Identifies the handler that executes a task.
     TaskRead:

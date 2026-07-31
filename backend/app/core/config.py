@@ -18,7 +18,7 @@ from pydantic import EmailStr, Field, SecretStr, field_validator, model_validato
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.enums import ProviderKind
+from app.core.enums import ProviderKind, RestrictedDomain
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -133,6 +133,33 @@ class Settings(BaseSettings):
     #: worker and is requeued on startup / during sweeps.
     task_lease_seconds: float = 900.0
 
+    # -- Engineering generation -------------------------------------------
+    #: Restricted domains an administrator has explicitly enabled a qualified
+    #: workflow for. Empty by default, and deliberately so: motion, safety
+    #: logic, burner management, process safety and high-energy systems are
+    #: review-only until somebody with the authority to say otherwise says so.
+    enabled_restricted_domains: list[str] = Field(default_factory=list)
+    #: Override for the template root. Defaults to ``<repo>/templates``.
+    template_root: Path | None = None
+    #: Ceiling on a single generation run, so a runaway plan cannot emit tens of
+    #: thousands of rungs nobody will read.
+    max_generated_rungs_per_run: int = 2_000
+    max_generated_tags_per_run: int = 20_000
+
+    # -- Rockwell workstation adapter (optional, licensed) ----------------
+    #: The whole adapter is off unless an administrator turns it on. With it
+    #: off, ``ROCKWELL_IMPORT_VERIFIED`` is simply unreachable and every
+    #: artifact stays labelled an import-ready candidate.
+    workstation_adapter_enabled: bool = False
+    workstation_adapter_key: str = ""
+    #: Absolute paths of the official Rockwell executables the adapter may run.
+    #: An allowlist rather than a search path: the adapter must never be able to
+    #: launch something merely because it was named in a job.
+    workstation_executable_allowlist: list[str] = Field(default_factory=list)
+    #: Isolated scratch directory for import verification. Never a project path.
+    workstation_working_dir: Path | None = None
+    workstation_timeout_seconds: int = 900
+
     # -- Events / WebSocket ----------------------------------------------
     event_schema_version: int = 1
     #: Events replayed to a client that connects with ``?since_seq=``.
@@ -148,7 +175,13 @@ class Settings(BaseSettings):
     def _resolve_data_dir(cls, value: Path) -> Path:
         return value if value.is_absolute() else (REPO_ROOT / value).resolve()
 
-    @field_validator("cors_origins", "enabled_providers", mode="before")
+    @field_validator(
+        "cors_origins",
+        "enabled_providers",
+        "enabled_restricted_domains",
+        "workstation_executable_allowlist",
+        mode="before",
+    )
     @classmethod
     def _split_csv(cls, value: object) -> object:
         """Allow ``ESCO_CORS_ORIGINS=a,b`` in addition to JSON lists."""
@@ -204,6 +237,52 @@ class Settings(BaseSettings):
                 raise ValueError("ESCO_JWT_SECRET must be set outside demo/development")
             if self.bootstrap_admin_password.get_secret_value() == "esco-demo-admin":
                 raise ValueError("ESCO_BOOTSTRAP_ADMIN_PASSWORD must be set in production")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_restricted_domains(self) -> Settings:
+        """Refuse an unrecognised restricted-domain name rather than ignoring it.
+
+        A typo here fails *safe* — the domain stays review-only — but it fails
+        silently, and an administrator who believes they have enabled a
+        qualified motion workflow and has not is in a worse position than one
+        who was told the name was wrong.
+        """
+        known = {domain.value for domain in RestrictedDomain}
+        unknown = [name for name in self.enabled_restricted_domains if name not in known]
+        if unknown:
+            raise ValueError(
+                f"ESCO_ENABLED_RESTRICTED_DOMAINS names {unknown!r}, which are not "
+                f"restricted domains. Valid values: {sorted(known)}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_workstation_adapter(self) -> Settings:
+        """An enabled adapter that cannot run anything is a misconfiguration.
+
+        The adapter drives licensed Rockwell tooling against generated files. It
+        may only launch executables named in an explicit allowlist, so enabling
+        it without one would leave import verification permanently unavailable
+        while the API reported the capability as present.
+        """
+        if not self.workstation_adapter_enabled:
+            return self
+        if not self.workstation_executable_allowlist:
+            raise ValueError(
+                "ESCO_WORKSTATION_ADAPTER_ENABLED is true but "
+                "ESCO_WORKSTATION_EXECUTABLE_ALLOWLIST is empty, so the adapter "
+                "could never run the official Rockwell tooling it exists to drive."
+            )
+        relative = [
+            path for path in self.workstation_executable_allowlist if not Path(path).is_absolute()
+        ]
+        if relative:
+            raise ValueError(
+                f"ESCO_WORKSTATION_EXECUTABLE_ALLOWLIST must hold absolute paths; "
+                f"{relative!r} are relative and would resolve against the working "
+                f"directory rather than naming one specific program."
+            )
         return self
 
     # -- Derived paths ----------------------------------------------------

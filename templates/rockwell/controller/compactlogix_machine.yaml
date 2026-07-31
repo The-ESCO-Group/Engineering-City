@@ -1,0 +1,316 @@
+# CompactLogix machine-control project layout.
+# See templates/README.md for the file format and the versioning rule.
+id: esco.controller.compactlogix.machine
+version: 1.0.0
+category: controller_project
+display_name: CompactLogix machine-control project layout
+description: >
+  Task, program and routine skeleton for a single-machine CompactLogix
+  application. One continuous MainTask carries five programs — Safety_Monitor,
+  Machine_Control, Alarms, HMI_Interface and Diagnostics — and each program's
+  MainRoutine calls that program's routines with JSR, so execution order is
+  written down in ladder rather than left to the order routines happen to sit
+  in the tree.
+supported_families: [compactlogix]
+approval_level: standard
+restricted_domains: []
+
+parameters:
+  - name: controller_name
+    type: identifier
+    required: true
+    description: Controller name as it will appear in the project, e.g. LINE4_CTRL
+  - name: machine_name
+    type: string
+    required: true
+    description: Machine or line this controller runs; used in program descriptions
+  - name: main_task_watchdog_ms
+    type: integer
+    required: false
+    default: 500
+    description: MainTask watchdog in milliseconds
+
+required_tags:
+  - role: status
+    suffix: Sys_FirstScan
+    data_type: BOOL
+    description: One-shot first-scan flag, set from the controller status bit
+  - role: mode
+    suffix: Machine_Mode_Auto
+    data_type: BOOL
+    description: Machine is in automatic mode
+  - role: alarm
+    suffix: Alarm_Any_Active
+    data_type: BOOL
+    description: Any alarm is currently active; drives the stack light and HMI banner
+  - role: diagnostic
+    suffix: Sys_ScanTime_ms
+    data_type: DINT
+    description: Last MainTask scan time in milliseconds
+  - role: diagnostic
+    suffix: Sys_Controller_Faulted
+    data_type: BOOL
+    description: A controller minor or major fault is present
+  - role: hmi_interface
+    suffix: HMI_Heartbeat
+    data_type: DINT
+    description: Counter the HMI watches to prove the controller is still scanning
+
+generated_objects:
+  tasks:
+    - name: MainTask
+      type: continuous
+      description: The single continuous task; everything in this layout runs in it
+      watchdog_ms: 500
+      programs:
+        - Safety_Monitor
+        - Machine_Control
+        - Alarms
+        - HMI_Interface
+        - Diagnostics
+
+  programs:
+    - name: Safety_Monitor
+      type: normal
+      description: >
+        Reads the STATUS of safety devices — E-stop relay contacts, guard
+        switches, light-curtain outputs — so machine logic can decide whether it
+        is allowed to run. It executes first so that everything downstream sees
+        a settled picture. It is NOT safety logic; see restrictions.
+      main_routine: MainRoutine
+      routines: [R_EStop_Status, R_Guard_Status]
+
+    - name: Machine_Control
+      type: normal
+      description: Modes, the machine sequence, and the device control blocks
+      main_routine: MainRoutine
+      routines: [R_Mode_Select, R_Sequence, R_Devices]
+
+    - name: Alarms
+      type: normal
+      description: Alarm detection and latching, kept out of the control programs
+      main_routine: MainRoutine
+      routines: [R_Alarm_Detect, R_Alarm_Latch]
+
+    - name: HMI_Interface
+      type: normal
+      description: >
+        The only place HMI-written tags are read into machine logic and machine
+        state is published back out, so the HMI is one boundary rather than a
+        set of writes scattered through the application.
+      main_routine: MainRoutine
+      routines: [R_HMI_Inputs, R_HMI_Outputs]
+
+    - name: Diagnostics
+      type: normal
+      description: Scan time, controller fault status and communication health
+      main_routine: MainRoutine
+      routines: [R_Scan_Diagnostics, R_Comms_Diagnostics]
+
+  routines:
+    # -- Safety_Monitor ----------------------------------------------------
+    - name: MainRoutine
+      program: Safety_Monitor
+      language: ladder
+      description: Calls the safety-device status routines in order
+      is_main: true
+    - name: R_EStop_Status
+      program: Safety_Monitor
+      language: ladder
+      description: E-stop relay contact status, for use as a machine permissive
+    - name: R_Guard_Status
+      program: Safety_Monitor
+      language: ladder
+      description: Guard-switch and light-curtain status, for use as a machine permissive
+
+    # -- Machine_Control ---------------------------------------------------
+    - name: MainRoutine
+      program: Machine_Control
+      language: ladder
+      description: Calls mode selection, then the sequence, then the device blocks
+      is_main: true
+    - name: R_Mode_Select
+      program: Machine_Control
+      language: ladder
+      description: Manual/automatic selection and the transition rules between them
+    - name: R_Sequence
+      program: Machine_Control
+      language: ladder
+      description: The machine step sequence
+    - name: R_Devices
+      program: Machine_Control
+      language: ladder
+      description: One control block per device, expanded from the equipment patterns
+
+    # -- Alarms ------------------------------------------------------------
+    - name: MainRoutine
+      program: Alarms
+      language: ladder
+      description: Calls alarm detection then alarm latching
+      is_main: true
+    - name: R_Alarm_Detect
+      program: Alarms
+      language: ladder
+      description: Evaluates each alarm condition
+    - name: R_Alarm_Latch
+      program: Alarms
+      language: ladder
+      description: Latches alarms and handles acknowledgement and reset
+
+    # -- HMI_Interface -----------------------------------------------------
+    - name: MainRoutine
+      program: HMI_Interface
+      language: ladder
+      description: Calls the HMI input routine, then the HMI output routine
+      is_main: true
+    - name: R_HMI_Inputs
+      program: HMI_Interface
+      language: ladder
+      description: Moves HMI-written command tags into machine logic
+    - name: R_HMI_Outputs
+      program: HMI_Interface
+      language: ladder
+      description: Publishes machine state, alarm state and the heartbeat to the HMI
+
+    # -- Diagnostics -------------------------------------------------------
+    - name: MainRoutine
+      program: Diagnostics
+      language: ladder
+      description: Calls the scan-time and communication diagnostic routines
+      is_main: true
+    - name: R_Scan_Diagnostics
+      program: Diagnostics
+      language: ladder
+      description: Scan time and controller fault status
+    - name: R_Comms_Diagnostics
+      program: Diagnostics
+      language: ladder
+      description: Connection status for every remote node
+
+  rungs:
+    - routine: Safety_Monitor/MainRoutine
+      title: Call E-stop status
+      comment: >
+        Safety-device status is read before anything else in the scan so that
+        machine logic downstream sees one settled picture per scan.
+      elements:
+        - {instruction: JSR, operand: R_EStop_Status, kind: output}
+    - routine: Safety_Monitor/MainRoutine
+      title: Call guard status
+      comment: Guard and light-curtain status, on the same terms as the E-stop status.
+      elements:
+        - {instruction: JSR, operand: R_Guard_Status, kind: output}
+
+    - routine: Machine_Control/MainRoutine
+      title: Call mode selection
+      comment: >
+        Mode is resolved before the sequence runs, so a mode change takes effect
+        on the same scan the sequence evaluates rather than one scan later.
+      elements:
+        - {instruction: JSR, operand: R_Mode_Select, kind: output}
+    - routine: Machine_Control/MainRoutine
+      title: Call the machine sequence
+      comment: The step sequence, which sets the device commands the next routine acts on.
+      elements:
+        - {instruction: JSR, operand: R_Sequence, kind: output}
+    - routine: Machine_Control/MainRoutine
+      title: Call the device control blocks
+      comment: >
+        Device blocks run last in this program so that they act on commands the
+        sequence set this scan.
+      elements:
+        - {instruction: JSR, operand: R_Devices, kind: output}
+
+    - routine: Alarms/MainRoutine
+      title: Call alarm detection
+      comment: Evaluate every alarm condition against the state this scan produced.
+      elements:
+        - {instruction: JSR, operand: R_Alarm_Detect, kind: output}
+    - routine: Alarms/MainRoutine
+      title: Call alarm latching
+      comment: >
+        Latching runs after detection so that an alarm that appeared and cleared
+        within one scan is still latched and visible to an operator.
+      elements:
+        - {instruction: JSR, operand: R_Alarm_Latch, kind: output}
+
+    - routine: HMI_Interface/MainRoutine
+      title: Call HMI inputs
+      comment: HMI-written tags are read in here and nowhere else.
+      elements:
+        - {instruction: JSR, operand: R_HMI_Inputs, kind: output}
+    - routine: HMI_Interface/MainRoutine
+      title: Call HMI outputs
+      comment: Machine state is published to the HMI here and nowhere else.
+      elements:
+        - {instruction: JSR, operand: R_HMI_Outputs, kind: output}
+
+    - routine: Diagnostics/MainRoutine
+      title: Call scan diagnostics
+      comment: Scan time and controller fault status.
+      elements:
+        - {instruction: JSR, operand: R_Scan_Diagnostics, kind: output}
+    - routine: Diagnostics/MainRoutine
+      title: Call communication diagnostics
+      comment: Connection status for every remote node.
+      elements:
+        - {instruction: JSR, operand: R_Comms_Diagnostics, kind: output}
+
+engineering_notes: >
+  JSR calls a routine inside the same program. There is no cross-program JSR in
+  Logix, so "one MainRoutine that calls everything" is not expressible: each
+  program has its own MainRoutine, the task calls those, and program order in
+  the task is what sequences the five programs. That order is deliberate —
+  safety-device status, then control, then alarms, then the HMI boundary, then
+  diagnostics — so that each stage reads state the previous stage settled in the
+  same scan.
+
+  A continuous task is the right default for one machine: it uses whatever time
+  is left after periodic tasks, and machine logic has no fixed period to hold.
+  Move to a periodic task only when something downstream genuinely needs a
+  deterministic interval, and record the reason.
+
+  The HMI_Interface program exists so that every tag an operator can write is
+  read in one routine. Scattering HMI writes through the control logic is what
+  makes "what can change this bit" unanswerable a year later.
+
+restrictions:
+  - >
+    Safety_Monitor is a STANDARD program that reads the status of safety
+    devices. It is not safety logic, it is not safety-rated, and it must never
+    be used to implement a safety function. E-stop, guard interlocking and
+    light-curtain muting belong in a safety controller with safety-rated
+    instructions, assessed against the machine's risk assessment by a qualified
+    person.
+  - >
+    This template creates an empty skeleton. Every routine it creates contains
+    no logic other than the JSR calls listed above; the machine sequence, the
+    alarms and the device blocks are still to be written.
+  - Does not create tasks other than MainTask, and does not size the watchdog for you.
+  - Does not create I/O modules, a controller path, or any communication configuration.
+  - Does not apply to GuardLogix or Compact GuardLogix; the safety task and safety programs are out of scope.
+  - Does not decide program execution order for you beyond the order listed here; changing it changes behaviour.
+
+tests:
+  - name: Every program has a called MainRoutine
+    given: The layout has been expanded into an empty project
+    when: The project is examined
+    then: >
+      Each of the five programs has a MainRoutine marked as the program's main
+      routine, and the task lists all five programs.
+  - name: No routine is dead on arrival
+    given: The layout has been expanded
+    when: A cross-reference pass runs
+    then: >
+      Every routine this template creates is either a program main routine or
+      the target of a JSR in that program's MainRoutine.
+  - name: Program order is as specified
+    given: The layout has been expanded
+    when: MainTask's program list is read
+    then: >
+      The order is Safety_Monitor, Machine_Control, Alarms, HMI_Interface,
+      Diagnostics.
+  - name: The skeleton imports
+    given: The generated L5X artifacts
+    when: They are imported into Studio 5000 in the stated order
+    then: The import completes with no error and the controller verifies clean.

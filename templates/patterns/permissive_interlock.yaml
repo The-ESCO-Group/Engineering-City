@@ -1,0 +1,316 @@
+# The generic permissive / interlock gate.
+# See templates/README.md for the file format and the versioning rule.
+id: esco.permissive.interlock
+version: 1.0.0
+category: permissive_interlock
+display_name: Permissive and interlock gate
+description: >
+  The gate that turns a set of conditions into the two bits every ESCO
+  equipment pattern consumes: _Permissive, which allows a START, and
+  _Interlock_OK, which allows RUNNING to continue. It also captures which
+  interlock tripped first, so an operator is told why the equipment stopped
+  rather than being shown every condition that went false afterwards.
+supported_families: [compactlogix, controllogix]
+approval_level: senior_review_required
+restricted_domains: []
+
+parameters:
+  - name: device_tag
+    type: identifier
+    required: true
+    description: Device tag stem the gate is built for, e.g. MTR_101
+  - name: permissive_bypass_allowed
+    type: boolean
+    required: false
+    default: false
+    description: >
+      Whether a keyed bypass of the START permissives exists. Defaults to false;
+      enabling it is an engineering decision that must be recorded, and it can
+      never bypass an interlock.
+  - name: trip_debounce_ms
+    type: integer
+    required: false
+    default: 0
+    description: >
+      How long an interlock source must be false before it trips. Defaults to
+      zero, i.e. no debounce, because delaying a trip is a decision somebody has
+      to make deliberately.
+
+required_tags:
+  - role: permissive
+    suffix: _Perm_Sources_OK
+    data_type: BOOL
+    description: >
+      Every individual START permissive is satisfied. Built by the expansion
+      from the project's permissive schedule; this template consumes it.
+  - role: interlock
+    suffix: _Ilk_Sources_OK
+    data_type: BOOL
+    description: >
+      No individual interlock is tripped. Built by the expansion from the
+      project's interlock schedule; this template consumes it.
+  - role: permissive
+    suffix: _Permissive
+    data_type: BOOL
+    description: The result — the equipment may be started
+  - role: interlock
+    suffix: _Interlock_OK
+    data_type: BOOL
+    description: The result — the equipment may continue to run
+  - role: status
+    suffix: _Sts_Ilk_Tripped
+    data_type: BOOL
+    description: An interlock has tripped and has not been reset
+  - role: status
+    suffix: _Ilk_Trip_OneShot
+    data_type: BOOL
+    description: One-shot storage bit for the first-out capture
+  - role: diagnostic
+    suffix: _Ilk_First_Out
+    data_type: DINT
+    description: >
+      Which interlock source tripped first, as a code from the project's
+      interlock schedule. Zero means no trip since the last reset.
+  - role: status
+    suffix: _Ilk_First_Out_Now
+    data_type: DINT
+    description: >
+      The code of the interlock that is tripped this scan, written by the
+      expansion's source rungs and sampled by the first-out capture.
+  - role: status
+    suffix: _Tmr_Ilk_Debounce
+    data_type: TIMER
+    description: >
+      Debounces an interlock source before the trip is LATCHED. With a preset of
+      zero it is done on the scan the sources go bad, so the default behaviour
+      is no delay at all.
+  - role: command
+    suffix: _Perm_Bypass_Req
+    data_type: BOOL
+    description: Operator request to bypass the start permissives
+    when_parameter: permissive_bypass_allowed
+  - role: permissive
+    suffix: _Perm_Bypass_Enable
+    data_type: BOOL
+    description: >
+      Keyswitch or supervisor authority that allows a bypass at all. A bypass
+      that only needs a screen button is not a bypass, it is a defeat.
+    when_parameter: permissive_bypass_allowed
+  - role: status
+    suffix: _Perm_Bypassed
+    data_type: BOOL
+    description: The start permissives are currently bypassed
+    when_parameter: permissive_bypass_allowed
+  - role: alarm
+    suffix: _Alm_Perm_Bypassed
+    data_type: BOOL
+    description: >
+      Annunciates the bypass for as long as it is active. A bypass nobody can
+      see from the HMI is one that stays in place for months.
+    when_parameter: permissive_bypass_allowed
+
+generated_objects:
+  routines:
+    - name: R_Permissives
+      language: ladder
+      description: >
+        Conditions required before equipment may be started. This pattern
+        contributes the gate; the routine already exists in the ESCO controller
+        layouts.
+    - name: R_Interlocks
+      language: ladder
+      description: >
+        Conditions that stop running equipment. This pattern contributes the
+        gate and the first-out capture.
+
+  rungs:
+    - routine: R_Permissives
+      title: "{device_tag} permissive gate"
+      comment: >
+        The start permissive. No bypass is configured, so this is simply the
+        conjunction of the sources with the interlock result: something that is
+        not allowed to run is not allowed to start either.
+      when_parameter: permissive_bypass_allowed
+      when_value: false
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Perm_Sources_OK", kind: condition}
+        - {instruction: XIC, operand: "{device_tag}_Interlock_OK", kind: condition}
+        - {instruction: OTE, operand: "{device_tag}_Permissive", kind: output}
+
+    - routine: R_Permissives
+      title: "{device_tag} permissive gate with bypass"
+      comment: >
+        The bypass is parallel to the permissive sources and NOT to the
+        interlock result. That placement is the whole safety argument for the
+        rung: a bypass can let an operator start equipment whose start
+        conditions are not yet met, and can never let them run equipment an
+        interlock has tripped.
+      when_parameter: permissive_bypass_allowed
+      when_value: true
+      elements:
+        - branch:
+            - - {instruction: XIC, operand: "{device_tag}_Perm_Sources_OK", kind: condition}
+            - - {instruction: XIC, operand: "{device_tag}_Perm_Bypassed", kind: condition}
+        - {instruction: XIC, operand: "{device_tag}_Interlock_OK", kind: condition}
+        - {instruction: OTE, operand: "{device_tag}_Permissive", kind: output}
+
+    - routine: R_Permissives
+      title: "{device_tag} permissive bypass active"
+      comment: >
+        A bypass needs both the request and the keyed authority, and it is not
+        sealed in: releasing either one ends the bypass on the next scan. The
+        alarm is raised for as long as the bypass is in place.
+      when_parameter: permissive_bypass_allowed
+      when_value: true
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Perm_Bypass_Req", kind: condition}
+        - {instruction: XIC, operand: "{device_tag}_Perm_Bypass_Enable", kind: condition}
+        - branch:
+            - - {instruction: OTE, operand: "{device_tag}_Perm_Bypassed", kind: output}
+            - - {instruction: OTE, operand: "{device_tag}_Alm_Perm_Bypassed", kind: output}
+
+    - routine: R_Interlocks
+      title: "{device_tag} interlock trip debounce"
+      comment: >
+        Times how long the sources have been bad. The default preset is zero, so
+        DN is set on the same scan and there is no delay; a non-zero preset
+        delays the LATCH only, never the gate below. Delaying a trip is a
+        deliberate decision and the default is not to.
+      elements:
+        - {instruction: XIO, operand: "{device_tag}_Ilk_Sources_OK", kind: condition}
+        - instruction: TON
+          operands: ["{device_tag}_Tmr_Ilk_Debounce", "{trip_debounce_ms}", "0"]
+          kind: output
+
+    - routine: R_Interlocks
+      title: "{device_tag} interlock gate"
+      comment: >
+        The run interlock. Computed positively — _Interlock_OK is TRUE when
+        everything is healthy — so that a tag which is never written, never
+        scanned, or lost with its producing program reads as TRIPPED rather than
+        as permission to run.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Ilk_Sources_OK", kind: condition}
+        - {instruction: XIO, operand: "{device_tag}_Sts_Ilk_Tripped", kind: condition}
+        - {instruction: OTE, operand: "{device_tag}_Interlock_OK", kind: output}
+
+    - routine: R_Interlocks
+      title: "{device_tag} interlock trip latch"
+      comment: >
+        A trip is latched once the debounce is satisfied. An interlock that
+        clears itself lets equipment restart the moment the condition goes away,
+        which is how a machine restarts on its own with somebody still standing
+        in front of it. Clearing this latch is esco.fault.reset's job, and it
+        will refuse while the sources are still bad.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Tmr_Ilk_Debounce.DN", kind: condition}
+        - {instruction: OTL, operand: "{device_tag}_Sts_Ilk_Tripped", kind: output}
+
+    - routine: R_Interlocks
+      title: "{device_tag} first out capture"
+      comment: >
+        Records which interlock was tripped on the scan the trip began, and only
+        on that scan. Without the one-shot, every condition that fails as a
+        consequence of the stop overwrites the cause, and the operator is told
+        the last thing that went wrong instead of the first.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Tmr_Ilk_Debounce.DN", kind: condition}
+        - instruction: ONS
+          operand: "{device_tag}_Ilk_Trip_OneShot"
+          kind: condition
+        - instruction: MOV
+          operands: ["{device_tag}_Ilk_First_Out_Now", "{device_tag}_Ilk_First_Out"]
+          kind: output
+
+engineering_notes: >
+  A permissive is a condition for STARTING. An interlock is a condition for
+  CONTINUING. They are different bits, gated at different points in the
+  equipment pattern, and the difference is not stylistic: a permissive in the
+  seal-in leg stops running equipment for no reason an operator can explain, and
+  an interlock in the start branch lets a tripped machine keep running.
+
+  Both results are computed positively. _Interlock_OK true means healthy. That
+  choice matters more than it looks: a BOOL that is never written is false, so a
+  tag lost to a deleted routine, an unscheduled program or a failed expansion
+  reads as tripped. The inverse convention fails the other way and silently
+  grants permission.
+
+  The trip is latched and first-out is captured on the transition. Between them
+  an operator gets "the machine stopped because the discharge chute is blocked"
+  rather than "eleven interlocks are bad" — which is the difference between a
+  five-minute recovery and an hour of guessing.
+
+  The individual source conditions are not generated here. They come from the
+  project's permissive and interlock schedule, one rung each, feeding
+  _Perm_Sources_OK and _Ilk_Sources_OK. This template deliberately owns only the
+  gate, so that adding a source is a change to the schedule rather than a
+  re-expansion of the pattern.
+
+restrictions:
+  - >
+    Not a safety function. Nothing generated here is safety-rated, and no
+    interlock built on this gate may be relied on as a protective measure from a
+    risk assessment. E-stop, guard interlocking, light curtains, two-hand
+    control and safe-speed monitoring belong in a safety controller, in
+    safety-rated logic, assessed by a qualified person.
+  - >
+    Does not generate the individual permissive or interlock source conditions.
+    It consumes _Perm_Sources_OK and _Ilk_Sources_OK and cannot verify that the
+    expansion built them from the complete schedule; a missing source is
+    invisible here.
+  - >
+    The bypass applies only to START permissives and can never bypass an
+    interlock. If a project needs an interlock defeated for maintenance, that is
+    a separate, procedurally controlled function and is not generated by this
+    template.
+  - >
+    Does not decide whether a condition is a permissive or an interlock. That
+    classification is an engineering judgement recorded in the interlock
+    schedule, and putting a condition in the wrong one is not detectable here.
+  - Does not clear its own trip latch. Use esco.fault.reset.
+  - >
+    First-out is only as good as _Ilk_First_Out_Now. If the expansion does not
+    write a distinct code per source, the captured value is meaningless rather
+    than merely imprecise.
+  - >
+    trip_debounce_ms delays the trip LATCH, not the gate. _Interlock_OK follows
+    the sources immediately in either case, so a momentary glitch still removes
+    the run permission for as long as it lasts; the debounce only stops it
+    becoming a latched trip somebody has to reset.
+  - Does not implement bypass timeouts, shift-based expiry, or a bypass audit log.
+
+tests:
+  - name: A tripped interlock prevents a start
+    given: _Ilk_Sources_OK is false
+    when: The gate is scanned
+    then: _Interlock_OK is false and _Permissive is false.
+  - name: The trip latches
+    given: An interlock has tripped
+    when: _Ilk_Sources_OK returns true
+    then: _Sts_Ilk_Tripped stays true and _Interlock_OK stays false until a reset is accepted.
+  - name: First out records the cause, not the consequence
+    given: A healthy machine
+    when: >
+      Source 3 trips and, two scans later, sources 5 and 7 trip as a consequence
+      of the equipment stopping
+    then: _Ilk_First_Out holds the code for source 3.
+  - name: First out is not overwritten by a later trip
+    given: A captured first-out value
+    when: Another source trips before the trip is reset
+    then: _Ilk_First_Out is unchanged.
+  - name: An unwritten source tag reads as tripped
+    given: A project where the routine writing _Ilk_Sources_OK is not scheduled
+    when: The gate is scanned
+    then: _Interlock_OK is false.
+  - name: The bypass cannot bypass an interlock
+    given: permissive_bypass_allowed is true, the bypass is active, and an interlock is tripped
+    when: A start is attempted
+    then: _Permissive stays false.
+  - name: The bypass needs the keyed authority
+    given: permissive_bypass_allowed is true and _Perm_Bypass_Enable is false
+    when: _Perm_Bypass_Req is set
+    then: _Perm_Bypassed stays false and no permissive is bypassed.
+  - name: An active bypass is annunciated
+    given: An active permissive bypass
+    when: The HMI alarm list is read
+    then: _Alm_Perm_Bypassed is present for as long as the bypass is in place.

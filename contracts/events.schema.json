@@ -11,6 +11,13 @@
     "agent.status_changed": "#/$defs/AgentStatusEventPayload",
     "approval.decided": "#/$defs/ApprovalEventPayload",
     "approval.requested": "#/$defs/ApprovalEventPayload",
+    "changeset.created": "#/$defs/ChangeSetEventPayload",
+    "changeset.merged": "#/$defs/ChangeSetMergedEventPayload",
+    "changeset.reviewed": "#/$defs/ChangeSetReviewedEventPayload",
+    "changeset.submitted": "#/$defs/ChangeSetEventPayload",
+    "changeset.validation_failed": "#/$defs/ChangeSetValidationFailedEventPayload",
+    "export.artifact_created": "#/$defs/ExportArtifactCreatedEventPayload",
+    "export.started": "#/$defs/ExportStartedEventPayload",
     "file.deleted": "#/$defs/FileEventPayload",
     "file.parse_failed": "#/$defs/FileEventPayload",
     "file.parsed": "#/$defs/FileEventPayload",
@@ -19,23 +26,50 @@
     "finding.created": "#/$defs/FindingEventPayload",
     "finding.reviewed": "#/$defs/FindingEventPayload",
     "finding.updated": "#/$defs/FindingEventPayload",
+    "gate.status_changed": "#/$defs/GateStatusChangedEventPayload",
     "project.completed": "#/$defs/ProjectEventPayload",
     "project.created": "#/$defs/ProjectEventPayload",
     "project.failed": "#/$defs/ProjectEventPayload",
+    "project.question_created": "#/$defs/ProjectQuestionEventPayload",
+    "project.question_resolved": "#/$defs/ProjectQuestionEventPayload",
     "project.updated": "#/$defs/ProjectEventPayload",
+    "release.candidate_created": "#/$defs/ReleaseCandidateCreatedEventPayload",
+    "release.ready": "#/$defs/ReleaseReadyEventPayload",
     "report.created": "#/$defs/ReportEventPayload",
+    "requirement.created": "#/$defs/RequirementEventPayload",
+    "revision.created": "#/$defs/RevisionCreatedEventPayload",
+    "task.assigned": "#/$defs/TaskAssignedEventPayload",
     "task.blocked": "#/$defs/TaskEventPayload",
     "task.completed": "#/$defs/TaskEventPayload",
     "task.created": "#/$defs/TaskEventPayload",
     "task.failed": "#/$defs/TaskEventPayload",
     "task.started": "#/$defs/TaskEventPayload",
+    "validation.completed": "#/$defs/ValidationCompletedEventPayload",
+    "validation.started": "#/$defs/ValidationStartedEventPayload",
     "workflow.cancelled": "#/$defs/WorkflowEventPayload",
+    "workflow.failed": "#/$defs/WorkflowFailedEventPayload",
     "workflow.paused": "#/$defs/WorkflowEventPayload",
+    "workflow.planned": "#/$defs/WorkflowPlannedEventPayload",
     "workflow.resumed": "#/$defs/WorkflowEventPayload",
     "workflow.started": "#/$defs/WorkflowEventPayload"
   },
   "$ref": "#/$defs/EventEnvelope",
   "$defs": {
+    "AgentKind": {
+      "description": "Stable identifier for an agent definition.",
+      "enum": [
+        "project_manager",
+        "plc_review",
+        "interlock_review",
+        "senior_review",
+        "delivery",
+        "requirements_planning",
+        "tag_architecture",
+        "plc_logic"
+      ],
+      "title": "AgentKind",
+      "type": "string"
+    },
     "AgentLocationEventPayload": {
       "properties": {
         "agent_id": {
@@ -235,6 +269,414 @@
       "title": "ApprovalEventPayload",
       "type": "object"
     },
+    "ApprovalGateKey": {
+      "description": "The six configurable gates a project passes through.",
+      "enum": [
+        "project_profile",
+        "devices_io_tags",
+        "logic_and_delivery",
+        "qa_and_risk",
+        "import_verification",
+        "release"
+      ],
+      "title": "ApprovalGateKey",
+      "type": "string"
+    },
+    "ChangeOperationType": {
+      "enum": [
+        "create_object",
+        "update_field",
+        "delete_object",
+        "link_objects",
+        "unlink_objects",
+        "rename_tag",
+        "assign_io",
+        "create_logic",
+        "update_logic",
+        "create_finding",
+        "resolve_finding",
+        "create_export",
+        "request_clarification"
+      ],
+      "title": "ChangeOperationType",
+      "type": "string"
+    },
+    "ChangeSetEventPayload": {
+      "description": "A proposed, scoped batch of changes to the canonical model.\n\nCounts and scope, never the operations: a change set may carry two thousand\nof them, and inlining them would put a document on the wire. ``confidence``,\n``assumption_count`` and ``warning_count`` are here because a proposal that\nstates no uncertainty is more suspicious than one that does.",
+      "properties": {
+        "changeset_id": {
+          "format": "uuid",
+          "title": "Changeset Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 300,
+          "title": "Title",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ChangeSetStatus"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "base_revision_number": {
+          "title": "Base Revision Number",
+          "type": "integer"
+        },
+        "operation_count": {
+          "default": 0,
+          "title": "Operation Count",
+          "type": "integer"
+        },
+        "allowed_object_types": {
+          "items": {
+            "$ref": "#/$defs/ObjectType"
+          },
+          "title": "Allowed Object Types",
+          "type": "array"
+        },
+        "author_agent_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "author_user_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author User Id"
+        },
+        "confidence": {
+          "default": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "assumption_count": {
+          "default": 0,
+          "title": "Assumption Count",
+          "type": "integer"
+        },
+        "warning_count": {
+          "default": 0,
+          "title": "Warning Count",
+          "type": "integer"
+        },
+        "requires_human_approval": {
+          "default": false,
+          "title": "Requires Human Approval",
+          "type": "boolean"
+        },
+        "restricted_domains": {
+          "items": {
+            "$ref": "#/$defs/RestrictedDomain"
+          },
+          "title": "Restricted Domains",
+          "type": "array"
+        }
+      },
+      "required": [
+        "changeset_id",
+        "title",
+        "status",
+        "location",
+        "base_revision_number"
+      ],
+      "title": "ChangeSetEventPayload",
+      "type": "object"
+    },
+    "ChangeSetMergedEventPayload": {
+      "description": "A change set applied to the canonical model in one transaction.\n\n``operation_counts_by_type`` is the point of the shape. A merge reported as\n\"38 operations\" hides whether it created a tag or deleted thirty of them,\nand the city cannot animate what it cannot tell apart.",
+      "properties": {
+        "changeset_id": {
+          "format": "uuid",
+          "title": "Changeset Id",
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "base_revision_number": {
+          "title": "Base Revision Number",
+          "type": "integer"
+        },
+        "resulting_revision_number": {
+          "title": "Resulting Revision Number",
+          "type": "integer"
+        },
+        "operation_counts_by_type": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/ChangeOperationType"
+          },
+          "title": "Operation Counts By Type",
+          "type": "object"
+        },
+        "object_counts_by_type": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/ObjectType"
+          },
+          "title": "Object Counts By Type",
+          "type": "object"
+        },
+        "operations_applied": {
+          "default": 0,
+          "title": "Operations Applied",
+          "type": "integer"
+        },
+        "operations_skipped": {
+          "default": 0,
+          "title": "Operations Skipped",
+          "type": "integer"
+        },
+        "merge_result_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Merge Result Id"
+        },
+        "merged_by_user_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Merged By User Id"
+        },
+        "summary": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "changeset_id",
+        "location",
+        "base_revision_number",
+        "resulting_revision_number"
+      ],
+      "title": "ChangeSetMergedEventPayload",
+      "type": "object"
+    },
+    "ChangeSetReviewedEventPayload": {
+      "description": "A review verdict on a change set.\n\nThe concerns ride along as short lines rather than as a bare count. A\nrejection the author cannot act on is the failure this event exists to\nprevent; ``concern_count`` is the true total, since the list is capped.",
+      "properties": {
+        "changeset_id": {
+          "format": "uuid",
+          "title": "Changeset Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ChangeSetStatus"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "verdict": {
+          "enum": [
+            "approve",
+            "request_changes",
+            "reject"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "concern_count": {
+          "default": 0,
+          "title": "Concern Count",
+          "type": "integer"
+        },
+        "concerns": {
+          "items": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Concerns",
+          "type": "array"
+        },
+        "reviewed_by_agent_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reviewed_by_user_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed By User Id"
+        },
+        "adjusted_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adjusted Confidence"
+        }
+      },
+      "required": [
+        "changeset_id",
+        "status",
+        "location",
+        "verdict"
+      ],
+      "title": "ChangeSetReviewedEventPayload",
+      "type": "object"
+    },
+    "ChangeSetStatus": {
+      "enum": [
+        "draft",
+        "submitted",
+        "validating",
+        "validation_failed",
+        "in_review",
+        "awaiting_approval",
+        "approved",
+        "rejected",
+        "merged",
+        "conflicted",
+        "superseded",
+        "abandoned"
+      ],
+      "title": "ChangeSetStatus",
+      "type": "string"
+    },
+    "ChangeSetValidationFailedEventPayload": {
+      "description": "A change set the deterministic validators refused.\n\nActionable by construction: ``reason`` says what was wrong in a sentence,\nthe counts are per severity so nobody has to guess how much of it blocks,\nand the failing operation is named where the failure was attributable to\none.",
+      "properties": {
+        "changeset_id": {
+          "format": "uuid",
+          "title": "Changeset Id",
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "reason": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "error_count": {
+          "default": 0,
+          "title": "Error Count",
+          "type": "integer"
+        },
+        "warning_count": {
+          "default": 0,
+          "title": "Warning Count",
+          "type": "integer"
+        },
+        "unsupported_count": {
+          "default": 0,
+          "title": "Unsupported Count",
+          "type": "integer"
+        },
+        "human_review_count": {
+          "default": 0,
+          "title": "Human Review Count",
+          "type": "integer"
+        },
+        "failed_operation_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failed Operation Id"
+        },
+        "failed_object_type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ObjectType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "failed_object_label": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Failed Object Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "changeset_id",
+        "location",
+        "reason"
+      ],
+      "title": "ChangeSetValidationFailedEventPayload",
+      "type": "object"
+    },
+    "ClarificationStatus": {
+      "enum": [
+        "open",
+        "answered",
+        "deferred",
+        "dismissed",
+        "obsolete"
+      ],
+      "title": "ClarificationStatus",
+      "type": "string"
+    },
     "EventEnvelope": {
       "description": "One entry in a project's ordered event stream.",
       "properties": {
@@ -353,10 +795,194 @@
         "finding.updated",
         "approval.requested",
         "approval.decided",
-        "report.created"
+        "report.created",
+        "project.question_created",
+        "project.question_resolved",
+        "requirement.created",
+        "workflow.planned",
+        "workflow.failed",
+        "task.assigned",
+        "changeset.created",
+        "changeset.validation_failed",
+        "changeset.submitted",
+        "changeset.reviewed",
+        "changeset.merged",
+        "revision.created",
+        "gate.status_changed",
+        "validation.started",
+        "validation.completed",
+        "export.started",
+        "export.artifact_created",
+        "release.candidate_created",
+        "release.ready"
       ],
       "title": "EventType",
       "type": "string"
+    },
+    "ExportArtifactCreatedEventPayload": {
+      "description": "One generated file inside a release package.\n\n``validation_level`` rather than a boolean, and per file rather than rolled\nup to the candidate: files do not all reach the same level, and labelling\nthe weakest one with the strength of the strongest would claim something\nnobody proved. ``is_produced_by_plugin`` is carried for the same reason —\nwe do not warrant code we did not generate.",
+      "properties": {
+        "artifact_id": {
+          "format": "uuid",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "release_candidate_id": {
+          "format": "uuid",
+          "title": "Release Candidate Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ExportArtifactKind"
+        },
+        "filename": {
+          "maxLength": 255,
+          "title": "Filename",
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "validation_level": {
+          "$ref": "#/$defs/ValidationLevel"
+        },
+        "relative_path": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Relative Path",
+          "type": "string"
+        },
+        "size_bytes": {
+          "default": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "default": "",
+          "maxLength": 64,
+          "title": "Sha256",
+          "type": "string"
+        },
+        "import_order": {
+          "default": 0,
+          "title": "Import Order",
+          "type": "integer"
+        },
+        "is_produced_by_plugin": {
+          "default": false,
+          "title": "Is Produced By Plugin",
+          "type": "boolean"
+        },
+        "plugin_name": {
+          "default": "",
+          "maxLength": 60,
+          "title": "Plugin Name",
+          "type": "string"
+        },
+        "warning_count": {
+          "default": 0,
+          "title": "Warning Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "release_candidate_id",
+        "kind",
+        "filename",
+        "location",
+        "validation_level"
+      ],
+      "title": "ExportArtifactCreatedEventPayload",
+      "type": "object"
+    },
+    "ExportArtifactKind": {
+      "enum": [
+        "controller_project_l5x",
+        "program_l5x",
+        "routine_l5x",
+        "udt_l5x",
+        "aoi_l5x",
+        "tag_csv",
+        "comment_csv",
+        "cross_reference_csv",
+        "import_order",
+        "limitations",
+        "target_profile",
+        "validation_summary",
+        "manifest",
+        "checksums",
+        "change_log",
+        "approval_log",
+        "evidence_index",
+        "hmi_display_xml",
+        "hmi_tag_csv",
+        "alarm_import",
+        "test_plan",
+        "report"
+      ],
+      "title": "ExportArtifactKind",
+      "type": "string"
+    },
+    "ExportStartedEventPayload": {
+      "description": "Generation of a release package beginning.\n\nThe artifact kinds the run intends to produce are named up front, so a\npackage that ends up missing one is visible as a gap rather than as an\nabsence nobody expected.",
+      "properties": {
+        "release_candidate_id": {
+          "format": "uuid",
+          "title": "Release Candidate Id",
+          "type": "string"
+        },
+        "candidate_number": {
+          "title": "Candidate Number",
+          "type": "integer"
+        },
+        "revision_number": {
+          "title": "Revision Number",
+          "type": "integer"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "export_profile_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Export Profile Id"
+        },
+        "export_profile_key": {
+          "default": "",
+          "maxLength": 60,
+          "title": "Export Profile Key",
+          "type": "string"
+        },
+        "artifact_kinds": {
+          "items": {
+            "$ref": "#/$defs/ExportArtifactKind"
+          },
+          "title": "Artifact Kinds",
+          "type": "array"
+        },
+        "expected_artifact_count": {
+          "default": 0,
+          "title": "Expected Artifact Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "release_candidate_id",
+        "candidate_number",
+        "revision_number",
+        "location"
+      ],
+      "title": "ExportStartedEventPayload",
+      "type": "object"
     },
     "FileEventPayload": {
       "properties": {
@@ -471,6 +1097,189 @@
       "title": "FindingEventPayload",
       "type": "object"
     },
+    "GateStatus": {
+      "enum": [
+        "not_ready",
+        "ready",
+        "awaiting_decision",
+        "passed",
+        "failed",
+        "skipped"
+      ],
+      "title": "GateStatus",
+      "type": "string"
+    },
+    "GateStatusChangedEventPayload": {
+      "description": "One of the six approval gates moving between states.\n\nThe unmet criteria are carried, not just the status. A gate that says \"not\nready\" without saying what is missing gives a UI nothing to render and an\nengineer nothing to do, so ``unmet_criteria`` is non-empty whenever the gate\nis not passable and ``unmet_criteria_count`` is the true total behind the\ncapped list. ``is_enabled`` and ``disabled_reason`` keep a gate an\nadministrator switched off visible instead of silently passing.",
+      "properties": {
+        "gate_key": {
+          "$ref": "#/$defs/ApprovalGateKey"
+        },
+        "previous_status": {
+          "$ref": "#/$defs/GateStatus"
+        },
+        "status": {
+          "$ref": "#/$defs/GateStatus"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "title": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Title",
+          "type": "string"
+        },
+        "criteria_count": {
+          "default": 0,
+          "title": "Criteria Count",
+          "type": "integer"
+        },
+        "unmet_criteria_count": {
+          "default": 0,
+          "title": "Unmet Criteria Count",
+          "type": "integer"
+        },
+        "unmet_criteria": {
+          "items": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Unmet Criteria",
+          "type": "array"
+        },
+        "is_enabled": {
+          "default": true,
+          "title": "Is Enabled",
+          "type": "boolean"
+        },
+        "disabled_reason": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Disabled Reason",
+          "type": "string"
+        },
+        "approval_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approval Id"
+        },
+        "decided_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decided By Id"
+        },
+        "decided_revision_number": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decided Revision Number"
+        },
+        "decision_comment": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Decision Comment",
+          "type": "string"
+        }
+      },
+      "required": [
+        "gate_key",
+        "previous_status",
+        "status",
+        "location"
+      ],
+      "title": "GateStatusChangedEventPayload",
+      "type": "object"
+    },
+    "ImportVerificationStatus": {
+      "enum": [
+        "not_attempted",
+        "unavailable",
+        "queued",
+        "running",
+        "passed",
+        "failed",
+        "error"
+      ],
+      "title": "ImportVerificationStatus",
+      "type": "string"
+    },
+    "ObjectType": {
+      "description": "Stable names for canonical objects.\n\nUsed wherever a reference has to be polymorphic — evidence links, change\noperations, impact analysis. A string rather than a foreign key per target\nso that adding an object type does not require a schema change everywhere\nit could be cited.",
+      "enum": [
+        "project_profile",
+        "project_question",
+        "project_decision",
+        "requirement",
+        "acceptance_criterion",
+        "assumption",
+        "constraint",
+        "clarification",
+        "area",
+        "unit",
+        "equipment_module",
+        "device",
+        "device_type",
+        "network_node",
+        "module",
+        "io_point",
+        "signal",
+        "address_assignment",
+        "tag",
+        "tag_alias",
+        "tag_group",
+        "data_type_definition",
+        "udt_definition",
+        "aoi_reference",
+        "controller_task",
+        "program",
+        "routine",
+        "logic_network",
+        "logic_rung",
+        "logic_instruction",
+        "interlock",
+        "permissive",
+        "cause_effect_entry",
+        "mode_definition",
+        "state_definition",
+        "transition_definition",
+        "sequence_step",
+        "fault_definition",
+        "reset_behavior",
+        "hmi_screen",
+        "hmi_binding",
+        "alarm_definition",
+        "test_case",
+        "finding",
+        "export_artifact",
+        "release_candidate"
+      ],
+      "title": "ObjectType",
+      "type": "string"
+    },
     "ProjectEventPayload": {
       "properties": {
         "project_id": {
@@ -498,6 +1307,334 @@
         "status"
       ],
       "title": "ProjectEventPayload",
+      "type": "object"
+    },
+    "ProjectQuestionEventPayload": {
+      "description": "A clarification the platform needs answered, raised or closed.\n\n``is_blocking`` and ``blocks_task_kinds`` travel with the event because the\ncity has to show what has stopped: without them a question that holds up\nnothing looks exactly like one holding up the whole project.",
+      "properties": {
+        "question_id": {
+          "format": "uuid",
+          "title": "Question Id",
+          "type": "string"
+        },
+        "reference": {
+          "maxLength": 40,
+          "title": "Reference",
+          "type": "string"
+        },
+        "category": {
+          "$ref": "#/$defs/QuestionCategory"
+        },
+        "status": {
+          "$ref": "#/$defs/ClarificationStatus"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "question": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Question",
+          "type": "string"
+        },
+        "why_it_matters": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Why It Matters",
+          "type": "string"
+        },
+        "is_mandatory": {
+          "default": true,
+          "title": "Is Mandatory",
+          "type": "boolean"
+        },
+        "is_blocking": {
+          "default": false,
+          "title": "Is Blocking",
+          "type": "boolean"
+        },
+        "blocks_task_kinds": {
+          "items": {
+            "$ref": "#/$defs/TaskKind"
+          },
+          "title": "Blocks Task Kinds",
+          "type": "array"
+        },
+        "answer_summary": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Answer Summary",
+          "type": "string"
+        },
+        "decision_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decision Id"
+        },
+        "answered_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Answered By Id"
+        }
+      },
+      "required": [
+        "question_id",
+        "reference",
+        "category",
+        "status",
+        "location"
+      ],
+      "title": "ProjectQuestionEventPayload",
+      "type": "object"
+    },
+    "QuestionCategory": {
+      "description": "What a clarification is about. Drives who should answer it.",
+      "enum": [
+        "target_platform",
+        "requirement_ambiguity",
+        "scope",
+        "device_or_equipment",
+        "io_assignment",
+        "tag_naming",
+        "interlock",
+        "sequence_or_mode",
+        "alarm",
+        "hmi",
+        "testing",
+        "template_selection",
+        "restricted_domain",
+        "other"
+      ],
+      "title": "QuestionCategory",
+      "type": "string"
+    },
+    "ReleaseCandidateCreatedEventPayload": {
+      "description": "A newly assembled package, at the level it has actually attained.\n\n``limitation_count`` and ``unsupported_item_count`` are on the event rather\nthan only inside the package: a limitation the customer first meets at the\nimport dialog is a limitation we hid.",
+      "properties": {
+        "release_candidate_id": {
+          "format": "uuid",
+          "title": "Release Candidate Id",
+          "type": "string"
+        },
+        "candidate_number": {
+          "title": "Candidate Number",
+          "type": "integer"
+        },
+        "revision_number": {
+          "title": "Revision Number",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/ReleaseCandidateStatus"
+        },
+        "validation_level": {
+          "$ref": "#/$defs/ValidationLevel"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "name": {
+          "default": "",
+          "maxLength": 120,
+          "title": "Name",
+          "type": "string"
+        },
+        "artifact_count": {
+          "default": 0,
+          "title": "Artifact Count",
+          "type": "integer"
+        },
+        "package_bytes": {
+          "default": 0,
+          "title": "Package Bytes",
+          "type": "integer"
+        },
+        "package_sha256": {
+          "default": "",
+          "maxLength": 64,
+          "title": "Package Sha256",
+          "type": "string"
+        },
+        "validation_run_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Validation Run Id"
+        },
+        "export_profile_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Export Profile Id"
+        },
+        "generator_version": {
+          "default": "",
+          "maxLength": 40,
+          "title": "Generator Version",
+          "type": "string"
+        },
+        "limitation_count": {
+          "default": 0,
+          "title": "Limitation Count",
+          "type": "integer"
+        },
+        "unsupported_item_count": {
+          "default": 0,
+          "title": "Unsupported Item Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "release_candidate_id",
+        "candidate_number",
+        "revision_number",
+        "status",
+        "validation_level",
+        "location"
+      ],
+      "title": "ReleaseCandidateCreatedEventPayload",
+      "type": "object"
+    },
+    "ReleaseCandidateStatus": {
+      "enum": [
+        "draft",
+        "generating",
+        "generated",
+        "validation_failed",
+        "awaiting_approval",
+        "approved",
+        "released",
+        "superseded",
+        "failed"
+      ],
+      "title": "ReleaseCandidateStatus",
+      "type": "string"
+    },
+    "ReleaseReadyEventPayload": {
+      "description": "A package that has cleared its gates and is ready to hand over.\n\nReady to *export* is not a release Studio 5000 has accepted, so both facts\nare carried and neither is collapsed into a flag: ``validation_level`` says\nhow far the package was actually proved, and ``import_verification_status``\nsays whether a licensed workstation has ever imported it —\n``not_attempted`` being the normal end state, because most deployments have\nno workstation adapter at all. ``is_import_ready_candidate_only`` is the\nclaim the UI, the manifest and the covering email must all repeat while it\nis true.",
+      "properties": {
+        "release_candidate_id": {
+          "format": "uuid",
+          "title": "Release Candidate Id",
+          "type": "string"
+        },
+        "candidate_number": {
+          "title": "Candidate Number",
+          "type": "integer"
+        },
+        "revision_number": {
+          "title": "Revision Number",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/ReleaseCandidateStatus"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "validation_level": {
+          "$ref": "#/$defs/ValidationLevel"
+        },
+        "import_verification_status": {
+          "$ref": "#/$defs/ImportVerificationStatus"
+        },
+        "is_import_ready_candidate_only": {
+          "default": true,
+          "title": "Is Import Ready Candidate Only",
+          "type": "boolean"
+        },
+        "import_verification_detail": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Import Verification Detail",
+          "type": "string"
+        },
+        "artifact_count": {
+          "default": 0,
+          "title": "Artifact Count",
+          "type": "integer"
+        },
+        "package_bytes": {
+          "default": 0,
+          "title": "Package Bytes",
+          "type": "integer"
+        },
+        "package_sha256": {
+          "default": "",
+          "maxLength": 64,
+          "title": "Package Sha256",
+          "type": "string"
+        },
+        "manifest_sha256": {
+          "default": "",
+          "maxLength": 64,
+          "title": "Manifest Sha256",
+          "type": "string"
+        },
+        "approved_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approved By Id"
+        },
+        "limitation_count": {
+          "default": 0,
+          "title": "Limitation Count",
+          "type": "integer"
+        },
+        "unsupported_item_count": {
+          "default": 0,
+          "title": "Unsupported Item Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "release_candidate_id",
+        "candidate_number",
+        "revision_number",
+        "status",
+        "location",
+        "validation_level",
+        "import_verification_status"
+      ],
+      "title": "ReleaseReadyEventPayload",
       "type": "object"
     },
     "ReportEventPayload": {
@@ -537,6 +1674,305 @@
         "status"
       ],
       "title": "ReportEventPayload",
+      "type": "object"
+    },
+    "RequirementEventPayload": {
+      "description": "One requirement the platform extracted from the brief.\n\n``is_inferred`` is carried rather than looked up: a requirement the platform\nderived is a proposal, and a feed that renders it identically to one the\ncustomer wrote is misreporting what happened.",
+      "properties": {
+        "requirement_id": {
+          "format": "uuid",
+          "title": "Requirement Id",
+          "type": "string"
+        },
+        "reference": {
+          "maxLength": 64,
+          "title": "Reference",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 300,
+          "title": "Title",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/RequirementKind"
+        },
+        "priority": {
+          "$ref": "#/$defs/RequirementPriority"
+        },
+        "status": {
+          "$ref": "#/$defs/RequirementStatus"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "is_inferred": {
+          "default": false,
+          "title": "Is Inferred",
+          "type": "boolean"
+        },
+        "confidence": {
+          "default": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "source_label": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Source Label",
+          "type": "string"
+        },
+        "acceptance_criteria_count": {
+          "default": 0,
+          "title": "Acceptance Criteria Count",
+          "type": "integer"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        }
+      },
+      "required": [
+        "requirement_id",
+        "reference",
+        "title",
+        "kind",
+        "priority",
+        "status",
+        "location"
+      ],
+      "title": "RequirementEventPayload",
+      "type": "object"
+    },
+    "RequirementKind": {
+      "enum": [
+        "functional",
+        "performance",
+        "safety",
+        "interface",
+        "operational",
+        "regulatory",
+        "constraint",
+        "other"
+      ],
+      "title": "RequirementKind",
+      "type": "string"
+    },
+    "RequirementPriority": {
+      "enum": [
+        "mandatory",
+        "expected",
+        "optional"
+      ],
+      "title": "RequirementPriority",
+      "type": "string"
+    },
+    "RequirementStatus": {
+      "enum": [
+        "proposed",
+        "accepted",
+        "rejected",
+        "superseded",
+        "implemented",
+        "verified"
+      ],
+      "title": "RequirementStatus",
+      "type": "string"
+    },
+    "RestrictedDomain": {
+      "description": "Engineering domains this platform will not generate for by default.\n\nEach is a domain where a plausible-looking generated artifact could cause\ninjury or major equipment damage, and where the competence to review it is\na formal qualification rather than general controls experience.",
+      "enum": [
+        "motion",
+        "safety_logic",
+        "burner_management",
+        "process_safety",
+        "high_energy",
+        "electrical_power_distribution",
+        "robotics"
+      ],
+      "title": "RestrictedDomain",
+      "type": "string"
+    },
+    "RevisionCreatedEventPayload": {
+      "description": "A new numbered point on the project's timeline.\n\nA revision is a label rather than a copy, so the payload names what produced\nit and how far it moved the model. ``is_release_baseline`` is carried\nbecause a baseline must never be the base for an in-place edit.",
+      "properties": {
+        "revision_id": {
+          "format": "uuid",
+          "title": "Revision Id",
+          "type": "string"
+        },
+        "number": {
+          "title": "Number",
+          "type": "integer"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "parent_revision_number": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Revision Number"
+        },
+        "changeset_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changeset Id"
+        },
+        "operation_count": {
+          "default": 0,
+          "title": "Operation Count",
+          "type": "integer"
+        },
+        "object_counts_by_type": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/ObjectType"
+          },
+          "title": "Object Counts By Type",
+          "type": "object"
+        },
+        "summary": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Summary",
+          "type": "string"
+        },
+        "created_by_agent_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "created_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created By Id"
+        },
+        "is_release_baseline": {
+          "default": false,
+          "title": "Is Release Baseline",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "revision_id",
+        "number",
+        "location"
+      ],
+      "title": "RevisionCreatedEventPayload",
+      "type": "object"
+    },
+    "SemanticLocation": {
+      "description": "Where in the city an agent is working.\n\nThe backend broadcasts these names and never pixel coordinates: where a\ndistrict *is* on screen is the frontend's business, and coupling the\nbackend to a layout would make moving a building a backend change.",
+      "enum": [
+        "project_intake",
+        "requirements_hall",
+        "project_core",
+        "tag_foundry",
+        "automation_core",
+        "ladder_logic_lab",
+        "electrical_works",
+        "hmi_district",
+        "alarm_center",
+        "qa_campus",
+        "testing_grounds",
+        "approval_plaza",
+        "documentation_quarter",
+        "release_logistics",
+        "template_library",
+        "data_center"
+      ],
+      "title": "SemanticLocation",
+      "type": "string"
+    },
+    "TaskAssignedEventPayload": {
+      "description": "A queued task handed to an agent.\n\nDistinct from ``task.started``: assignment is what sends an agent across the\ncity, so the destination is on the event rather than derived from the kind.",
+      "properties": {
+        "task_id": {
+          "format": "uuid",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/TaskKind"
+        },
+        "title": {
+          "maxLength": 300,
+          "title": "Title",
+          "type": "string"
+        },
+        "agent_kind": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "attempt": {
+          "default": 1,
+          "title": "Attempt",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "task_id",
+        "kind",
+        "title",
+        "agent_kind",
+        "location"
+      ],
+      "title": "TaskAssignedEventPayload",
       "type": "object"
     },
     "TaskEventPayload": {
@@ -581,6 +2017,228 @@
         "status"
       ],
       "title": "TaskEventPayload",
+      "type": "object"
+    },
+    "TaskKind": {
+      "description": "Identifies the handler that executes a task.",
+      "enum": [
+        "intake",
+        "inventory_files",
+        "parse_file",
+        "build_evidence_graph",
+        "plan_project",
+        "review_plc",
+        "review_interlocks",
+        "senior_review",
+        "request_approvals",
+        "delivery",
+        "finalize_project",
+        "extract_requirements",
+        "resolve_clarifications",
+        "design_tags",
+        "design_plc_architecture",
+        "generate_logic",
+        "validate_cross_discipline",
+        "evaluate_approval_gate",
+        "generate_release_candidate",
+        "verify_import",
+        "assemble_package"
+      ],
+      "title": "TaskKind",
+      "type": "string"
+    },
+    "ValidationCompletedEventPayload": {
+      "description": "What a validation run found, counted per severity.\n\nA single total invites the reader to guess how much of it blocks, so the\ncounts are broken out; ``checks_run`` sits beside them because a run that\nfound nothing because it ran nothing must not look like a clean one, and\n``is_blocking`` states the consequence rather than leaving it to be inferred\nfrom the numbers. ``summary`` and ``first_error_result_id`` make a failing\nrun name something the reader can open.",
+      "properties": {
+        "validation_run_id": {
+          "format": "uuid",
+          "title": "Validation Run Id",
+          "type": "string"
+        },
+        "revision_number": {
+          "title": "Revision Number",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/ValidationRunStatus"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "summary": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "disciplines": {
+          "items": {
+            "$ref": "#/$defs/ValidationDiscipline"
+          },
+          "title": "Disciplines",
+          "type": "array"
+        },
+        "error_count": {
+          "default": 0,
+          "title": "Error Count",
+          "type": "integer"
+        },
+        "warning_count": {
+          "default": 0,
+          "title": "Warning Count",
+          "type": "integer"
+        },
+        "information_count": {
+          "default": 0,
+          "title": "Information Count",
+          "type": "integer"
+        },
+        "unsupported_count": {
+          "default": 0,
+          "title": "Unsupported Count",
+          "type": "integer"
+        },
+        "human_review_count": {
+          "default": 0,
+          "title": "Human Review Count",
+          "type": "integer"
+        },
+        "checks_run": {
+          "default": 0,
+          "title": "Checks Run",
+          "type": "integer"
+        },
+        "is_blocking": {
+          "default": false,
+          "title": "Is Blocking",
+          "type": "boolean"
+        },
+        "first_error_result_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "First Error Result Id"
+        },
+        "first_error_object_label": {
+          "default": "",
+          "maxLength": 200,
+          "title": "First Error Object Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "validation_run_id",
+        "revision_number",
+        "status",
+        "location",
+        "summary"
+      ],
+      "title": "ValidationCompletedEventPayload",
+      "type": "object"
+    },
+    "ValidationDiscipline": {
+      "enum": [
+        "requirements",
+        "tags",
+        "io",
+        "plc_logic",
+        "interlocks",
+        "hmi",
+        "alarms",
+        "testing",
+        "documentation",
+        "release",
+        "cross_discipline"
+      ],
+      "title": "ValidationDiscipline",
+      "type": "string"
+    },
+    "ValidationLevel": {
+      "description": "How far an artifact has actually been proved.\n\nStrictly ordered, and never collapsed to a boolean. Everything this backend\ncan do offline stops at ``ROUND_TRIP_PARSED``: we can prove our own output\nparses back into the same model, which is not the same as proving Studio\n5000 will import it.",
+      "enum": [
+        "generated",
+        "schema_validated",
+        "internal_semantic_validated",
+        "round_trip_parsed",
+        "rockwell_import_verified",
+        "human_approved",
+        "released"
+      ],
+      "title": "ValidationLevel",
+      "type": "string"
+    },
+    "ValidationRunStatus": {
+      "enum": [
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "title": "ValidationRunStatus",
+      "type": "string"
+    },
+    "ValidationStartedEventPayload": {
+      "description": "A validation run beginning over one revision.\n\n``disciplines`` is on the event because a clean result across three\ndisciplines must never be read as a clean result across all of them, and\n``revision_number`` because a run is a statement about a specific state of\nthe model rather than about the project as it is now.",
+      "properties": {
+        "validation_run_id": {
+          "format": "uuid",
+          "title": "Validation Run Id",
+          "type": "string"
+        },
+        "revision_number": {
+          "title": "Revision Number",
+          "type": "integer"
+        },
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "disciplines": {
+          "items": {
+            "$ref": "#/$defs/ValidationDiscipline"
+          },
+          "title": "Disciplines",
+          "type": "array"
+        },
+        "triggered_by_task_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Triggered By Task Id"
+        },
+        "triggered_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Triggered By Id"
+        }
+      },
+      "required": [
+        "validation_run_id",
+        "revision_number",
+        "location"
+      ],
+      "title": "ValidationStartedEventPayload",
       "type": "object"
     },
     "WebSocketError": {
@@ -674,6 +2332,138 @@
         }
       },
       "title": "WorkflowEventPayload",
+      "type": "object"
+    },
+    "WorkflowFailedEventPayload": {
+      "description": "A run that stopped and will not continue on its own.\n\n``reason`` is required and ``failed_task_id`` names the task that produced\nit where one did. A failure broadcast as a status word tells a reader that\nsomething is wrong and nothing about what to do next.",
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "reason": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "failed_task_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failed Task Id"
+        },
+        "failed_task_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tasks_completed": {
+          "default": 0,
+          "title": "Tasks Completed",
+          "type": "integer"
+        },
+        "tasks_remaining": {
+          "default": 0,
+          "title": "Tasks Remaining",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "location",
+        "reason"
+      ],
+      "title": "WorkflowFailedEventPayload",
+      "type": "object"
+    },
+    "WorkflowPlannedEventPayload": {
+      "description": "The plan a Project Manager agent produced for a run.\n\nTask counts by kind rather than the tasks themselves: the plan is a\ndocument, and the feed only needs how much work was scheduled and what\nalready holds it up.",
+      "properties": {
+        "location": {
+          "$ref": "#/$defs/SemanticLocation"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "task_count": {
+          "default": 0,
+          "title": "Task Count",
+          "type": "integer"
+        },
+        "task_counts_by_kind": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/TaskKind"
+          },
+          "title": "Task Counts By Kind",
+          "type": "object"
+        },
+        "summary": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Summary",
+          "type": "string"
+        },
+        "blocked_by_question_references": {
+          "items": {
+            "maxLength": 40,
+            "type": "string"
+          },
+          "title": "Blocked By Question References",
+          "type": "array"
+        },
+        "risk_count": {
+          "default": 0,
+          "title": "Risk Count",
+          "type": "integer"
+        },
+        "out_of_scope_count": {
+          "default": 0,
+          "title": "Out Of Scope Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "location"
+      ],
+      "title": "WorkflowPlannedEventPayload",
       "type": "object"
     }
   }

@@ -10,10 +10,10 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, String, Text
+from sqlalchemy import ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.enums import ApprovalKind, ApprovalStatus
+from app.core.enums import ApprovalDecision, ApprovalGateKey, ApprovalKind, ApprovalStatus
 from app.database.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.database.types import GUID, JSONDict, UTCDateTime
 
@@ -44,11 +44,28 @@ class Approval(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     report_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("reports.id", ondelete="CASCADE"), nullable=True
     )
+    #: Set when the decision is about merging a proposed change to the canonical
+    #: engineering model rather than about a finding.
+    change_set_id: Mapped[uuid.UUID | None] = mapped_column(GUID, nullable=True, index=True)
+    release_candidate_id: Mapped[uuid.UUID | None] = mapped_column(GUID, nullable=True, index=True)
+    #: Set on a gate decision. Which of the six gates this settles.
+    gate_key: Mapped[ApprovalGateKey | None] = mapped_column(nullable=True, index=True)
+    #: The impact analysis a reviewer must see before approving a rename. An
+    #: approval that names one is an approval given *with* the consequences in
+    #: front of the reviewer, which is the only kind worth recording.
+    impact_report_id: Mapped[uuid.UUID | None] = mapped_column(GUID, nullable=True)
+    #: The revision the decision applies to. A later change does not inherit it.
+    revision_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     kind: Mapped[ApprovalKind] = mapped_column(nullable=False, index=True)
     status: Mapped[ApprovalStatus] = mapped_column(
         default=ApprovalStatus.PENDING, nullable=False, index=True
     )
+    #: What the reviewer chose, kept separately from ``status`` because the two
+    #: are not the same thing: ``ACCEPT_RISK`` and ``APPROVE`` both leave an
+    #: approval settled, and a release that proceeded on knowingly accepted risk
+    #: must not be indistinguishable afterwards from one with no risk at all.
+    decision: Mapped[ApprovalDecision | None] = mapped_column(nullable=True)
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     #: Plain-language statement of exactly what the human is being asked to

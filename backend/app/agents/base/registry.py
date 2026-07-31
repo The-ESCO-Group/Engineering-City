@@ -4,14 +4,16 @@ Declarative metadata for every agent the platform knows about, kept separate
 from the implementations so the API can list agents (and report which are
 unavailable) without importing agent logic or depending on optional plugins.
 
-``building`` and ``home_location`` exist for the city visualisation only.
+``building`` is a display label. ``home_location`` is a :class:`SemanticLocation`
+member: the backend broadcasts semantic district names and never pixel
+coordinates, so moving a building on screen stays a frontend change.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.core.enums import AgentKind, TaskKind
+from app.core.enums import AgentKind, SemanticLocation, TaskKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,7 +24,7 @@ class AgentSpec:
     display_name: str
     description: str
     building: str
-    home_location: str
+    home_location: SemanticLocation
     handles_task_kinds: tuple[TaskKind, ...]
     #: True when supplied by a plugin rather than the core product.
     is_plugin: bool = False
@@ -40,7 +42,7 @@ CORE_AGENTS: tuple[AgentSpec, ...] = (
             "and builds the task plan with its dependencies."
         ),
         building="Intake Hall",
-        home_location="intake_dock",
+        home_location=SemanticLocation.PROJECT_INTAKE,
         handles_task_kinds=(TaskKind.INVENTORY_FILES, TaskKind.PLAN_PROJECT),
         boundaries=(
             "Does not draw technical engineering conclusions.",
@@ -56,7 +58,7 @@ CORE_AGENTS: tuple[AgentSpec, ...] = (
             "evidence and separates observation from inference."
         ),
         building="Logic Works",
-        home_location="logic_works",
+        home_location=SemanticLocation.LADDER_LOGIC_LAB,
         handles_task_kinds=(TaskKind.REVIEW_PLC,),
         boundaries=(
             "Does not connect to a controller.",
@@ -72,7 +74,7 @@ CORE_AGENTS: tuple[AgentSpec, ...] = (
             "produces a structured discrepancy matrix with evidence on both sides."
         ),
         building="Safety Annex",
-        home_location="safety_annex",
+        home_location=SemanticLocation.AUTOMATION_CORE,
         handles_task_kinds=(TaskKind.REVIEW_INTERLOCKS,),
         boundaries=(
             "Does not approve or certify a safety function.",
@@ -88,7 +90,7 @@ CORE_AGENTS: tuple[AgentSpec, ...] = (
             "confidence where evidence is incomplete."
         ),
         building="Review Hall",
-        home_location="review_hall",
+        home_location=SemanticLocation.QA_CAMPUS,
         handles_task_kinds=(TaskKind.SENIOR_REVIEW, TaskKind.REQUEST_APPROVALS),
         boundaries=(
             "Is not the final human engineer and never signs off on its own.",

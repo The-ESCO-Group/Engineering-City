@@ -1,0 +1,291 @@
+# Standard across-the-line motor start/stop.
+# See templates/README.md for the file format and the versioning rule.
+id: esco.motor.standard
+version: 1.0.0
+category: motor_control
+display_name: Standard motor start/stop
+description: >
+  Three-wire start/stop for a single-direction, across-the-line motor starter,
+  with a start permissive, a run interlock, run feedback and fail-to-start /
+  fail-to-stop detection. The permissive gates the start only; the interlock
+  gates the seal as well, so a permissive that goes away does not stop a running
+  motor and an interlock does.
+supported_families: [compactlogix, controllogix]
+approval_level: standard
+restricted_domains: []
+
+parameters:
+  - name: device_tag
+    type: identifier
+    required: true
+    description: Device tag stem, e.g. MTR_101
+  - name: has_run_feedback
+    type: boolean
+    required: false
+    default: true
+    description: >
+      The starter reports it is running (auxiliary contact or overload contact).
+      Without it, running status is the command echoed back and the template
+      cannot detect a failure to start.
+  - name: fail_to_start_ms
+    type: integer
+    required: false
+    default: 2000
+    description: How long run feedback may stay absent after a run command
+  - name: fail_to_stop_ms
+    type: integer
+    required: false
+    default: 2000
+    description: How long run feedback may persist after the run command is removed
+
+required_tags:
+  - role: command
+    suffix: _Cmd_Start
+    data_type: BOOL
+    description: Operator or sequence start request, momentary
+  - role: command
+    suffix: _Cmd_Stop
+    data_type: BOOL
+    description: Operator or sequence stop request, momentary; true means stop is requested
+  - role: permissive
+    suffix: _Permissive
+    data_type: BOOL
+    description: Every condition required before the motor may be STARTED is satisfied
+  - role: interlock
+    suffix: _Interlock_OK
+    data_type: BOOL
+    description: >
+      No interlock is tripped. False stops a running motor, which is what makes
+      it an interlock rather than a permissive.
+  - role: command
+    suffix: _Cmd_Run
+    data_type: BOOL
+    description: The sealed run command; the internal result of this block
+  - role: io_alias
+    suffix: _Out_Run
+    data_type: BOOL
+    description: Physical output to the starter contactor
+  - role: status
+    suffix: _Sts_Running
+    data_type: BOOL
+    description: The motor is running
+  - role: status
+    suffix: _Sts_Faulted
+    data_type: BOOL
+    description: A latched fault is present; cleared only by the fault-reset pattern
+  - role: feedback
+    suffix: _In_Run_Fbk
+    data_type: BOOL
+    description: Starter auxiliary contact; the motor is actually running
+    when_parameter: has_run_feedback
+  - role: status
+    suffix: _Tmr_FailToStart
+    data_type: TIMER
+    description: Times run feedback failing to appear after a run command
+    when_parameter: has_run_feedback
+  - role: status
+    suffix: _Tmr_FailToStop
+    data_type: TIMER
+    description: Times run feedback persisting after the run command is removed
+    when_parameter: has_run_feedback
+  - role: alarm
+    suffix: _Alm_FailToStart
+    data_type: BOOL
+    description: Commanded to run and no run feedback appeared within the allowed time
+    when_parameter: has_run_feedback
+  - role: alarm
+    suffix: _Alm_FailToStop
+    data_type: BOOL
+    description: Run command removed and run feedback persisted beyond the allowed time
+    when_parameter: has_run_feedback
+
+generated_objects:
+  routines:
+    - name: R_Devices
+      language: ladder
+      description: >
+        Device control blocks. This pattern contributes one block; the routine
+        already exists in the ESCO controller layouts.
+
+  rungs:
+    - routine: R_Devices
+      title: "{device_tag} run request"
+      comment: >
+        Three-wire start/stop. The start branch carries the permissive, so a
+        permissive that becomes false prevents a START but does not drop a motor
+        that is already sealed in. The interlock and the fault are in the common
+        leg, so either one drops the motor immediately. Cmd_Stop is examined
+        if-open so a stop request always wins.
+      elements:
+        - branch:
+            - - {instruction: XIC, operand: "{device_tag}_Cmd_Start", kind: condition}
+              - {instruction: XIC, operand: "{device_tag}_Permissive", kind: condition}
+            - - {instruction: XIC, operand: "{device_tag}_Cmd_Run", kind: condition}
+        - {instruction: XIO, operand: "{device_tag}_Cmd_Stop", kind: condition}
+        - {instruction: XIC, operand: "{device_tag}_Interlock_OK", kind: condition}
+        - {instruction: XIO, operand: "{device_tag}_Sts_Faulted", kind: condition}
+        - {instruction: OTE, operand: "{device_tag}_Cmd_Run", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} starter output"
+      comment: >
+        The physical output is driven from the run command on its own rung, so
+        the command can be observed, forced or simulated without touching the
+        control logic that produced it.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Cmd_Run", kind: condition}
+        - {instruction: OTE, operand: "{device_tag}_Out_Run", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} running status from feedback"
+      comment: >
+        Running status is the starter's auxiliary contact, not the command. A
+        motor whose contactor has dropped out is not running however hard the
+        controller is asking.
+      when_parameter: has_run_feedback
+      when_value: true
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_In_Run_Fbk", kind: condition}
+        - {instruction: OTE, operand: "{device_tag}_Sts_Running", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} running status from command"
+      comment: >
+        No run feedback is wired, so running status is the command echoed back.
+        This is an assumption, not an observation: the HMI must show it as
+        "commanded to run", and no fail-to-start detection is possible.
+      when_parameter: has_run_feedback
+      when_value: false
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Cmd_Run", kind: condition}
+        - {instruction: OTE, operand: "{device_tag}_Sts_Running", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} fail to start timer"
+      comment: Run commanded, feedback absent. Times how long that has been true.
+      when_parameter: has_run_feedback
+      when_value: true
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Cmd_Run", kind: condition}
+        - {instruction: XIO, operand: "{device_tag}_In_Run_Fbk", kind: condition}
+        - instruction: TON
+          operands: ["{device_tag}_Tmr_FailToStart", "{fail_to_start_ms}", "0"]
+          kind: output
+
+    - routine: R_Devices
+      title: "{device_tag} fail to start"
+      comment: >
+        Latches the fault, which drops the run command on the first rung. The
+        latch is deliberate: a motor that failed to start must stay stopped and
+        visible until somebody resets it, not retry on the next scan.
+      when_parameter: has_run_feedback
+      when_value: true
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Tmr_FailToStart.DN", kind: condition}
+        - branch:
+            - - {instruction: OTL, operand: "{device_tag}_Sts_Faulted", kind: output}
+            - - {instruction: OTE, operand: "{device_tag}_Alm_FailToStart", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} fail to stop timer"
+      comment: >
+        Run command removed, feedback still present. A welded contactor is the
+        usual cause, and it is the more dangerous of the two failures because
+        the machine believes the motor is stopped.
+      when_parameter: has_run_feedback
+      when_value: true
+      elements:
+        - {instruction: XIO, operand: "{device_tag}_Cmd_Run", kind: condition}
+        - {instruction: XIC, operand: "{device_tag}_In_Run_Fbk", kind: condition}
+        - instruction: TON
+          operands: ["{device_tag}_Tmr_FailToStop", "{fail_to_stop_ms}", "0"]
+          kind: output
+
+    - routine: R_Devices
+      title: "{device_tag} fail to stop"
+      comment: >
+        Latches the fault and raises the alarm. Note what this rung does NOT do:
+        it cannot stop the motor, because the controller has already removed the
+        only output it has. Stopping a motor whose contactor has welded is an
+        electrical design problem, not a logic one.
+      when_parameter: has_run_feedback
+      when_value: true
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Tmr_FailToStop.DN", kind: condition}
+        - branch:
+            - - {instruction: OTL, operand: "{device_tag}_Sts_Faulted", kind: output}
+            - - {instruction: OTE, operand: "{device_tag}_Alm_FailToStop", kind: output}
+
+engineering_notes: >
+  Permissive and interlock are not synonyms and this template treats them
+  differently on purpose. A permissive is a condition for STARTING — lube
+  pressure established, upstream conveyor running — and appears only in the
+  start branch, because losing it while running is usually not a reason to drop
+  the motor. An interlock is a condition for CONTINUING to run, and sits in the
+  common leg where it drops the seal. Putting a permissive in the common leg is
+  the most common way this pattern is got wrong: the motor then stops the moment
+  a start condition goes away, and nobody can explain why it dropped out.
+
+  Fail-to-start and fail-to-stop are both worth having, and fail-to-stop is the
+  one people leave out. It is the only way logic learns that a contactor has
+  welded, and until it is detected the rest of the application is reasoning
+  about a stopped motor that is turning.
+
+  Timer presets are stated in milliseconds and must be set from the equipment:
+  a starter with a slow auxiliary contact or a soft-start will trip a 2000 ms
+  fail-to-start that has nothing wrong with it.
+
+restrictions:
+  - >
+    Not a safety function. This pattern will not stop a motor safely, is not
+    rated for it, and must never be relied on for E-stop, guard interlocking or
+    any function derived from a risk assessment. Those belong in a safety
+    controller.
+  - >
+    Single direction only. Reversing, two-speed and wye-delta starters need
+    interlocking between contactors and a transition dead time, none of which
+    this pattern generates.
+  - >
+    Does not implement motor protection. Overload, phase loss, ground fault and
+    thermistor trips are the responsibility of the overload relay or the motor
+    protection device; this pattern only consumes the resulting contact through
+    _Interlock_OK.
+  - Does not clear its own fault. Use esco.fault.reset, which will not clear a condition that is still true.
+  - Does not include a start warning horn or a pre-start delay.
+  - Does not count starts per hour or enforce an anti-recycle time.
+  - >
+    With has_run_feedback false there is no fail-to-start and no fail-to-stop
+    detection, and _Sts_Running is an assumption. That is a documented reduction
+    in capability, not an equivalent configuration.
+
+tests:
+  - name: Start requires the permissive
+    given: The motor is stopped and _Permissive is false
+    when: _Cmd_Start is pulsed
+    then: _Cmd_Run stays false and the starter output stays de-energised.
+  - name: Losing the permissive does not stop a running motor
+    given: The motor is running with _Cmd_Run sealed in
+    when: _Permissive goes false
+    then: _Cmd_Run stays true.
+  - name: Losing the interlock stops a running motor
+    given: The motor is running
+    when: _Interlock_OK goes false
+    then: _Cmd_Run goes false on the same scan and the starter output de-energises.
+  - name: Stop wins over a held start
+    given: _Cmd_Start is held true
+    when: _Cmd_Stop is pulsed
+    then: _Cmd_Run goes false and does not re-seal while _Cmd_Stop is true.
+  - name: Fail to start is detected and latched
+    given: has_run_feedback is true and the motor is commanded to run
+    when: _In_Run_Fbk stays false for longer than fail_to_start_ms
+    then: >
+      _Sts_Faulted latches, _Alm_FailToStart is set, _Cmd_Run drops, and neither
+      clears when the timer is reset.
+  - name: Fail to stop is detected
+    given: The motor is running and _Cmd_Run is removed
+    when: _In_Run_Fbk stays true for longer than fail_to_stop_ms
+    then: _Sts_Faulted latches and _Alm_FailToStop is set.
+  - name: A fault blocks a restart
+    given: _Sts_Faulted is true
+    when: _Cmd_Start is pulsed with every permissive and interlock satisfied
+    then: _Cmd_Run stays false.

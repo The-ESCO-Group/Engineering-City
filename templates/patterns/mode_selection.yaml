@@ -1,0 +1,271 @@
+# Manual / automatic mode selection with a defined transition rule.
+# See templates/README.md for the file format and the versioning rule.
+id: esco.mode.selection
+version: 1.0.0
+category: mode_selection
+display_name: Manual / automatic mode selection
+description: >
+  Two mutually exclusive modes with an asymmetric, stated transition rule.
+  Entering automatic is conditional — the sequence must be at rest and no fault
+  present — because it is the direction that can start machinery. Leaving
+  automatic is unconditional, because refusing to give an operator manual
+  control is the worse failure. The controller powers up in manual.
+supported_families: [compactlogix, controllogix]
+approval_level: standard
+restricted_domains: []
+
+parameters:
+  - name: machine_tag
+    type: identifier
+    required: true
+    description: Machine or area tag stem, e.g. LINE4
+  - name: block_message_hold_ms
+    type: integer
+    required: false
+    default: 3000
+    description: How long a refused mode change is annunciated
+
+required_tags:
+  - role: command
+    suffix: _Cmd_Mode_Auto
+    data_type: BOOL
+    description: Operator request to enter automatic, momentary
+  - role: command
+    suffix: _Cmd_Mode_Manual
+    data_type: BOOL
+    description: Operator request to enter manual, momentary
+  - role: mode
+    suffix: _Sts_Mode_Auto
+    data_type: BOOL
+    description: The machine is in automatic
+  - role: mode
+    suffix: _Sts_Mode_Manual
+    data_type: BOOL
+    description: The machine is in manual
+  - role: status
+    suffix: _Sts_Mode_Invalid
+    data_type: BOOL
+    description: >
+      Neither mode or both modes are set. Should never be true; it exists so
+      that a corrupted or half-written mode state is detectable rather than
+      being silently treated as one of the two valid modes.
+  - role: sequence
+    suffix: _Sts_Seq_Idle
+    data_type: BOOL
+    description: >
+      The sequence is at rest and holding no state. Written by the sequence
+      pattern; consumed here as the condition for entering automatic.
+  - role: status
+    suffix: _Sts_Faulted
+    data_type: BOOL
+    description: A latched fault is present anywhere in the machine
+  - role: status
+    suffix: _Mode_Auto_OneShot
+    data_type: BOOL
+    description: One-shot storage bit for the request to enter automatic
+  - role: status
+    suffix: _Mode_Manual_OneShot
+    data_type: BOOL
+    description: One-shot storage bit for the request to enter manual
+  - role: status
+    suffix: _Sys_FirstScan
+    data_type: BOOL
+    description: First-scan flag, taken from the controller status bit
+  - role: status
+    suffix: _Tmr_Mode_Blocked
+    data_type: TIMER
+    description: Holds the refused mode-change indication long enough to be read
+  - role: alarm
+    suffix: _Alm_Mode_Change_Blocked
+    data_type: BOOL
+    description: A request to enter automatic was refused, and why is on the HMI
+
+generated_objects:
+  routines:
+    - name: R_Mode_Select
+      language: ladder
+      description: >
+        Mode selection and the transition rules. This pattern contributes the
+        block; the routine already exists in the ESCO controller layouts.
+
+  rungs:
+    - routine: R_Mode_Select
+      title: "{machine_tag} power up in manual"
+      comment: >
+        First scan forces manual. A controller that powers up in automatic can
+        begin a sequence before anybody has looked at the machine, and the state
+        of a non-retentive mode bit after a power cycle is not something to rely
+        on either way.
+      elements:
+        - {instruction: XIC, operand: "{machine_tag}_Sys_FirstScan", kind: condition}
+        - branch:
+            - - {instruction: OTL, operand: "{machine_tag}_Sts_Mode_Manual", kind: output}
+            - - {instruction: OTU, operand: "{machine_tag}_Sts_Mode_Auto", kind: output}
+
+    - routine: R_Mode_Select
+      title: "{machine_tag} enter automatic"
+      comment: >
+        The conditional direction. Automatic may only be entered from a sequence
+        that is idle and with no fault latched, so the sequence always starts
+        from a known step rather than resuming mid-cycle against equipment an
+        operator has moved by hand. Edge-triggered, so a held request cannot
+        force the machine into automatic the instant the sequence happens to
+        pass through idle.
+      elements:
+        - {instruction: XIC, operand: "{machine_tag}_Cmd_Mode_Auto", kind: condition}
+        - instruction: ONS
+          operand: "{machine_tag}_Mode_Auto_OneShot"
+          kind: condition
+        - {instruction: XIC, operand: "{machine_tag}_Sts_Seq_Idle", kind: condition}
+        - {instruction: XIO, operand: "{machine_tag}_Sts_Faulted", kind: condition}
+        - branch:
+            - - {instruction: OTL, operand: "{machine_tag}_Sts_Mode_Auto", kind: output}
+            - - {instruction: OTU, operand: "{machine_tag}_Sts_Mode_Manual", kind: output}
+
+    - routine: R_Mode_Select
+      title: "{machine_tag} automatic refused"
+      comment: >
+        Tells the operator the request was heard and refused. A mode button that
+        appears to do nothing is one an operator presses repeatedly and then
+        works around.
+      elements:
+        - {instruction: XIC, operand: "{machine_tag}_Cmd_Mode_Auto", kind: condition}
+        - branch:
+            - - {instruction: XIO, operand: "{machine_tag}_Sts_Seq_Idle", kind: condition}
+            - - {instruction: XIC, operand: "{machine_tag}_Sts_Faulted", kind: condition}
+        - instruction: TON
+          operands: ["{machine_tag}_Tmr_Mode_Blocked", "{block_message_hold_ms}", "0"]
+          kind: output
+
+    - routine: R_Mode_Select
+      title: "{machine_tag} automatic refused indication"
+      comment: Held for the configured time so a momentary press produces a readable message.
+      elements:
+        - {instruction: XIC, operand: "{machine_tag}_Tmr_Mode_Blocked.TT", kind: condition}
+        - {instruction: OTE, operand: "{machine_tag}_Alm_Mode_Change_Blocked", kind: output}
+
+    - routine: R_Mode_Select
+      title: "{machine_tag} enter manual"
+      comment: >
+        The unconditional direction. Manual is always available: an operator who
+        wants hand control of a machine gets it, and logic that argues about it
+        is logic that will be defeated at the panel. Automatic outputs stop
+        because they are gated on _Sts_Mode_Auto, not because this rung stops
+        them.
+      elements:
+        - {instruction: XIC, operand: "{machine_tag}_Cmd_Mode_Manual", kind: condition}
+        - instruction: ONS
+          operand: "{machine_tag}_Mode_Manual_OneShot"
+          kind: condition
+        - branch:
+            - - {instruction: OTL, operand: "{machine_tag}_Sts_Mode_Manual", kind: output}
+            - - {instruction: OTU, operand: "{machine_tag}_Sts_Mode_Auto", kind: output}
+
+    - routine: R_Mode_Select
+      title: "{machine_tag} drop to manual on fault"
+      comment: >
+        A latched fault takes the machine out of automatic. Without this, a
+        faulted machine sits in automatic with its sequence held, and clearing
+        the fault resumes motion with nobody expecting it.
+      elements:
+        - {instruction: XIC, operand: "{machine_tag}_Sts_Faulted", kind: condition}
+        - branch:
+            - - {instruction: OTL, operand: "{machine_tag}_Sts_Mode_Manual", kind: output}
+            - - {instruction: OTU, operand: "{machine_tag}_Sts_Mode_Auto", kind: output}
+
+    - routine: R_Mode_Select
+      title: "{machine_tag} mode state invalid"
+      comment: >
+        Neither mode set, or both. Neither can be produced by the rungs above,
+        so this rung is watching for something else having written the mode bits
+        — a stray force, an HMI writing state directly, or a second copy of this
+        block expanded by mistake.
+      elements:
+        - branch:
+            - - {instruction: XIO, operand: "{machine_tag}_Sts_Mode_Auto", kind: condition}
+              - {instruction: XIO, operand: "{machine_tag}_Sts_Mode_Manual", kind: condition}
+            - - {instruction: XIC, operand: "{machine_tag}_Sts_Mode_Auto", kind: condition}
+              - {instruction: XIC, operand: "{machine_tag}_Sts_Mode_Manual", kind: condition}
+        - {instruction: OTE, operand: "{machine_tag}_Sts_Mode_Invalid", kind: output}
+
+engineering_notes: >
+  The transition rule is asymmetric on purpose, and the asymmetry is the
+  engineering content of this pattern.
+
+  Manual to automatic is guarded. It is the direction in which machinery can
+  begin to move on its own, and it is only allowed from an idle sequence with no
+  fault, so the sequence starts at a step that matches where the equipment
+  actually is.
+
+  Automatic to manual is unguarded. Requiring conditions to hand control back to
+  a person is a way of guaranteeing that someone eventually pulls a fuse.
+
+  The mode bits are the gate for every automatic output in the machine, and this
+  block only sets them. Nothing here stops an output; automatic logic must be
+  written to require _Sts_Mode_Auto, and manual logic to require
+  _Sts_Mode_Manual. A cross-discipline check should confirm that every automatic
+  output is gated, because an ungated one keeps running after the mode changes
+  and is invisible in this template.
+
+  Both modes are set by OTL/OTU rather than by a pair of OTEs so that the mode
+  survives a scan in which no request is present. That is also why the invalid
+  state is worth watching: latches can be left in a state no rung intended.
+
+restrictions:
+  - >
+    Does not gate any output. This block decides what mode the machine is in and
+    nothing else. Automatic outputs that are not conditioned on _Sts_Mode_Auto
+    keep operating after a change to manual, and this template cannot detect it.
+  - >
+    Two modes only. Semi-automatic, maintenance, cleaning, setup and jog are not
+    generated, and adding one is not a matter of adding a bit — each new mode
+    multiplies the transition rules that need stating.
+  - >
+    Not a safety function and not a substitute for a maintenance mode. A safe
+    maintenance state means energy isolation under a lockout procedure, not a
+    mode bit in a standard controller.
+  - >
+    Does not enforce who may change mode. Any operator with write access to the
+    command tags can, and a keyed selector is a hardware decision this pattern
+    only consumes if the expansion wires it in.
+  - >
+    Does not decide what happens to equipment already running when the mode
+    changes. Whether a running conveyor coasts, stops or continues is the device
+    block's business and must be decided explicitly.
+  - Does not implement a mode-change history or record who requested one.
+
+tests:
+  - name: The controller powers up in manual
+    given: A controller that has just been power cycled
+    when: The first scan completes
+    then: _Sts_Mode_Manual is true and _Sts_Mode_Auto is false.
+  - name: Automatic is refused while the sequence is running
+    given: _Sts_Seq_Idle is false
+    when: _Cmd_Mode_Auto is pulsed
+    then: >
+      _Sts_Mode_Auto stays false, the machine stays in manual, and
+      _Alm_Mode_Change_Blocked is raised for block_message_hold_ms.
+  - name: Automatic is refused while a fault is latched
+    given: _Sts_Faulted is true and the sequence is idle
+    when: _Cmd_Mode_Auto is pulsed
+    then: _Sts_Mode_Auto stays false and the refusal is annunciated.
+  - name: Automatic is accepted from an idle, fault-free machine
+    given: _Sts_Seq_Idle true and _Sts_Faulted false
+    when: _Cmd_Mode_Auto is pulsed
+    then: _Sts_Mode_Auto goes true and _Sts_Mode_Manual goes false on the same scan.
+  - name: Manual is always available
+    given: The machine is in automatic with the sequence part way through a cycle
+    when: _Cmd_Mode_Manual is pulsed
+    then: _Sts_Mode_Manual goes true and _Sts_Mode_Auto goes false immediately.
+  - name: A held automatic request does not sneak in
+    given: _Cmd_Mode_Auto is forced true and the sequence is running
+    when: The sequence later reaches idle
+    then: The machine stays in manual, because no new rising edge has occurred.
+  - name: A fault drops the machine out of automatic
+    given: The machine is in automatic
+    when: A fault latches
+    then: _Sts_Mode_Auto goes false and _Sts_Mode_Manual goes true.
+  - name: The modes are mutually exclusive
+    given: Any sequence of mode requests
+    when: The mode bits are sampled after each scan
+    then: Exactly one is true and _Sts_Mode_Invalid is never set.

@@ -1,0 +1,272 @@
+# Raw-to-engineering-units scaling with out-of-range detection.
+# See templates/README.md for the file format and the versioning rule.
+id: esco.analog.input.scaling
+version: 1.0.0
+category: analog_input_scaling
+display_name: Analog input scaling with out-of-range detection
+description: >
+  Converts a raw analog input to engineering units by linear interpolation
+  between two stated points, and separately decides whether the raw signal is
+  inside the range the transmitter is capable of producing. A value that is out
+  of range is still scaled — but it is flagged, because a scaled number nobody
+  marked as suspect is indistinguishable from a real measurement.
+supported_families: [compactlogix, controllogix]
+approval_level: standard
+restricted_domains: []
+
+parameters:
+  - name: signal_tag
+    type: identifier
+    required: true
+    description: Signal tag stem, e.g. PT_101
+  - name: raw_min
+    type: integer
+    required: false
+    default: 0
+    description: Raw count corresponding to eu_min, e.g. 0 for a 0-20 mA card at 0 mA
+  - name: raw_max
+    type: integer
+    required: false
+    default: 32767
+    description: Raw count corresponding to eu_max
+  - name: eu_min
+    type: number
+    required: false
+    default: 0.0
+    description: Engineering value at raw_min, from the transmitter's calibrated range
+  - name: eu_max
+    type: number
+    required: false
+    default: 100.0
+    description: Engineering value at raw_max, from the transmitter's calibrated range
+  - name: raw_under_range
+    type: integer
+    required: false
+    default: 3000
+    description: >
+      Raw count below which the signal is treated as under range. For a 4-20 mA
+      transmitter on a 0-20 mA card this is the broken-wire threshold and must
+      sit below 4 mA but above zero, so a severed cable is distinguishable from a
+      genuine bottom-of-scale reading.
+  - name: raw_over_range
+    type: integer
+    required: false
+    default: 32000
+    description: Raw count above which the signal is treated as over range
+  - name: fault_debounce_ms
+    type: integer
+    required: false
+    default: 1000
+    description: How long the signal must stay out of range before the alarm is raised
+  - name: units
+    type: string
+    required: false
+    default: ""
+    description: Engineering units, e.g. barg, degC. Recorded on the tag description.
+
+required_tags:
+  - role: io_alias
+    suffix: _Raw
+    data_type: INT
+    description: Raw count read from the analog input module
+  - role: analog_process_value
+    suffix: _PV
+    data_type: REAL
+    description: The measurement in engineering units
+  - role: status
+    suffix: _Sts_Under_Range
+    data_type: BOOL
+    description: The raw signal is below raw_under_range
+  - role: status
+    suffix: _Sts_Over_Range
+    data_type: BOOL
+    description: The raw signal is above raw_over_range
+  - role: feedback
+    suffix: _In_Module_Faulted
+    data_type: BOOL
+    description: >
+      The analog module or its channel reports a fault, taken from the module's
+      own status. A channel that is not being updated reads as a plausible
+      number, so this bit is the only way to know the value is stale.
+  - role: status
+    suffix: _Sts_Valid
+    data_type: BOOL
+    description: >
+      The measurement may be used. False means downstream logic must not act on
+      _PV; it does not mean _PV is zero.
+  - role: status
+    suffix: _Tmr_Signal_Fault
+    data_type: TIMER
+    description: Debounces an out-of-range condition before it becomes an alarm
+  - role: alarm
+    suffix: _Alm_Signal_Fault
+    data_type: BOOL
+    description: The signal has been out of range or the module faulted for long enough to alarm
+
+generated_objects:
+  routines:
+    - name: R_AI_Scaling
+      language: ladder
+      description: >
+        Raw counts to engineering units. This pattern contributes one block; the
+        routine already exists in the ESCO controller layouts.
+    - name: R_AI_Validity
+      language: ladder
+      description: >
+        Range and module-fault checking for each analog input. This pattern
+        contributes one block.
+
+  rungs:
+    - routine: R_AI_Scaling
+      title: "{signal_tag} scale to engineering units"
+      comment: >
+        Linear interpolation between the two calibration points. Unconditional:
+        the value is always scaled, even when it is out of range, so an operator
+        can see how far out of range it is rather than seeing a frozen number.
+        Whether it may be USED is _Sts_Valid, computed separately.
+      elements:
+        - instruction: CPT
+          operands:
+            - "{signal_tag}_PV"
+            - "(({signal_tag}_Raw - {raw_min}) * ({eu_max} - {eu_min}) / ({raw_max} - {raw_min})) + {eu_min}"
+          kind: output
+
+    - routine: R_AI_Validity
+      title: "{signal_tag} under range"
+      comment: >
+        Below the under-range threshold. On a 4-20 mA loop this is the
+        broken-wire, failed-transmitter or lost-loop-power case, and it is the
+        single most valuable thing this block does.
+      elements:
+        - instruction: LES
+          operands: ["{signal_tag}_Raw", "{raw_under_range}"]
+          kind: condition
+        - {instruction: OTE, operand: "{signal_tag}_Sts_Under_Range", kind: output}
+
+    - routine: R_AI_Validity
+      title: "{signal_tag} over range"
+      comment: Above the over-range threshold; a shorted loop or a transmitter driven past span.
+      elements:
+        - instruction: GRT
+          operands: ["{signal_tag}_Raw", "{raw_over_range}"]
+          kind: condition
+        - {instruction: OTE, operand: "{signal_tag}_Sts_Over_Range", kind: output}
+
+    - routine: R_AI_Validity
+      title: "{signal_tag} signal valid"
+      comment: >
+        In range and the module is healthy. Downstream logic checks this bit
+        before acting on _PV. Computed positively so that an unwritten or
+        never-scanned tag reads as INVALID rather than as good.
+      elements:
+        - {instruction: XIO, operand: "{signal_tag}_Sts_Under_Range", kind: condition}
+        - {instruction: XIO, operand: "{signal_tag}_Sts_Over_Range", kind: condition}
+        - {instruction: XIO, operand: "{signal_tag}_In_Module_Faulted", kind: condition}
+        - {instruction: OTE, operand: "{signal_tag}_Sts_Valid", kind: output}
+
+    - routine: R_AI_Validity
+      title: "{signal_tag} signal fault debounce"
+      comment: >
+        Any of the three invalid conditions starts the timer. Debounced because
+        a single noisy scan on a long cable run is not a failed transmitter, and
+        an alarm that cries wolf gets disabled.
+      elements:
+        - branch:
+            - - {instruction: XIC, operand: "{signal_tag}_Sts_Under_Range", kind: condition}
+            - - {instruction: XIC, operand: "{signal_tag}_Sts_Over_Range", kind: condition}
+            - - {instruction: XIC, operand: "{signal_tag}_In_Module_Faulted", kind: condition}
+        - instruction: TON
+          operands: ["{signal_tag}_Tmr_Signal_Fault", "{fault_debounce_ms}", "0"]
+          kind: output
+
+    - routine: R_AI_Validity
+      title: "{signal_tag} signal fault alarm"
+      comment: >
+        Not latched. The alarm follows the condition, because an analog signal
+        that has come back is genuinely healthy again and holding the alarm on
+        would hide the recovery. The consequences of the excursion — a tripped
+        interlock, an aborted sequence — are latched by the blocks that own them.
+      elements:
+        - {instruction: XIC, operand: "{signal_tag}_Tmr_Signal_Fault.DN", kind: condition}
+        - {instruction: OTE, operand: "{signal_tag}_Alm_Signal_Fault", kind: output}
+
+engineering_notes: >
+  Scaling and validity are two different questions and this block answers them
+  separately. Scaling asks "what number does this count represent"; validity
+  asks "should anything believe it". Collapsing them — freezing _PV when the
+  signal is bad, or zeroing it — produces a value that looks like a real
+  measurement of zero, which is worse than an obviously wrong one.
+
+  The under-range threshold is where a 4-20 mA loop earns its keep. A 0-10 V or
+  0-20 mA signal cannot distinguish "zero" from "disconnected", so with those
+  the under-range test can only catch a negative count and the loss of the
+  transmitter is invisible to the controller. If the measurement matters, insist
+  on 4-20 mA at the design stage.
+
+  raw_min and raw_max describe the CARD's count range at the endpoints of the
+  transmitter's range, and eu_min and eu_max describe the TRANSMITTER's
+  calibrated range. Getting the two mixed up is the classic scaling error, and
+  it produces a value that is plausible everywhere except at the ends.
+
+  Downstream logic must gate on _Sts_Valid. Nothing in this template can enforce
+  that, which is why it appears in the restrictions.
+
+restrictions:
+  - >
+    Linear two-point scaling only. A square-root extraction for a differential
+    pressure flow element, a thermocouple or RTD linearisation, or any
+    characterised curve is not generated and cannot be expressed by these
+    parameters.
+  - >
+    Does not hold, filter, damp or substitute a value. _PV follows the raw count
+    every scan including while the signal is invalid, and there is no last-good
+    value.
+  - >
+    Does not stop downstream logic from using an invalid _PV. _Sts_Valid is
+    published; honouring it is the responsibility of every block that reads the
+    measurement, and a cross-discipline check should confirm each one does.
+  - >
+    Cannot detect a transmitter that is in range and wrong — drifted, mis-calibrated,
+    isolated by a closed manifold valve, or measuring the wrong thing.
+  - >
+    On a 0-10 V or 0-20 mA signal, a disconnected transmitter reads as zero and
+    is indistinguishable from a genuine bottom-of-scale measurement. The
+    under-range test does not help.
+  - Does not generate process alarms on the measurement itself; high, high-high, low and low-low limits are separate.
+  - Does not scale an analog OUTPUT.
+
+tests:
+  - name: Scaling is correct at both endpoints
+    given: raw_min 0, raw_max 32767, eu_min 0.0, eu_max 100.0
+    when: _Raw is set to 0 and then to 32767
+    then: _PV reads 0.0 and then 100.0.
+  - name: Scaling is correct at midscale
+    given: The same range
+    when: _Raw is set to 16384
+    then: _PV reads 50.0 within rounding.
+  - name: A broken wire is detected
+    given: A 4-20 mA transmitter with raw_under_range set below 4 mA
+    when: The loop is disconnected
+    then: >
+      _Sts_Under_Range goes true, _Sts_Valid goes false immediately, and
+      _Alm_Signal_Fault is raised after fault_debounce_ms.
+  - name: Over range is detected
+    given: The configured over-range threshold
+    when: _Raw is driven above it
+    then: _Sts_Over_Range goes true and _Sts_Valid goes false.
+  - name: A module fault invalidates the value
+    given: A healthy in-range signal
+    when: _In_Module_Faulted goes true
+    then: _Sts_Valid goes false even though the raw count is unchanged.
+  - name: The value is still scaled while invalid
+    given: An out-of-range raw count
+    when: The scaling rung is scanned
+    then: _PV holds the scaled out-of-range number, not zero and not its last good value.
+  - name: A momentary excursion does not alarm
+    given: fault_debounce_ms of 1000
+    when: The signal goes out of range for 200 ms and returns
+    then: _Alm_Signal_Fault is never raised.
+  - name: The alarm clears when the signal recovers
+    given: A raised signal-fault alarm
+    when: The signal returns to range
+    then: _Alm_Signal_Fault clears without a reset.

@@ -19,7 +19,18 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core.enums import ActionType, ApprovalKind, FindingCategory, FindingSeverity
+from app.core.enums import (
+    ACCEPTABLE_BASIS_KINDS,
+    TRACEABLE_OBJECT_TYPES,
+    ActionType,
+    ApprovalKind,
+    ChangeOperationType,
+    EvidenceKind,
+    FindingCategory,
+    FindingSeverity,
+    ObjectType,
+    QuestionCategory,
+)
 
 #: Action types that make a technical assertion and therefore require at least
 #: one evidence anchor.
@@ -207,7 +218,7 @@ class UpdateFindingReviewPayload(BaseModel):
     verdict: Literal["supported", "unsupported", "duplicate", "needs_more_evidence"]
     notes: Annotated[str, Field(max_length=4000)] = ""
     adjusted_severity: FindingSeverity | None = None
-    adjusted_confidence: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
+    adjusted_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     duplicate_of_finding_id: uuid.UUID | None = None
     parser_limitations: list[str] = Field(default_factory=list)
 
@@ -243,6 +254,308 @@ class ReportNoFindingsPayload(BaseModel):
     limitations: str = ""
 
 
+# ---------------------------------------------------------------------------
+# Production platform: proposing changes to the canonical engineering model.
+# ---------------------------------------------------------------------------
+class ObjectBasis(BaseModel):
+    """Why a proposed object should exist.
+
+    A generated tag, rung, alarm or test case must be derivable from something a
+    human can check: a document, a requirement, an approved template rule, or a
+    named engineering decision. This is that statement, and it is validated at
+    the action boundary — the earliest and cheapest point at which a missing
+    basis can be caught.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: EvidenceKind
+    anchor_id: uuid.UUID | None = None
+    requirement_reference: str = ""
+    decision_reference: str = ""
+    #: Qualified template identifier, e.g. ``esco.motor.standard@1.0.0``.
+    template_id: str = ""
+    note: str = ""
+
+    @model_validator(mode="after")
+    def _must_actually_point_at_something(self) -> ObjectBasis:
+        if self.kind not in ACCEPTABLE_BASIS_KINDS:
+            raise ValueError(
+                f"{self.kind.value} is evidence *about* a document, not a reason for an "
+                f"object to exist; acceptable: "
+                f"{sorted(k.value for k in ACCEPTABLE_BASIS_KINDS)}"
+            )
+        if not (
+            self.anchor_id
+            or self.requirement_reference
+            or self.decision_reference
+            or self.template_id
+        ):
+            raise ValueError(
+                "a basis must name an anchor, a requirement, a decision or a template; "
+                "an empty basis asserts traceability without providing it"
+            )
+        return self
+
+
+class ChangeOperationProposal(BaseModel):
+    """One structured edit a model is proposing.
+
+    Deliberately narrow. A model cannot write SQL, cannot name a table, and
+    cannot supply a value for a column that is not part of the object it names
+    — deterministic code decides how an operation becomes rows.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation_type: ChangeOperationType
+    object_type: ObjectType
+    #: Omitted for a create; the id is assigned deterministically at merge.
+    object_id: uuid.UUID | None = None
+    #: Lets a later operation in the same change set refer to something an
+    #: earlier one creates, before a real id exists.
+    temp_key: str = ""
+    #: The ``object_revision`` this edit was written against. Required for an
+    #: update or a delete: without it there is nothing to detect a conflict
+    #: against, and the edit would silently overwrite concurrent work.
+    based_on_object_revision: int | None = None
+
+    field_name: str = ""
+    values: dict[str, Any] = Field(default_factory=dict)
+
+    related_object_type: ObjectType | None = None
+    related_object_id: uuid.UUID | None = None
+    relationship_key: str = ""
+
+    #: Why this object should exist. Required when creating one of the object
+    #: kinds the traceability rule covers.
+    basis: list[ObjectBasis] = Field(default_factory=list)
+    description: str = ""
+
+    @model_validator(mode="after")
+    def _updates_must_state_what_they_are_based_on(self) -> ChangeOperationProposal:
+        needs_base = {
+            ChangeOperationType.UPDATE_FIELD,
+            ChangeOperationType.DELETE_OBJECT,
+            ChangeOperationType.UPDATE_LOGIC,
+            ChangeOperationType.RENAME_TAG,
+        }
+        if self.operation_type in needs_base:
+            if self.object_id is None:
+                raise ValueError(f"{self.operation_type.value} must name an object_id")
+            if self.based_on_object_revision is None:
+                raise ValueError(
+                    f"{self.operation_type.value} must state based_on_object_revision; "
+                    "without it a concurrent edit cannot be detected and would be "
+                    "silently overwritten"
+                )
+        if self.operation_type is ChangeOperationType.UPDATE_FIELD and not self.field_name:
+            raise ValueError("update_field must name the field")
+        return self
+
+    @model_validator(mode="after")
+    def _created_objects_must_state_a_basis(self) -> ChangeOperationProposal:
+        creating = self.operation_type in {
+            ChangeOperationType.CREATE_OBJECT,
+            ChangeOperationType.CREATE_LOGIC,
+        }
+        if creating and self.object_type in TRACEABLE_OBJECT_TYPES and not self.basis:
+            raise ValueError(
+                f"creating a {self.object_type.value} requires at least one basis "
+                "(a requirement, a template rule, a human decision or a cited "
+                "document); an object that exists for no stated reason cannot be "
+                "reviewed"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _renames_must_supply_both_names(self) -> ChangeOperationProposal:
+        if self.operation_type is ChangeOperationType.RENAME_TAG:
+            missing = [key for key in ("from_name", "to_name") if not self.values.get(key)]
+            if missing:
+                raise ValueError(f"rename_tag requires values {missing}")
+        return self
+
+
+class ProposeChangesetPayload(BaseModel):
+    """Body of a ``propose_changeset`` action.
+
+    A model proposes; deterministic code validates, detects conflicts, applies a
+    human gate where one is warranted, and merges. Nothing here writes anything.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: Annotated[str, Field(min_length=1, max_length=300)]
+    summary: Annotated[str, Field(min_length=1, max_length=4000)]
+    #: Short and user-facing. Never a transcript of model reasoning.
+    rationale: str = ""
+    base_revision_number: int = Field(
+        ge=0, description="The revision this change set was written against."
+    )
+    operations: Annotated[list[ChangeOperationProposal], Field(min_length=1, max_length=2000)]
+    assumptions: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    #: Named by the agent when it believes the change touches a restricted
+    #: domain. The backend checks independently; this is a declaration, not a
+    #: permission.
+    restricted_domains: list[str] = Field(default_factory=list)
+    requires_human_approval: bool = False
+
+    @model_validator(mode="after")
+    def _renames_always_need_a_human(self) -> ProposeChangesetPayload:
+        """A tag rename cannot be self-approved.
+
+        Renaming a tag reaches into logic, HMI bindings, alarms, tests and
+        documentation. The impact report exists so an engineer can see that list
+        before agreeing to it, and a change set that renames while claiming to
+        need no approval is asking to skip exactly that step.
+        """
+        renames = [
+            op for op in self.operations if op.operation_type is ChangeOperationType.RENAME_TAG
+        ]
+        if renames and not self.requires_human_approval:
+            raise ValueError(
+                f"{len(renames)} rename_tag operation(s) present but "
+                "requires_human_approval is false; a rename must be approved with "
+                "its impact report in front of the reviewer"
+            )
+        return self
+
+
+class ReviewChangesetPayload(BaseModel):
+    """Body of a ``review_changeset`` action: the Senior Review verdict."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    changeset_id: uuid.UUID
+    verdict: Literal["approve", "request_changes", "reject"]
+    #: Required for anything other than a clean approval, so a rejection is
+    #: never a bare refusal an author cannot act on.
+    concerns: list[str] = Field(default_factory=list)
+    #: Senior review may lower a confidence, never raise it. Enforced by the
+    #: runner; declared here so the intent is visible in the payload.
+    adjusted_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    notes: str = ""
+
+    @model_validator(mode="after")
+    def _a_refusal_must_say_why(self) -> ReviewChangesetPayload:
+        if self.verdict != "approve" and not self.concerns:
+            raise ValueError(f"verdict '{self.verdict}' requires at least one concern")
+        return self
+
+
+class PlannedTask(BaseModel):
+    """One task in a proposed plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: Annotated[str, Field(min_length=1, max_length=60)]
+    task_kind: str
+    title: Annotated[str, Field(min_length=1, max_length=300)]
+    reason: str = ""
+    depends_on: list[str] = Field(default_factory=list)
+    #: Whether the dependency is required. A soft dependency lets a run continue
+    #: past an input that could not be read, rather than stalling forever.
+    hard_dependencies: bool = True
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class CreateTaskPlanPayload(BaseModel):
+    """Body of a ``create_task_plan`` action: the Project Manager's plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: Annotated[str, Field(min_length=1, max_length=4000)]
+    tasks: Annotated[list[PlannedTask], Field(min_length=1, max_length=200)]
+    #: Work the plan deliberately does not cover, and why.
+    out_of_scope: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    #: Blockers that must be resolved before the plan can start.
+    blocked_by_questions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _dependencies_must_exist_within_the_plan(self) -> CreateTaskPlanPayload:
+        keys = {task.key for task in self.tasks}
+        for task in self.tasks:
+            unknown = [dep for dep in task.depends_on if dep not in keys]
+            if unknown:
+                raise ValueError(
+                    f"task {task.key!r} depends on {unknown}, which the plan does not "
+                    "define; a dangling dependency would leave the task queued forever"
+                )
+        return self
+
+
+class RequestClarificationPayload(BaseModel):
+    """Body of a ``request_clarification`` action.
+
+    The product must never fill a gap by inventing a plausible answer. This is
+    the alternative, and it is why ``competing_readings`` is not optional
+    decoration: "this is ambiguous" without saying *how* leaves a human with
+    nothing to decide.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: QuestionCategory
+    question: Annotated[str, Field(min_length=1, max_length=2000)]
+    #: What is blocked until this is answered.
+    why_it_matters: Annotated[str, Field(min_length=1, max_length=2000)]
+    #: The readings the text will support. Two or more, or none at all if the
+    #: problem is missing information rather than ambiguity.
+    competing_readings: list[str] = Field(default_factory=list)
+    is_mandatory: bool = True
+    blocks_task_kinds: list[str] = Field(default_factory=list)
+    related_object_type: ObjectType | None = None
+    related_object_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _ambiguity_must_name_the_alternatives(self) -> RequestClarificationPayload:
+        if len(self.competing_readings) == 1:
+            raise ValueError(
+                "competing_readings has one entry; either name the alternative "
+                "reading as well or leave the list empty and state the missing "
+                "information in the question"
+            )
+        return self
+
+
+class GeneratePreviewPayload(BaseModel):
+    """Body of a ``generate_preview`` action: something for a human to read.
+
+    A preview is a rendering, never an artifact. It exists so an engineer can
+    see what a change set would produce before approving it, and producing one
+    must not create or modify anything.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    preview_kind: Literal["ladder_text", "tag_table", "import_order", "impact", "summary"]
+    title: Annotated[str, Field(min_length=1, max_length=300)]
+    content: Annotated[str, Field(min_length=1, max_length=200_000)]
+    changeset_id: uuid.UUID | None = None
+    object_type: ObjectType | None = None
+    object_id: uuid.UUID | None = None
+    limitations: list[str] = Field(default_factory=list)
+
+
+class CompleteTaskPayload(BaseModel):
+    """Body of a ``complete_task`` action.
+
+    ``limitations`` is required in spirit and empty only when the agent really
+    did examine everything it was asked to. A completion that states no limits
+    is a stronger claim than most runs can support.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Annotated[str, Field(min_length=1, max_length=4000)]
+    objects_created: dict[str, int] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+    follow_up: list[str] = Field(default_factory=list)
+
+
 #: Payload model for each action type. An action whose payload fails to validate
 #: against its model is rejected before execution.
 ACTION_PAYLOAD_MODELS: dict[ActionType, type[BaseModel]] = {
@@ -254,6 +567,12 @@ ACTION_PAYLOAD_MODELS: dict[ActionType, type[BaseModel]] = {
     ActionType.UPDATE_FINDING_REVIEW: UpdateFindingReviewPayload,
     ActionType.REPORT_BLOCKER: ReportBlockerPayload,
     ActionType.REPORT_NO_FINDINGS: ReportNoFindingsPayload,
+    ActionType.CREATE_TASK_PLAN: CreateTaskPlanPayload,
+    ActionType.REQUEST_CLARIFICATION: RequestClarificationPayload,
+    ActionType.PROPOSE_CHANGESET: ProposeChangesetPayload,
+    ActionType.REVIEW_CHANGESET: ReviewChangesetPayload,
+    ActionType.GENERATE_PREVIEW: GeneratePreviewPayload,
+    ActionType.COMPLETE_TASK: CompleteTaskPayload,
 }
 
 

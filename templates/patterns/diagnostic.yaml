@@ -1,0 +1,283 @@
+# Scan-time and controller-fault diagnostics.
+# See templates/README.md for the file format and the versioning rule.
+id: esco.diagnostic.controller
+version: 1.0.0
+category: diagnostic
+display_name: Scan time and controller fault diagnostics
+description: >
+  Publishes the health of the controller itself: task scan time and its maximum
+  since power-up, whether the scan is running long, and whether a minor fault is
+  logged. All of it comes from GSV against the controller's own objects, so it
+  reports what the controller knows rather than what the application believes.
+  This is the block that turns "it feels slower than it used to" into a number.
+supported_families: [compactlogix, controllogix]
+approval_level: standard
+restricted_domains: []
+
+parameters:
+  - name: system_tag
+    type: identifier
+    required: true
+    description: Prefix for the controller-scope diagnostic tags, e.g. Sys
+  - name: task_name
+    type: identifier
+    required: true
+    description: Name of the task whose scan time is measured, e.g. MainTask
+  - name: scan_time_warn_ms
+    type: integer
+    required: false
+    default: 50
+    description: >
+      Scan time above which a warning is raised. Set it from the headroom the
+      application needs, not from a round number: for a periodic task it must be
+      well inside the period.
+  - name: scan_warn_debounce_ms
+    type: integer
+    required: false
+    default: 2000
+    description: How long the scan must stay long before the warning is raised
+
+required_tags:
+  - role: diagnostic
+    suffix: _ScanTime_us
+    data_type: DINT
+    description: Last scan time of the monitored task, in microseconds as GSV returns it
+    units: us
+  - role: diagnostic
+    suffix: _ScanTime_ms
+    data_type: REAL
+    description: Last scan time in milliseconds, for display
+    units: ms
+  - role: diagnostic
+    suffix: _ScanTime_Max_ms
+    data_type: REAL
+    description: >
+      Largest scan time seen since the last reset. The instantaneous value is
+      almost always healthy; the maximum is where an occasional long scan shows
+      up.
+    units: ms
+  - role: status
+    suffix: _Sts_ScanTime_High
+    data_type: BOOL
+    description: The last scan exceeded scan_time_warn_ms
+  - role: status
+    suffix: _Tmr_ScanTime_High
+    data_type: TIMER
+    description: Debounces a long scan before it becomes a warning
+  - role: alarm
+    suffix: _Alm_ScanTime_High
+    data_type: BOOL
+    description: The task has been scanning long for longer than the debounce allows
+  - role: diagnostic
+    suffix: _Minor_Fault_Bits
+    data_type: DINT
+    description: >
+      The controller's minor fault word, read from the fault log object. A minor
+      fault does not stop the controller, which is exactly why it goes unnoticed
+      — a battery, an instruction overflow or a serial port error can sit there
+      for months.
+  - role: status
+    suffix: _Sts_Minor_Faulted
+    data_type: BOOL
+    description: At least one minor fault bit is set
+  - role: alarm
+    suffix: _Alm_Minor_Fault
+    data_type: BOOL
+    description: The controller has a minor fault logged
+  - role: status
+    suffix: _Sys_FirstScan
+    data_type: BOOL
+    description: First-scan flag, taken from the controller status bit
+
+generated_objects:
+  routines:
+    - name: R_Scan_Diagnostics
+      language: ladder
+      description: >
+        Task scan time and controller fault status. This pattern contributes the
+        block; the routine already exists in the ESCO controller layouts.
+
+  rungs:
+    - routine: R_Scan_Diagnostics
+      title: "{system_tag} read the task scan time"
+      comment: >
+        GSV against the TASK object returns the last scan time in microseconds.
+        Unconditional, so the value is current every scan.
+      elements:
+        - instruction: GSV
+          operands: ["TASK", "{task_name}", "LastScanTime", "{system_tag}_ScanTime_us"]
+          kind: output
+
+    - routine: R_Scan_Diagnostics
+      title: "{system_tag} convert the scan time to milliseconds"
+      comment: >
+        Microseconds are what the controller reports; milliseconds are what an
+        engineer thinks in. Converted once, here, so no display or comparison
+        downstream has to remember the unit.
+      elements:
+        - instruction: CPT
+          operands: ["{system_tag}_ScanTime_ms", "{system_tag}_ScanTime_us / 1000.0"]
+          kind: output
+
+    - routine: R_Scan_Diagnostics
+      title: "{system_tag} reset the maximum on first scan"
+      comment: >
+        The maximum is cleared at power-up so it describes this run of the
+        controller. Placed before the capture rung so a long first scan — which
+        is normal — is still recorded rather than being cleared straight after.
+      elements:
+        - {instruction: XIC, operand: "{system_tag}_Sys_FirstScan", kind: condition}
+        - instruction: MOV
+          operands: ["0.0", "{system_tag}_ScanTime_Max_ms"]
+          kind: output
+
+    - routine: R_Scan_Diagnostics
+      title: "{system_tag} capture the maximum scan time"
+      comment: >
+        The instantaneous scan time is almost always fine; the occasional long
+        one is what matters, and it is gone before anybody looks at a trend.
+        Holding the maximum is what makes an intermittent problem visible.
+      elements:
+        - instruction: GRT
+          operands: ["{system_tag}_ScanTime_ms", "{system_tag}_ScanTime_Max_ms"]
+          kind: condition
+        - instruction: MOV
+          operands: ["{system_tag}_ScanTime_ms", "{system_tag}_ScanTime_Max_ms"]
+          kind: output
+
+    - routine: R_Scan_Diagnostics
+      title: "{system_tag} scan time high"
+      comment: Compares the last scan against the configured warning threshold.
+      elements:
+        - instruction: GRT
+          operands: ["{system_tag}_ScanTime_ms", "{scan_time_warn_ms}"]
+          kind: condition
+        - {instruction: OTE, operand: "{system_tag}_Sts_ScanTime_High", kind: output}
+
+    - routine: R_Scan_Diagnostics
+      title: "{system_tag} scan time high debounce"
+      comment: >
+        Debounced because one long scan is normal — a message completing, an
+        online edit, a trend upload. A scan that stays long is a different thing
+        and is what deserves an alarm.
+      elements:
+        - {instruction: XIC, operand: "{system_tag}_Sts_ScanTime_High", kind: condition}
+        - instruction: TON
+          operands: ["{system_tag}_Tmr_ScanTime_High", "{scan_warn_debounce_ms}", "0"]
+          kind: output
+
+    - routine: R_Scan_Diagnostics
+      title: "{system_tag} scan time alarm"
+      comment: >
+        Not latched. A scan time that has recovered is genuinely healthy again,
+        and the maximum on the rung above preserves the evidence that it was not.
+      elements:
+        - {instruction: XIC, operand: "{system_tag}_Tmr_ScanTime_High.DN", kind: condition}
+        - {instruction: OTE, operand: "{system_tag}_Alm_ScanTime_High", kind: output}
+
+    - routine: R_Scan_Diagnostics
+      title: "{system_tag} read the minor fault word"
+      comment: >
+        GSV against the fault log returns the minor fault bits. Reading it costs
+        nothing and it is the only way a minor fault becomes visible without
+        somebody going online with the controller.
+      elements:
+        - instruction: GSV
+          operands: ["FAULTLOG", "", "MinorFaultBits", "{system_tag}_Minor_Fault_Bits"]
+          kind: output
+
+    - routine: R_Scan_Diagnostics
+      title: "{system_tag} minor fault present"
+      comment: >
+        Any bit set is a minor fault. Which one it is stays in the word for
+        somebody to decode; this bit is what puts it on the HMI.
+      elements:
+        - instruction: NEQ
+          operands: ["{system_tag}_Minor_Fault_Bits", "0"]
+          kind: condition
+        - branch:
+            - - {instruction: OTE, operand: "{system_tag}_Sts_Minor_Faulted", kind: output}
+            - - {instruction: OTE, operand: "{system_tag}_Alm_Minor_Fault", kind: output}
+
+engineering_notes: >
+  A controller that is scanning long, or carrying a minor fault, gives no
+  outward sign. The machine runs, the HMI updates, and the first symptom is
+  usually a control loop behaving oddly or a task overlapping. Reading these
+  values costs a handful of instructions and turns an invisible condition into
+  one on an alarm list.
+
+  The maximum matters more than the instantaneous value. Scan time is sampled
+  once per scan by logic that runs in the very task it is measuring, so anything
+  worth catching is over before an operator opens the screen. Keeping the
+  maximum since power-up is what lets somebody say "it peaked at 180 ms
+  yesterday" rather than "it looks fine now".
+
+  Minor faults are the ones that get missed. They do not stop the controller,
+  they do not appear on the front panel in any way an operator reads, and they
+  persist across a download. A depleted battery on an older controller, an
+  arithmetic overflow, a serial port error — all sit in that word, and this rung
+  is usually the only thing that ever looks at it.
+
+  GSV is not free and is not the same on every family. The instruction, the
+  object names and the attribute names here are the common Logix set; confirm
+  them against the target controller's reference before generating, because a
+  GSV with a wrong attribute name is a verification error rather than a silent
+  one — which is at least the good kind of failure.
+
+restrictions:
+  - >
+    Reports; it does not act. Nothing here stops, slows or corrects anything.
+    A controller whose scan time is climbing keeps running exactly as it was,
+    and what to do about it is a decision for whoever reads the alarm.
+  - >
+    Does not read or clear major faults. A major fault stops the controller and
+    is handled by the controller fault handler, which is a separate routine with
+    different rules and is not generated by this pattern.
+  - >
+    Does not clear the minor fault word. Clearing it requires an SSV against the
+    fault log and would discard evidence of what happened, so it is left as a
+    deliberate manual action.
+  - >
+    Does not decode which minor fault is present. The bit meanings are
+    controller-specific; the word is published for somebody to look up.
+  - >
+    Measures one task. A project with several tasks needs one expansion per
+    task, and the maximum from one task says nothing about another.
+  - >
+    Does not detect task overlap. That is a separate status bit on the task
+    object and belongs with the periodic task that can overlap.
+  - Does not report controller memory, battery or energy-storage state, module status, or CPU utilisation.
+  - >
+    The scan time is measured by logic running inside the task being measured,
+    so it cannot observe a scan long enough to trip the watchdog — the controller
+    faults first.
+
+tests:
+  - name: Scan time is published in milliseconds
+    given: A running controller
+    when: _ScanTime_ms is read and compared with the task's scan time in Studio 5000
+    then: They agree within rounding.
+  - name: The maximum is held
+    given: A controller whose scan time briefly peaks
+    when: The scan time returns to normal
+    then: _ScanTime_Max_ms still holds the peak value.
+  - name: The maximum resets at power-up
+    given: A recorded maximum from the previous run
+    when: The controller is power cycled
+    then: _ScanTime_Max_ms starts from zero and records this run's peak.
+  - name: A single long scan does not alarm
+    given: scan_warn_debounce_ms of 2000
+    when: One scan exceeds the threshold
+    then: _Sts_ScanTime_High goes true for that scan and _Alm_ScanTime_High is not raised.
+  - name: A sustained long scan alarms
+    given: The same configuration
+    when: The scan stays above the threshold for longer than the debounce
+    then: _Alm_ScanTime_High is raised, and clears on its own when the scan recovers.
+  - name: A minor fault becomes visible
+    given: A controller with a minor fault logged
+    when: The diagnostic block is scanned
+    then: _Minor_Fault_Bits is non-zero and _Alm_Minor_Fault is raised.
+  - name: A clean controller reports clean
+    given: A controller with no minor fault
+    when: The diagnostic block is scanned
+    then: _Minor_Fault_Bits is zero and no diagnostic alarm is active.

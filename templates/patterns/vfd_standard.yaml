@@ -1,0 +1,299 @@
+# Standard VFD run/stop with a clamped speed reference.
+# See templates/README.md for the file format and the versioning rule.
+id: esco.vfd.standard
+version: 1.0.0
+category: vfd_control
+display_name: Standard VFD run/stop with speed reference
+description: >
+  Single-direction VFD control: a sealed run command on the same permissive and
+  interlock terms as a across-the-line starter, a speed reference clamped to a
+  stated range before it leaves the controller, and the drive's own ready and
+  fault status folded into the start conditions and the alarm.
+supported_families: [compactlogix, controllogix]
+approval_level: standard
+restricted_domains: []
+
+parameters:
+  - name: device_tag
+    type: identifier
+    required: true
+    description: Device tag stem, e.g. VFD_201
+  - name: speed_min_hz
+    type: number
+    required: false
+    default: 0.0
+    description: >
+      Lowest speed the drive may be commanded to. Set from the driven equipment,
+      not the drive: a fan below its minimum stalls, a pump below its minimum
+      does not develop head, and a motor below its minimum loses cooling.
+  - name: speed_max_hz
+    type: number
+    required: false
+    default: 60.0
+    description: Highest speed the drive may be commanded to
+  - name: fail_to_start_ms
+    type: integer
+    required: false
+    default: 5000
+    description: How long the drive may fail to report running after a run command
+
+required_tags:
+  - role: command
+    suffix: _Cmd_Start
+    data_type: BOOL
+    description: Operator or sequence start request, momentary
+  - role: command
+    suffix: _Cmd_Stop
+    data_type: BOOL
+    description: Operator or sequence stop request, momentary; true means stop is requested
+  - role: permissive
+    suffix: _Permissive
+    data_type: BOOL
+    description: Every condition required before the drive may be STARTED is satisfied
+  - role: interlock
+    suffix: _Interlock_OK
+    data_type: BOOL
+    description: No interlock is tripped; false stops a running drive
+  - role: command
+    suffix: _Cmd_Run
+    data_type: BOOL
+    description: The sealed run command sent to the drive
+  - role: feedback
+    suffix: _Sts_Drive_Ready
+    data_type: BOOL
+    description: The drive reports it is ready to run
+  - role: feedback
+    suffix: _Sts_Drive_Faulted
+    data_type: BOOL
+    description: The drive reports its own fault
+  - role: feedback
+    suffix: _Sts_Drive_Running
+    data_type: BOOL
+    description: The drive reports it is running
+  - role: status
+    suffix: _Sts_Running
+    data_type: BOOL
+    description: The drive is running, taken from the drive's own status
+  - role: status
+    suffix: _Sts_Faulted
+    data_type: BOOL
+    description: A latched fault is present; cleared only by the fault-reset pattern
+  - role: setpoint
+    suffix: _SP_Speed_Hz
+    data_type: REAL
+    description: Requested speed, as written by the operator or the sequence
+    units: Hz
+  - role: command
+    suffix: _Out_Speed_Ref_Hz
+    data_type: REAL
+    description: Clamped speed reference actually sent to the drive
+    units: Hz
+  - role: analog_process_value
+    suffix: _PV_Speed_Hz
+    data_type: REAL
+    description: Speed the drive reports it is running at
+    units: Hz
+  - role: status
+    suffix: _Tmr_FailToStart
+    data_type: TIMER
+    description: Times the drive failing to report running after a run command
+  - role: alarm
+    suffix: _Alm_Drive_Fault
+    data_type: BOOL
+    description: The drive reported a fault
+  - role: alarm
+    suffix: _Alm_FailToStart
+    data_type: BOOL
+    description: Commanded to run and the drive did not report running in time
+  - role: status
+    suffix: _Sts_SP_Clamped
+    data_type: BOOL
+    description: >
+      The requested speed was outside the allowed range and was clamped. Visible
+      so an operator learns the drive is not running at the speed they asked for.
+
+generated_objects:
+  routines:
+    - name: R_Devices
+      language: ladder
+      description: >
+        Device control blocks. This pattern contributes one block; the routine
+        already exists in the ESCO controller layouts.
+
+  rungs:
+    - routine: R_Devices
+      title: "{device_tag} run request"
+      comment: >
+        Same three-wire structure as a starter, with the drive's own ready bit
+        added to the start branch: commanding a drive that is not ready produces
+        a fault at the drive rather than a start. Drive ready is deliberately not
+        in the common leg — a drive that drops ready while running has already
+        stopped itself.
+      elements:
+        - branch:
+            - - {instruction: XIC, operand: "{device_tag}_Cmd_Start", kind: condition}
+              - {instruction: XIC, operand: "{device_tag}_Permissive", kind: condition}
+              - {instruction: XIC, operand: "{device_tag}_Sts_Drive_Ready", kind: condition}
+            - - {instruction: XIC, operand: "{device_tag}_Cmd_Run", kind: condition}
+        - {instruction: XIO, operand: "{device_tag}_Cmd_Stop", kind: condition}
+        - {instruction: XIC, operand: "{device_tag}_Interlock_OK", kind: condition}
+        - {instruction: XIO, operand: "{device_tag}_Sts_Faulted", kind: condition}
+        - {instruction: OTE, operand: "{device_tag}_Cmd_Run", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} running status"
+      comment: >
+        Running status is what the drive reports, not what it was told. A drive
+        that has tripped is not running however long the run command has been on.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Sts_Drive_Running", kind: condition}
+        - {instruction: OTE, operand: "{device_tag}_Sts_Running", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} speed reference within range"
+      comment: >
+        The requested speed is inside the allowed band, so it passes through
+        unchanged. LIM is inclusive at both ends.
+      elements:
+        - instruction: LIM
+          operands: ["{speed_min_hz}", "{device_tag}_SP_Speed_Hz", "{speed_max_hz}"]
+          kind: condition
+        - instruction: MOV
+          operands: ["{device_tag}_SP_Speed_Hz", "{device_tag}_Out_Speed_Ref_Hz"]
+          kind: output
+
+    - routine: R_Devices
+      title: "{device_tag} speed reference clamped high"
+      comment: >
+        A request above the maximum is clamped rather than rejected, and the
+        clamp is flagged. Passing an out-of-range reference to the drive and
+        letting it decide means two devices each holding half the limit.
+      elements:
+        - instruction: GRT
+          operands: ["{device_tag}_SP_Speed_Hz", "{speed_max_hz}"]
+          kind: condition
+        - branch:
+            - - instruction: MOV
+                operands: ["{speed_max_hz}", "{device_tag}_Out_Speed_Ref_Hz"]
+                kind: output
+            - - {instruction: OTE, operand: "{device_tag}_Sts_SP_Clamped", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} speed reference clamped low"
+      comment: >
+        A request below the minimum is clamped up to the minimum. Note the
+        consequence: a request of zero does not stop the drive, it runs it at
+        the minimum. Stopping is the run command's job, on the rung above.
+      elements:
+        - instruction: LES
+          operands: ["{device_tag}_SP_Speed_Hz", "{speed_min_hz}"]
+          kind: condition
+        - branch:
+            - - instruction: MOV
+                operands: ["{speed_min_hz}", "{device_tag}_Out_Speed_Ref_Hz"]
+                kind: output
+            - - {instruction: OTE, operand: "{device_tag}_Sts_SP_Clamped", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} zero the reference when stopped"
+      comment: >
+        Last of the reference rungs, so it overrides the clamps. A stopped drive
+        carries a zero reference, so a drive that is re-enabled by anything other
+        than this block cannot come up at the last commanded speed.
+      elements:
+        - {instruction: XIO, operand: "{device_tag}_Cmd_Run", kind: condition}
+        - instruction: MOV
+          operands: ["0.0", "{device_tag}_Out_Speed_Ref_Hz"]
+          kind: output
+
+    - routine: R_Devices
+      title: "{device_tag} drive fault"
+      comment: The drive's own fault is latched here so it behaves like every other fault.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Sts_Drive_Faulted", kind: condition}
+        - branch:
+            - - {instruction: OTL, operand: "{device_tag}_Sts_Faulted", kind: output}
+            - - {instruction: OTE, operand: "{device_tag}_Alm_Drive_Fault", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} fail to start timer"
+      comment: >
+        Run commanded, drive not reporting running. The preset must exceed the
+        drive's configured acceleration time or every start trips it.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Cmd_Run", kind: condition}
+        - {instruction: XIO, operand: "{device_tag}_Sts_Drive_Running", kind: condition}
+        - instruction: TON
+          operands: ["{device_tag}_Tmr_FailToStart", "{fail_to_start_ms}", "0"]
+          kind: output
+
+    - routine: R_Devices
+      title: "{device_tag} fail to start"
+      comment: Latches the fault, which drops the run command on the first rung.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Tmr_FailToStart.DN", kind: condition}
+        - branch:
+            - - {instruction: OTL, operand: "{device_tag}_Sts_Faulted", kind: output}
+            - - {instruction: OTE, operand: "{device_tag}_Alm_FailToStart", kind: output}
+
+engineering_notes: >
+  The reference rungs are ordered and the order is load-bearing: in-range, then
+  clamped high, then clamped low, then zeroed when stopped. Each later rung can
+  override an earlier one, and the last word belongs to "the drive is stopped,
+  so the reference is zero". Reordering them produces a drive that starts at
+  whatever speed was last requested.
+
+  The minimum speed is an equipment limit, not a preference. It is why a request
+  of zero clamps up instead of down, and it is why stopping has to be the run
+  command rather than a zero reference — a reference of zero on a running drive
+  is a drive running at its minimum, not a stopped one.
+
+  Speed is treated in Hz throughout because that is what the drive parameter set
+  is in. If the project speaks in percent or in engineering units, convert once
+  at the HMI boundary and keep this block in Hz; converting in two places is how
+  a 50 Hz commissioning site ends up running 20 per cent fast.
+
+restrictions:
+  - >
+    Not a safety function, and specifically not Safe Torque Off. A VFD stopped
+    by removing its run command is not in a safe state, and this pattern must
+    never be used where a risk assessment calls for STO or a safe stop.
+  - Single direction only. Reversing needs a direction command, a zero-speed check and a reversal dead time.
+  - >
+    Does not configure the drive. Acceleration and deceleration ramps, current
+    limits, the carrier frequency, the stop mode and the drive's own parameter
+    set are commissioning work and are not generated.
+  - Does not implement PID or any closed-loop speed or process control.
+  - Does not cover permanent-magnet, synchronous-reluctance or vector-with-encoder configurations.
+  - Does not handle the drive's connection loss; use esco.communication.loss for that.
+  - Does not clear its own fault. Use esco.fault.reset.
+
+tests:
+  - name: A drive that is not ready cannot be started
+    given: _Sts_Drive_Ready is false
+    when: _Cmd_Start is pulsed with the permissive satisfied
+    then: _Cmd_Run stays false.
+  - name: Losing the interlock stops a running drive
+    given: The drive is running
+    when: _Interlock_OK goes false
+    then: _Cmd_Run goes false on the same scan.
+  - name: A high request is clamped and flagged
+    given: speed_max_hz is 60.0
+    when: _SP_Speed_Hz is set to 75.0 with the drive running
+    then: _Out_Speed_Ref_Hz is 60.0 and _Sts_SP_Clamped is true.
+  - name: A low request is clamped up to the minimum
+    given: speed_min_hz is 15.0
+    when: _SP_Speed_Hz is set to 5.0 with the drive running
+    then: _Out_Speed_Ref_Hz is 15.0 and _Sts_SP_Clamped is true.
+  - name: A stopped drive carries a zero reference
+    given: The drive is stopped and _SP_Speed_Hz is 45.0
+    when: The reference rungs are scanned
+    then: _Out_Speed_Ref_Hz is 0.0.
+  - name: A drive fault latches
+    given: The drive is running
+    when: _Sts_Drive_Faulted goes true and then clears at the drive
+    then: _Sts_Faulted stays true and _Cmd_Run stays false until a reset is accepted.
+  - name: Fail to start is detected
+    given: The drive is commanded to run
+    when: _Sts_Drive_Running stays false for longer than fail_to_start_ms
+    then: _Sts_Faulted latches and _Alm_FailToStart is set.

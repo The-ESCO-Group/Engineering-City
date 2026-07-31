@@ -1,0 +1,323 @@
+# Connection-fault detection with a stated fail state.
+# See templates/README.md for the file format and the versioning rule.
+id: esco.communication.loss
+version: 1.0.0
+category: communication_loss
+display_name: Communication loss detection and fail state
+description: >
+  Detects that a remote node's connection has failed, marks everything received
+  from it as stale, and drives the node's outputs to the fail state the project
+  chose. The fail state is a required parameter with no default: what a machine
+  should do when it stops hearing from a device is an engineering decision, and
+  a template that guessed it would be inventing one.
+supported_families: [compactlogix, controllogix]
+approval_level: senior_review_required
+restricted_domains: []
+
+parameters:
+  - name: node_tag
+    type: identifier
+    required: true
+    description: Remote node tag stem, e.g. RIO_PANEL2 or DRIVE_NET1
+  - name: fail_state
+    type: enum
+    required: true
+    choices: [de_energize, energize, hold_last_state, go_to_value]
+    description: >
+      What this node's outputs do when the connection is lost. Required, with no
+      default: the safe choice depends entirely on what the outputs drive, and a
+      default would be a decision nobody made. Matches the platform's FailState
+      vocabulary.
+  - name: connection_timeout_ms
+    type: integer
+    required: false
+    default: 3000
+    description: >
+      How long the connection fault must persist before it is declared. Long
+      enough to ride through a switch reconverging, short enough that logic is
+      not acting on stale data. It is not a substitute for the module's own
+      requested packet interval.
+  - name: fail_value
+    type: number
+    required: false
+    default: 0.0
+    description: Value analog outputs are driven to when fail_state is go_to_value
+
+required_tags:
+  - role: diagnostic
+    suffix: _Conn_Faulted
+    data_type: BOOL
+    description: >
+      The connection-fault bit for this node, taken from the module's own status
+      member. This is the controller's view of the connection and is the only
+      trustworthy source; a heartbeat in application logic tells you about the
+      remote program, not the connection.
+  - role: status
+    suffix: _Sts_Comms_OK
+    data_type: BOOL
+    description: >
+      The connection is healthy. Computed positively so that an unwritten or
+      unscanned tag reads as NOT OK.
+  - role: status
+    suffix: _Sts_Data_Stale
+    data_type: BOOL
+    description: >
+      Everything received from this node is stale and must not be acted on. The
+      input tags keep their last received values, which look entirely normal,
+      so this bit is the only thing that distinguishes them.
+  - role: status
+    suffix: _Tmr_Conn_Fault
+    data_type: TIMER
+    description: Times how long the connection fault has persisted
+  - role: alarm
+    suffix: _Alm_Comms_Loss
+    data_type: BOOL
+    description: The connection to this node has been lost
+  - role: status
+    suffix: _Sts_Fail_State_Applied
+    data_type: BOOL
+    description: The chosen fail state is currently being applied to this node's outputs
+  - role: diagnostic
+    suffix: _Comms_Loss_Count
+    data_type: DINT
+    description: >
+      How many times this connection has been lost. An intermittent link shows
+      up here long before it becomes an outage, and without a count it is
+      dismissed as a one-off every time.
+  - role: status
+    suffix: _Conn_Fault_OneShot
+    data_type: BOOL
+    description: One-shot storage bit for counting a new connection loss
+  - role: io_alias
+    suffix: _Out_All
+    data_type: BOOL
+    description: >
+      Stands for this node's discrete output collection. The expansion resolves
+      it to the actual output tags, one rung each; it is named here so that a
+      node whose outputs were never enumerated is a visible gap rather than a
+      fail state that quietly applies to nothing.
+  - role: io_alias
+    suffix: _Out_Analog_All
+    data_type: REAL
+    description: >
+      Stands for this node's analog output collection, resolved by the expansion
+      on the same terms as _Out_All.
+    when_parameter: fail_state
+    when_value: go_to_value
+  - role: status
+    suffix: _Sts_Hold_Last_State
+    data_type: BOOL
+    description: >
+      The node's outputs are deliberately being left where they were. Published
+      so that "we chose to hold" is visible on the HMI rather than looking
+      identical to "the fail state was never implemented".
+    when_parameter: fail_state
+    when_value: hold_last_state
+
+generated_objects:
+  routines:
+    - name: R_Comms_Diagnostics
+      language: ladder
+      description: >
+        Connection status for each remote node. This pattern contributes one
+        block; the routine already exists in the ESCO controller layouts.
+
+  rungs:
+    - routine: R_Comms_Diagnostics
+      title: "{node_tag} connection fault timer"
+      comment: >
+        Times the module's own connection-fault bit. The delay rides through a
+        network event that resolves itself; it does not make the data any
+        fresher while it runs.
+      elements:
+        - {instruction: XIC, operand: "{node_tag}_Conn_Faulted", kind: condition}
+        - instruction: TON
+          operands: ["{node_tag}_Tmr_Conn_Fault", "{connection_timeout_ms}", "0"]
+          kind: output
+
+    - routine: R_Comms_Diagnostics
+      title: "{node_tag} communications healthy"
+      comment: >
+        Computed positively and written every scan. A program that stops being
+        scheduled, or a routine deleted in a bad merge, leaves this false — which
+        is the direction that fails safe. The inverse convention would leave a
+        dead node looking healthy.
+      elements:
+        - {instruction: XIO, operand: "{node_tag}_Conn_Faulted", kind: condition}
+        - {instruction: XIO, operand: "{node_tag}_Tmr_Conn_Fault.DN", kind: condition}
+        - {instruction: OTE, operand: "{node_tag}_Sts_Comms_OK", kind: output}
+
+    - routine: R_Comms_Diagnostics
+      title: "{node_tag} communications lost"
+      comment: >
+        The declaration. Everything from this node is marked stale on the same
+        scan the alarm is raised, so no logic gets a window in which the alarm is
+        up but the data is still trusted.
+      elements:
+        - {instruction: XIC, operand: "{node_tag}_Tmr_Conn_Fault.DN", kind: condition}
+        - branch:
+            - - {instruction: OTE, operand: "{node_tag}_Alm_Comms_Loss", kind: output}
+            - - {instruction: OTE, operand: "{node_tag}_Sts_Data_Stale", kind: output}
+            - - {instruction: OTE, operand: "{node_tag}_Sts_Fail_State_Applied", kind: output}
+
+    - routine: R_Comms_Diagnostics
+      title: "{node_tag} count the loss"
+      comment: >
+        One count per loss, on the edge. An intermittent connection that drops
+        for two seconds every hour never trips anything and is invisible without
+        this count.
+      elements:
+        - {instruction: XIC, operand: "{node_tag}_Tmr_Conn_Fault.DN", kind: condition}
+        - instruction: ONS
+          operand: "{node_tag}_Conn_Fault_OneShot"
+          kind: condition
+        - instruction: ADD
+          operands: ["{node_tag}_Comms_Loss_Count", "1", "{node_tag}_Comms_Loss_Count"]
+          kind: output
+
+    - routine: R_Comms_Diagnostics
+      title: "{node_tag} fail state — de-energize outputs"
+      comment: >
+        The chosen fail state is de-energize. Every output on this node is
+        unlatched while the connection is lost, so a lost link leaves the
+        equipment stopped.
+      when_parameter: fail_state
+      when_value: de_energize
+      elements:
+        - {instruction: XIC, operand: "{node_tag}_Sts_Fail_State_Applied", kind: condition}
+        - {instruction: OTU, operand: "{node_tag}_Out_All", kind: output}
+
+    - routine: R_Comms_Diagnostics
+      title: "{node_tag} fail state — energize outputs"
+      comment: >
+        The chosen fail state is energize. Unusual, and correct only where
+        de-energising is the dangerous direction — a brake that is released by
+        power, a valve that must stay open to relieve pressure. It must be
+        justified in the design record.
+      when_parameter: fail_state
+      when_value: energize
+      elements:
+        - {instruction: XIC, operand: "{node_tag}_Sts_Fail_State_Applied", kind: condition}
+        - {instruction: OTL, operand: "{node_tag}_Out_All", kind: output}
+
+    - routine: R_Comms_Diagnostics
+      title: "{node_tag} fail state — go to value"
+      comment: >
+        The chosen fail state is a stated value, which applies to analog outputs.
+        The value is written once per scan while the fail state is applied.
+      when_parameter: fail_state
+      when_value: go_to_value
+      elements:
+        - {instruction: XIC, operand: "{node_tag}_Sts_Fail_State_Applied", kind: condition}
+        - instruction: MOV
+          operands: ["{fail_value}", "{node_tag}_Out_Analog_All"]
+          kind: output
+
+    - routine: R_Comms_Diagnostics
+      title: "{node_tag} fail state — hold last state"
+      comment: >
+        The chosen fail state is hold-last-state, so this block writes nothing to
+        the outputs. The rung exists to make that visible in the logic: an
+        engineer reading the routine sees a deliberate decision to hold rather
+        than an omission. Note that holding the last state on a lost connection
+        is a decision to keep equipment running with nobody controlling it.
+      when_parameter: fail_state
+      when_value: hold_last_state
+      elements:
+        - {instruction: XIC, operand: "{node_tag}_Sts_Fail_State_Applied", kind: condition}
+        - {instruction: OTE, operand: "{node_tag}_Sts_Hold_Last_State", kind: output}
+
+engineering_notes: >
+  The connection-fault bit comes from the module's own status, not from a
+  heartbeat in application logic. A heartbeat tells you the remote program is
+  running; the connection status tells you the controller is receiving data. The
+  two fail differently, and the module's view is the one that matters for
+  deciding whether an input tag is current.
+
+  Input tags do not change when a connection drops. They hold whatever arrived
+  last, which is the whole problem: a pressure reading of 4.2 bar looks exactly
+  like a pressure reading of 4.2 bar whether it arrived this scan or forty
+  minutes ago. _Sts_Data_Stale is the only thing that distinguishes them, and
+  every piece of logic reading from this node has to honour it.
+
+  The fail state is required with no default because the safe direction depends
+  on what the outputs drive. De-energising is right for a conveyor and wrong for
+  a fail-open pressure-relief valve. This platform treats an undefined fail state
+  as a documented gap rather than something to fill in with a plausible answer,
+  and this parameter is where that shows up in a template.
+
+  The controller's fail state and the module's own configured fail state are two
+  different mechanisms. This logic can only act while the controller still has a
+  connection to write through; where the module itself loses its link, only the
+  module's configured output behaviour applies. Both must be set, and set to
+  agree.
+
+restrictions:
+  - >
+    Not a safety function. Loss of communication is not a safe stop, and no
+    fail state configured here may be relied on as a protective measure from a
+    risk assessment.
+  - >
+    Cannot detect a connected device that has stopped updating. A module whose
+    connection is healthy but whose field data is frozen — a failed sensor, a
+    remote program stopped in program mode — looks entirely normal here.
+  - >
+    Does not configure the module's own fail state. That is set in the module
+    properties and takes effect when the module loses its connection to the
+    controller. This logic only covers the case where the controller is still
+    able to write. Both must be configured, and they must agree.
+  - >
+    _Out_All and _Out_Analog_All stand for this node's output collection. The
+    expansion must resolve them to the actual output tags; a node whose outputs
+    are not enumerated silently gets no fail state applied at all.
+  - >
+    Does not stop downstream logic from acting on stale inputs. _Sts_Data_Stale
+    is published; honouring it is the responsibility of every block that reads
+    from this node, and a cross-discipline check should confirm each one does.
+  - >
+    hold_last_state applies nothing. Choosing it means equipment keeps doing
+    what it was last told with nobody controlling it, and it must be justified
+    per node rather than chosen because it is the least disruptive option.
+  - Does not cover produced/consumed tag connections between controllers, which need their own status handling.
+  - Does not attempt to re-establish the connection, and does not inhibit or reset the module.
+  - Does not clear its own alarm latch downstream; the alarm follows the condition.
+
+tests:
+  - name: A lost connection is declared after the timeout
+    given: A healthy node and connection_timeout_ms of 3000
+    when: _Conn_Faulted goes true and stays true
+    then: >
+      After 3 s, _Sts_Comms_OK is false, _Alm_Comms_Loss and _Sts_Data_Stale are
+      true, and _Comms_Loss_Count has incremented by one.
+  - name: A brief network event does not declare a loss
+    given: connection_timeout_ms of 3000
+    when: _Conn_Faulted is true for 500 ms and clears
+    then: No alarm is raised, the data is never marked stale, and the count is unchanged.
+  - name: Stale data is marked, not zeroed
+    given: A declared communication loss
+    when: The node's input tags are read
+    then: >
+      They still hold their last received values, and _Sts_Data_Stale is the only
+      indication that they are not current.
+  - name: The de-energize fail state is applied
+    given: fail_state is de_energize
+    when: The connection is declared lost
+    then: This node's outputs are de-energised and stay de-energised until the connection returns.
+  - name: The hold-last-state choice writes nothing
+    given: fail_state is hold_last_state
+    when: The connection is declared lost
+    then: No output on this node is changed by this block.
+  - name: An unwritten status tag reads as not OK
+    given: A project where the routine writing _Sts_Comms_OK is not scheduled
+    when: The status is read
+    then: _Sts_Comms_OK is false.
+  - name: Recovery clears the alarm
+    given: A declared communication loss
+    when: The connection is re-established
+    then: >
+      _Sts_Comms_OK goes true, _Alm_Comms_Loss and _Sts_Data_Stale clear, and
+      _Comms_Loss_Count keeps its value.
+  - name: An intermittent link is visible
+    given: A connection that drops briefly and recovers, repeatedly
+    when: _Comms_Loss_Count is read after a shift
+    then: It shows one count per declared loss.

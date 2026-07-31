@@ -1,0 +1,366 @@
+# ControlLogix process-control project layout.
+# See templates/README.md for the file format and the versioning rule.
+id: esco.controller.controllogix.process
+version: 1.0.0
+category: controller_project
+display_name: ControlLogix process-control project layout
+description: >
+  Task, program and routine skeleton for a ControlLogix process application.
+  A periodic ProcessTask carries the control chain at a fixed interval — analog
+  conditioning, then permissives and interlocks, then control, then alarms — and
+  a continuous MainTask carries the work that has no deadline: the HMI boundary
+  and diagnostics.
+supported_families: [controllogix]
+approval_level: standard
+restricted_domains: []
+
+parameters:
+  - name: controller_name
+    type: identifier
+    required: true
+    description: Controller name as it will appear in the project, e.g. AREA20_CTRL
+  - name: process_area
+    type: string
+    required: true
+    description: Process area or unit this controller runs; used in program descriptions
+  - name: process_task_rate_ms
+    type: integer
+    required: false
+    default: 100
+    description: >
+      ProcessTask period in milliseconds. Must be chosen from the slowest loop
+      period the process actually needs, not from what the controller can manage.
+  - name: process_task_watchdog_ms
+    type: integer
+    required: false
+    default: 500
+    description: ProcessTask watchdog in milliseconds; must exceed the worst-case scan
+
+required_tags:
+  - role: status
+    suffix: Sys_FirstScan
+    data_type: BOOL
+    description: One-shot first-scan flag, set from the controller status bit
+  - role: permissive
+    suffix: Proc_Permissives_OK
+    data_type: BOOL
+    description: Every process permissive is satisfied; start is allowed
+  - role: interlock
+    suffix: Proc_Interlocks_OK
+    data_type: BOOL
+    description: No process interlock is tripped; running is allowed to continue
+  - role: alarm
+    suffix: Alarm_Any_Active
+    data_type: BOOL
+    description: Any process alarm is currently active
+  - role: diagnostic
+    suffix: Sys_ProcessTask_ScanTime_ms
+    data_type: DINT
+    description: Last ProcessTask scan time in milliseconds
+  - role: diagnostic
+    suffix: Sys_ProcessTask_Overlap
+    data_type: BOOL
+    description: >
+      ProcessTask did not finish before its next scheduled execution. A periodic
+      task that overlaps is silently running late, which is exactly what a fixed
+      period was chosen to prevent.
+  - role: diagnostic
+    suffix: Sys_Controller_Faulted
+    data_type: BOOL
+    description: A controller minor or major fault is present
+
+generated_objects:
+  tasks:
+    - name: ProcessTask
+      type: periodic
+      description: >
+        The control chain, at a fixed period. Periodic rather than continuous
+        because analog conditioning, PID and any rate calculation are only
+        correct if the interval between executions is known.
+      rate_ms: 100
+      watchdog_ms: 500
+      programs:
+        - Analog_Inputs
+        - Process_Interlocks
+        - Process_Control
+        - Alarms
+
+    - name: MainTask
+      type: continuous
+      description: >
+        Work with no deadline — the HMI boundary and diagnostics — kept out of
+        the periodic task so it cannot lengthen a scan that has a period to hold.
+      watchdog_ms: 500
+      programs:
+        - HMI_Interface
+        - Diagnostics
+
+  programs:
+    - name: Analog_Inputs
+      type: normal
+      description: >
+        Raw-to-engineering-units conversion and signal validity, executed before
+        anything reads a process value.
+      main_routine: MainRoutine
+      routines: [R_AI_Scaling, R_AI_Validity]
+
+    - name: Process_Interlocks
+      type: normal
+      description: >
+        Permissives and interlocks, evaluated on conditioned values and before
+        any control acts on them.
+      main_routine: MainRoutine
+      routines: [R_Permissives, R_Interlocks]
+
+    - name: Process_Control
+      type: normal
+      description: Control loops and the device control blocks
+      main_routine: MainRoutine
+      routines: [R_Loops, R_Devices]
+
+    - name: Alarms
+      type: normal
+      description: Process alarm detection and latching
+      main_routine: MainRoutine
+      routines: [R_Alarm_Detect, R_Alarm_Latch]
+
+    - name: HMI_Interface
+      type: normal
+      description: >
+        The only place HMI-written tags are read into process logic and process
+        state is published back out.
+      main_routine: MainRoutine
+      routines: [R_HMI_Inputs, R_HMI_Outputs]
+
+    - name: Diagnostics
+      type: normal
+      description: Scan time, task overlap, controller fault status and communication health
+      main_routine: MainRoutine
+      routines: [R_Scan_Diagnostics, R_Comms_Diagnostics]
+
+  routines:
+    # -- Analog_Inputs -----------------------------------------------------
+    - name: MainRoutine
+      program: Analog_Inputs
+      language: ladder
+      description: Calls scaling, then validity checking
+      is_main: true
+    - name: R_AI_Scaling
+      program: Analog_Inputs
+      language: ladder
+      description: Raw counts to engineering units, one block per analog input
+    - name: R_AI_Validity
+      program: Analog_Inputs
+      language: ladder
+      description: Out-of-range and module-fault handling for each analog input
+
+    # -- Process_Interlocks ------------------------------------------------
+    - name: MainRoutine
+      program: Process_Interlocks
+      language: ladder
+      description: Calls permissive evaluation, then interlock evaluation
+      is_main: true
+    - name: R_Permissives
+      program: Process_Interlocks
+      language: ladder
+      description: Conditions that must be true before equipment may be started
+    - name: R_Interlocks
+      program: Process_Interlocks
+      language: ladder
+      description: Conditions that stop running equipment
+
+    # -- Process_Control ---------------------------------------------------
+    - name: MainRoutine
+      program: Process_Control
+      language: ladder
+      description: Calls the control loops, then the device blocks
+      is_main: true
+    - name: R_Loops
+      program: Process_Control
+      language: ladder
+      description: Control loops, one block per loop
+    - name: R_Devices
+      program: Process_Control
+      language: ladder
+      description: One control block per device, expanded from the equipment patterns
+
+    # -- Alarms ------------------------------------------------------------
+    - name: MainRoutine
+      program: Alarms
+      language: ladder
+      description: Calls alarm detection, then alarm latching
+      is_main: true
+    - name: R_Alarm_Detect
+      program: Alarms
+      language: ladder
+      description: Evaluates each process alarm condition
+    - name: R_Alarm_Latch
+      program: Alarms
+      language: ladder
+      description: Latches alarms and handles acknowledgement and reset
+
+    # -- HMI_Interface -----------------------------------------------------
+    - name: MainRoutine
+      program: HMI_Interface
+      language: ladder
+      description: Calls the HMI input routine, then the HMI output routine
+      is_main: true
+    - name: R_HMI_Inputs
+      program: HMI_Interface
+      language: ladder
+      description: Moves HMI-written setpoints and commands into process logic
+    - name: R_HMI_Outputs
+      program: HMI_Interface
+      language: ladder
+      description: Publishes process values, alarm state and mode to the HMI
+
+    # -- Diagnostics -------------------------------------------------------
+    - name: MainRoutine
+      program: Diagnostics
+      language: ladder
+      description: Calls scan diagnostics, then communication diagnostics
+      is_main: true
+    - name: R_Scan_Diagnostics
+      program: Diagnostics
+      language: ladder
+      description: Task scan time, task overlap and controller fault status
+    - name: R_Comms_Diagnostics
+      program: Diagnostics
+      language: ladder
+      description: Connection status for every remote node
+
+  rungs:
+    - routine: Analog_Inputs/MainRoutine
+      title: Call analog scaling
+      comment: >
+        Scaling runs first in the periodic chain: every permissive, interlock,
+        loop and alarm downstream reads engineering units, not raw counts.
+      elements:
+        - {instruction: JSR, operand: R_AI_Scaling, kind: output}
+    - routine: Analog_Inputs/MainRoutine
+      title: Call analog validity
+      comment: >
+        Validity runs immediately after scaling so a bad signal is marked before
+        anything acts on the value it produced.
+      elements:
+        - {instruction: JSR, operand: R_AI_Validity, kind: output}
+
+    - routine: Process_Interlocks/MainRoutine
+      title: Call permissive evaluation
+      comment: Permissives are evaluated on this scan's conditioned values.
+      elements:
+        - {instruction: JSR, operand: R_Permissives, kind: output}
+    - routine: Process_Interlocks/MainRoutine
+      title: Call interlock evaluation
+      comment: >
+        Interlocks are evaluated before control acts, so a trip takes effect on
+        the scan it is detected rather than the next one.
+      elements:
+        - {instruction: JSR, operand: R_Interlocks, kind: output}
+
+    - routine: Process_Control/MainRoutine
+      title: Call the control loops
+      comment: Loops read conditioned values and the interlock result from this scan.
+      elements:
+        - {instruction: JSR, operand: R_Loops, kind: output}
+    - routine: Process_Control/MainRoutine
+      title: Call the device control blocks
+      comment: Device blocks act on the commands the loops and the operator set.
+      elements:
+        - {instruction: JSR, operand: R_Devices, kind: output}
+
+    - routine: Alarms/MainRoutine
+      title: Call alarm detection
+      comment: Alarms are evaluated last so they describe the state control just produced.
+      elements:
+        - {instruction: JSR, operand: R_Alarm_Detect, kind: output}
+    - routine: Alarms/MainRoutine
+      title: Call alarm latching
+      comment: Latching runs after detection so a momentary alarm still reaches the operator.
+      elements:
+        - {instruction: JSR, operand: R_Alarm_Latch, kind: output}
+
+    - routine: HMI_Interface/MainRoutine
+      title: Call HMI inputs
+      comment: HMI-written setpoints and commands are read in here and nowhere else.
+      elements:
+        - {instruction: JSR, operand: R_HMI_Inputs, kind: output}
+    - routine: HMI_Interface/MainRoutine
+      title: Call HMI outputs
+      comment: Process state is published to the HMI here and nowhere else.
+      elements:
+        - {instruction: JSR, operand: R_HMI_Outputs, kind: output}
+
+    - routine: Diagnostics/MainRoutine
+      title: Call scan diagnostics
+      comment: Scan time, task overlap and controller fault status.
+      elements:
+        - {instruction: JSR, operand: R_Scan_Diagnostics, kind: output}
+    - routine: Diagnostics/MainRoutine
+      title: Call communication diagnostics
+      comment: Connection status for every remote node.
+      elements:
+        - {instruction: JSR, operand: R_Comms_Diagnostics, kind: output}
+
+engineering_notes: >
+  The period is an engineering decision, not a default. A periodic task exists
+  so that the interval between executions is known: PID tuning, rate-of-change
+  calculations and totalisers are all wrong if it drifts. Choose the period from
+  the fastest loop the process genuinely needs and confirm the worst-case scan
+  fits inside it with margin, then set the watchdog above that worst case.
+
+  Program order inside ProcessTask is the point of the layout: conditioning,
+  then permissives and interlocks, then control, then alarms. Reordering it
+  means control acts on values conditioned during the previous scan and
+  interlocks evaluated against a state that has already moved.
+
+  The HMI boundary and diagnostics sit in the continuous task deliberately.
+  They have no deadline, and putting them in the periodic task means every
+  operator screen update competes with the control chain for the period.
+
+  Sys_ProcessTask_Overlap is worth wiring up on day one. A periodic task that
+  overruns its period does not announce itself; without this bit the first
+  symptom is a control loop behaving as though it were tuned for a different
+  interval.
+
+restrictions:
+  - >
+    Creates a skeleton only. Every routine is empty apart from the JSR calls
+    listed here; the loops, interlocks, alarms and device blocks are still to be
+    written.
+  - >
+    This is a basic process control layer, not a safety instrumented system. It
+    is not SIL rated, it carries no proof-test interval, and no interlock placed
+    in Process_Interlocks may be relied on as a protection layer. Safety
+    instrumented functions belong in a system assessed under IEC 61511 by a
+    qualified person.
+  - Does not choose the task period or the watchdog for you, and cannot verify the worst-case scan.
+  - Does not create I/O modules, produced/consumed tags, or any communication configuration.
+  - Does not create PID or loop instructions; R_Loops is created empty.
+  - Does not apply to redundant chassis configuration, which changes task and program constraints.
+
+tests:
+  - name: The periodic task carries the control chain in order
+    given: The layout has been expanded into an empty project
+    when: ProcessTask's program list is read
+    then: >
+      The order is Analog_Inputs, Process_Interlocks, Process_Control, Alarms,
+      and ProcessTask is periodic with the chosen rate.
+  - name: Deadline-free work is outside the periodic task
+    given: The layout has been expanded
+    when: MainTask's program list is read
+    then: It contains HMI_Interface and Diagnostics, and no program from the control chain.
+  - name: No routine is dead on arrival
+    given: The layout has been expanded
+    when: A cross-reference pass runs
+    then: >
+      Every routine is either a program main routine or the target of a JSR in
+      that program's MainRoutine.
+  - name: Task overlap is observable
+    given: A controller running the expanded layout
+    when: ProcessTask is forced to overrun its period
+    then: Sys_ProcessTask_Overlap becomes true and a diagnostic alarm is raised.
+  - name: The skeleton imports
+    given: The generated L5X artifacts
+    when: They are imported into Studio 5000 in the stated order
+    then: The import completes with no error and the controller verifies clean.

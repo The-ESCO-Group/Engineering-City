@@ -145,7 +145,13 @@
         "request_approval",
         "update_finding_review",
         "report_blocker",
-        "report_no_findings"
+        "report_no_findings",
+        "create_task_plan",
+        "request_clarification",
+        "propose_changeset",
+        "review_changeset",
+        "generate_preview",
+        "complete_task"
       ],
       "description": "The closed set of actions a model is permitted to propose."
     },
@@ -445,7 +451,10 @@
         "plc_review",
         "interlock_review",
         "senior_review",
-        "delivery"
+        "delivery",
+        "requirements_planning",
+        "tag_architecture",
+        "plc_logic"
       ],
       "description": "Stable identifier for an agent definition."
     },
@@ -873,6 +882,12 @@
         "pdf_page",
         "pdf_text_range",
         "xml_element",
+        "description_paragraph",
+        "requirement",
+        "template",
+        "human_decision",
+        "generated_object",
+        "validation_result",
         "file_line",
         "file_section",
         "file_whole"
@@ -907,7 +922,12 @@
         "equipment_damage_recommendation",
         "design_recommendation",
         "finding_release",
-        "report_release"
+        "report_release",
+        "gate_decision",
+        "changeset_merge",
+        "tag_rename",
+        "restricted_domain",
+        "release_candidate"
       ],
       "description": "Why a human decision is required."
     },
@@ -1075,7 +1095,10 @@
         "pending",
         "approved",
         "rejected",
-        "cancelled"
+        "cancelled",
+        "changes_requested",
+        "risk_accepted",
+        "deferred"
       ],
       "description": ""
     },
@@ -1106,7 +1129,24 @@
         "approval.requested",
         "approval.decided",
         "report.created",
-        "model_configuration.changed"
+        "model_configuration.changed",
+        "profile.updated",
+        "question.created",
+        "question.answered",
+        "decision.recorded",
+        "changeset.created",
+        "changeset.submitted",
+        "changeset.merged",
+        "changeset.rejected",
+        "revision.created",
+        "tag.renamed",
+        "gate.decided",
+        "validation.run",
+        "export.generated",
+        "release.candidate_created",
+        "release.approved",
+        "workstation.configured",
+        "workstation.verification_requested"
       ],
       "description": "Auditable operations. Every member must be written by exactly one call"
     },
@@ -1504,7 +1544,26 @@
         "finding.updated",
         "approval.requested",
         "approval.decided",
-        "report.created"
+        "report.created",
+        "project.question_created",
+        "project.question_resolved",
+        "requirement.created",
+        "workflow.planned",
+        "workflow.failed",
+        "task.assigned",
+        "changeset.created",
+        "changeset.validation_failed",
+        "changeset.submitted",
+        "changeset.reviewed",
+        "changeset.merged",
+        "revision.created",
+        "gate.status_changed",
+        "validation.started",
+        "validation.completed",
+        "export.started",
+        "export.artifact_created",
+        "release.candidate_created",
+        "release.ready"
       ],
       "description": "Event types broadcast over the project WebSocket."
     },
@@ -1594,7 +1653,11 @@
         "inference",
         "missing_expected",
         "parser_warning",
-        "unsupported_content"
+        "unsupported_content",
+        "template_rule",
+        "human_decision",
+        "generated_object",
+        "validation_output"
       ],
       "description": "How strongly a piece of evidence supports a claim."
     },
@@ -3002,9 +3065,18 @@
         "awaiting_review",
         "completed",
         "failed",
-        "archived"
+        "archived",
+        "clarification_required",
+        "tag_and_io_design",
+        "plc_architecture",
+        "implementation",
+        "cross_discipline_review",
+        "test_development",
+        "release_validation",
+        "ready_for_export",
+        "blocked"
       ],
-      "description": ""
+      "description": "Project lifecycle."
     },
     "ProviderKind": {
       "title": "ProviderKind",
@@ -3633,7 +3705,17 @@
         "senior_review",
         "request_approvals",
         "delivery",
-        "finalize_project"
+        "finalize_project",
+        "extract_requirements",
+        "resolve_clarifications",
+        "design_tags",
+        "design_plc_architecture",
+        "generate_logic",
+        "validate_cross_discipline",
+        "evaluate_approval_gate",
+        "generate_release_candidate",
+        "verify_import",
+        "assemble_package"
       ],
       "description": "Identifies the handler that executes a task."
     },

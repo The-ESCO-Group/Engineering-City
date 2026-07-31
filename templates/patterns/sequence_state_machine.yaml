@@ -1,0 +1,375 @@
+# Stepped sequence with a per-step timeout.
+# See templates/README.md for the file format and the versioning rule.
+id: esco.sequence.state_machine
+version: 1.0.0
+category: sequence_state_machine
+display_name: Stepped sequence with per-step timeouts
+description: >
+  A single-integer step sequence with an explicit step register, a per-step
+  timeout, and abort and hold handling. The step number is the machine's state
+  and the only thing that decides what happens next, so "where is the machine"
+  is one tag rather than an inference across a dozen latches. Every step is
+  timed, because a step that never completes is the failure mode a sequence
+  actually has.
+supported_families: [compactlogix, controllogix]
+approval_level: senior_review_required
+restricted_domains: []
+
+parameters:
+  - name: machine_tag
+    type: identifier
+    required: true
+    description: Machine or area tag stem, e.g. LINE4
+  - name: step_count
+    type: integer
+    required: false
+    default: 8
+    description: >
+      Number of active steps, numbered 1 to step_count. Step 0 is idle and is
+      not counted.
+  - name: step_timeout_ms
+    type: integer
+    required: false
+    default: 30000
+    description: >
+      Default per-step timeout. A single figure for every step is a starting
+      point, not an answer: a step that waits for a tank to fill and one that
+      waits for a cylinder to extend do not share a timeout.
+  - name: hold_allowed
+    type: boolean
+    required: false
+    default: true
+    description: Whether the operator may hold the sequence at the current step
+
+required_tags:
+  - role: sequence
+    suffix: _Seq_Step
+    data_type: DINT
+    description: >
+      The current step. 0 is idle. This is the machine's state; nothing else may
+      be treated as a second copy of it.
+  - role: sequence
+    suffix: _Seq_Step_Last
+    data_type: DINT
+    description: The step as of the previous scan, used to detect a step change
+  - role: sequence
+    suffix: _Seq_Step_Complete
+    data_type: BOOL
+    description: >
+      The current step's completion condition is satisfied. Written by the
+      per-step logic the expansion generates; this block only consumes it.
+  - role: command
+    suffix: _Cmd_Seq_Start
+    data_type: BOOL
+    description: Operator or supervisory request to start the sequence, momentary
+  - role: command
+    suffix: _Cmd_Seq_Abort
+    data_type: BOOL
+    description: Operator request to abort the sequence, momentary
+  - role: status
+    suffix: _Sts_Seq_Running
+    data_type: BOOL
+    description: The sequence is executing
+  - role: sequence
+    suffix: _Sts_Seq_Idle
+    data_type: BOOL
+    description: >
+      The sequence is at step 0 and holding no state. This is the bit the mode
+      pattern requires before it will let the machine into automatic.
+  - role: mode
+    suffix: _Sts_Mode_Auto
+    data_type: BOOL
+    description: The machine is in automatic; written by the mode pattern
+  - role: status
+    suffix: _Sts_Faulted
+    data_type: BOOL
+    description: A latched fault is present
+  - role: status
+    suffix: _Seq_Start_OneShot
+    data_type: BOOL
+    description: One-shot storage bit for the start request
+  - role: status
+    suffix: _Seq_Advance_OneShot
+    data_type: BOOL
+    description: One-shot storage bit for the step-complete edge
+  - role: status
+    suffix: _Tmr_Seq_Step
+    data_type: TIMER
+    description: Times the current step; reset whenever the step number changes
+  - role: alarm
+    suffix: _Alm_Seq_Step_Timeout
+    data_type: BOOL
+    description: The current step did not complete within its allowed time
+  - role: diagnostic
+    suffix: _Seq_Timeout_Step
+    data_type: DINT
+    description: >
+      The step number that timed out. Kept separate from _Seq_Step so the
+      evidence survives the abort that follows.
+  - role: command
+    suffix: _Cmd_Seq_Hold
+    data_type: BOOL
+    description: Operator request to hold the sequence at the current step
+    when_parameter: hold_allowed
+  - role: status
+    suffix: _Sts_Seq_Held
+    data_type: BOOL
+    description: The sequence is held at the current step
+    when_parameter: hold_allowed
+
+generated_objects:
+  routines:
+    - name: R_Sequence
+      language: ladder
+      description: >
+        The machine step sequence. This pattern contributes the step engine; the
+        per-step action and completion logic is generated separately. The
+        routine already exists in the ESCO controller layouts.
+
+  rungs:
+    - routine: R_Sequence
+      title: "{machine_tag} start the sequence"
+      comment: >
+        A start is accepted only from idle, in automatic, with no fault. Starting
+        from anywhere else means resuming at a step that may not match where the
+        equipment physically is.
+      elements:
+        - {instruction: XIC, operand: "{machine_tag}_Cmd_Seq_Start", kind: condition}
+        - instruction: ONS
+          operand: "{machine_tag}_Seq_Start_OneShot"
+          kind: condition
+        - {instruction: XIC, operand: "{machine_tag}_Sts_Seq_Idle", kind: condition}
+        - {instruction: XIC, operand: "{machine_tag}_Sts_Mode_Auto", kind: condition}
+        - {instruction: XIO, operand: "{machine_tag}_Sts_Faulted", kind: condition}
+        - branch:
+            - - instruction: MOV
+                operands: ["1", "{machine_tag}_Seq_Step"]
+                kind: output
+            - - {instruction: OTE, operand: "{machine_tag}_Sts_Seq_Running", kind: output}
+
+    - routine: "R_Sequence"
+      title: "{machine_tag} reset the step timer on a step change"
+      comment: >
+        The step timer is reset by the step NUMBER changing, not by any
+        particular transition. That way every route into a step — normal
+        advance, abort, a jump — starts the timer from zero, and no path can
+        arrive at a step with a timer that is already part-way through.
+      elements:
+        - instruction: NEQ
+          operands: ["{machine_tag}_Seq_Step", "{machine_tag}_Seq_Step_Last"]
+          kind: condition
+        - branch:
+            - - {instruction: RES, operand: "{machine_tag}_Tmr_Seq_Step", kind: output}
+            - - instruction: MOV
+                operands: ["{machine_tag}_Seq_Step", "{machine_tag}_Seq_Step_Last"]
+                kind: output
+
+    - routine: R_Sequence
+      title: "{machine_tag} step timer"
+      comment: >
+        Runs while the sequence is running and not held. A held sequence is a
+        deliberate pause and must not time out, or an operator who holds the
+        machine to look at something returns to a timeout fault.
+      elements:
+        - {instruction: XIC, operand: "{machine_tag}_Sts_Seq_Running", kind: condition}
+        - instruction: TON
+          operands: ["{machine_tag}_Tmr_Seq_Step", "{step_timeout_ms}", "0"]
+          kind: output
+
+    - routine: R_Sequence
+      title: "{machine_tag} suspend the step timer while held"
+      comment: >
+        Resets the timer for as long as the hold is in place. Placed after the
+        timer rung so it wins, and written as a reset rather than a gate so the
+        step restarts its full allowance when the hold is released.
+      when_parameter: hold_allowed
+      when_value: true
+      elements:
+        - {instruction: XIC, operand: "{machine_tag}_Sts_Seq_Held", kind: condition}
+        - {instruction: RES, operand: "{machine_tag}_Tmr_Seq_Step", kind: output}
+
+    - routine: R_Sequence
+      title: "{machine_tag} step timeout"
+      comment: >
+        A step that has not completed in its allowed time faults the machine and
+        records which step it was. The sequence is stopped rather than skipped:
+        advancing past a step that did not finish is how a machine ends up
+        acting on a condition nobody established.
+      elements:
+        - {instruction: XIC, operand: "{machine_tag}_Tmr_Seq_Step.DN", kind: condition}
+        - branch:
+            - - instruction: MOV
+                operands: ["{machine_tag}_Seq_Step", "{machine_tag}_Seq_Timeout_Step"]
+                kind: output
+            - - {instruction: OTL, operand: "{machine_tag}_Sts_Faulted", kind: output}
+            - - {instruction: OTE, operand: "{machine_tag}_Alm_Seq_Step_Timeout", kind: output}
+
+    - routine: R_Sequence
+      title: "{machine_tag} hold the sequence"
+      comment: >
+        Hold follows the request rather than latching, so releasing the button
+        releases the hold. The sequence stays on its current step and the step
+        timer is suspended.
+      when_parameter: hold_allowed
+      when_value: true
+      elements:
+        - {instruction: XIC, operand: "{machine_tag}_Cmd_Seq_Hold", kind: condition}
+        - {instruction: XIC, operand: "{machine_tag}_Sts_Seq_Running", kind: condition}
+        - {instruction: OTE, operand: "{machine_tag}_Sts_Seq_Held", kind: output}
+
+    - routine: R_Sequence
+      title: "{machine_tag} advance to the next step"
+      comment: >
+        The advance. Edge-triggered on step complete so a completion condition
+        that stays true cannot run the sequence through several steps in one
+        scan — which is the classic way a step sequence appears to skip steps.
+        The mode, fault and hold conditions are all checked here, so there is one
+        place that decides whether the sequence may move.
+      elements:
+        - {instruction: XIC, operand: "{machine_tag}_Sts_Seq_Running", kind: condition}
+        - {instruction: XIC, operand: "{machine_tag}_Seq_Step_Complete", kind: condition}
+        - instruction: ONS
+          operand: "{machine_tag}_Seq_Advance_OneShot"
+          kind: condition
+        - {instruction: XIC, operand: "{machine_tag}_Sts_Mode_Auto", kind: condition}
+        - {instruction: XIO, operand: "{machine_tag}_Sts_Faulted", kind: condition}
+        - instruction: ADD
+          operands: ["{machine_tag}_Seq_Step", "1", "{machine_tag}_Seq_Step"]
+          kind: output
+
+    - routine: R_Sequence
+      title: "{machine_tag} sequence complete"
+      comment: >
+        Past the last step, so the cycle is finished and the sequence returns to
+        idle. Uses GRT against step_count rather than an equality test, so a step
+        register that has somehow gone past the end still lands back at idle
+        instead of running off into unreachable steps.
+      elements:
+        - instruction: GRT
+          operands: ["{machine_tag}_Seq_Step", "{step_count}"]
+          kind: condition
+        - branch:
+            - - instruction: MOV
+                operands: ["0", "{machine_tag}_Seq_Step"]
+                kind: output
+            - - {instruction: OTU, operand: "{machine_tag}_Sts_Seq_Running", kind: output}
+
+    - routine: R_Sequence
+      title: "{machine_tag} abort the sequence"
+      comment: >
+        Abort returns the step register to idle. It does NOT put the equipment
+        back to a home position: what an aborted machine should do with a
+        half-extended cylinder or a part-full tank is an engineering decision per
+        machine, and this template refuses to guess it.
+      elements:
+        - branch:
+            - - {instruction: XIC, operand: "{machine_tag}_Cmd_Seq_Abort", kind: condition}
+            - - {instruction: XIC, operand: "{machine_tag}_Sts_Faulted", kind: condition}
+            - - {instruction: XIO, operand: "{machine_tag}_Sts_Mode_Auto", kind: condition}
+        - branch:
+            - - instruction: MOV
+                operands: ["0", "{machine_tag}_Seq_Step"]
+                kind: output
+            - - {instruction: OTU, operand: "{machine_tag}_Sts_Seq_Running", kind: output}
+
+    - routine: R_Sequence
+      title: "{machine_tag} sequence idle"
+      comment: >
+        Idle is step 0 and not running. Computed rather than latched, so it
+        cannot disagree with the step register — and the mode pattern depends on
+        it being true only when the machine really is at rest.
+      elements:
+        - instruction: EQU
+          operands: ["{machine_tag}_Seq_Step", "0"]
+          kind: condition
+        - {instruction: XIO, operand: "{machine_tag}_Sts_Seq_Running", kind: condition}
+        - {instruction: OTE, operand: "{machine_tag}_Sts_Seq_Idle", kind: output}
+
+engineering_notes: >
+  One integer holds the state. Every step's action logic is written as "if
+  _Seq_Step equals N then ...", and there is exactly one place that changes it.
+  The alternative — a latch per step — looks simpler until two of them are set
+  at once, at which point the machine is in a state no drawing describes and no
+  amount of reading the ladder will explain.
+
+  Every step is timed, and the timer is reset by the step number changing rather
+  than by the transition that caused it. That is what makes an abort, a fault
+  recovery and a normal advance all arrive at a fresh timer. A per-step timeout
+  is not defensive programming; it is the only mechanism by which a sequence
+  waiting forever for a condition that will never arrive becomes an alarm
+  somebody can act on.
+
+  A timeout stops the sequence rather than skipping the step. Skipping means the
+  machine proceeds on the assumption that a thing happened when it demonstrably
+  did not.
+
+  step_timeout_ms is a single default for every step and that is its weakness.
+  Commissioning should replace it with a per-step value, because the step that
+  waits for a heater to reach temperature and the step that waits for a solenoid
+  to shift are not comparable, and one default forces the timeout to be as long
+  as the slowest step — which makes it useless for all the others.
+
+restrictions:
+  - >
+    Not a safety function. A sequence stopping is not a machine in a safe state,
+    and no step in this pattern may be relied on as a protective measure.
+  - >
+    Does not generate the per-step action or completion logic. This is the step
+    engine; what each step does and when it is complete is written per machine
+    and feeds _Seq_Step_Complete.
+  - >
+    Does not put equipment into a safe or home position on abort, timeout or a
+    change to manual. The step register returns to idle and outputs are left
+    where the device blocks leave them. What an aborted machine should do with
+    part-completed work is a decision per machine and must be written explicitly.
+  - >
+    One default timeout for every step. Per-step timeouts require replacing the
+    single preset, and until that is done the timeout is only meaningful for the
+    slowest step.
+  - >
+    Linear sequences only. Branching, parallel legs, nested sub-sequences and
+    step-back recovery are not expressible with a single step register and are
+    not generated.
+  - Does not resume mid-cycle. A sequence that is aborted or faulted restarts from step 1.
+  - Does not detect that the equipment's physical state disagrees with the step number.
+  - Does not record a step history or cycle time.
+
+tests:
+  - name: The sequence starts only from idle in automatic
+    given: The machine is in manual
+    when: _Cmd_Seq_Start is pulsed
+    then: _Seq_Step stays 0 and _Sts_Seq_Running stays false.
+  - name: A normal cycle advances one step per completion
+    given: A running sequence at step 3
+    when: _Seq_Step_Complete goes true and stays true for ten scans
+    then: _Seq_Step becomes 4 and stops there, because the advance is edge-triggered.
+  - name: The step timer restarts on every step change
+    given: A running sequence with a 30 s step timeout
+    when: The sequence advances after 25 s on a step
+    then: The step timer reads zero on the first scan of the new step.
+  - name: A step that never completes times out
+    given: A running sequence at step 5 whose completion condition never becomes true
+    when: step_timeout_ms elapses
+    then: >
+      _Sts_Faulted latches, _Alm_Seq_Step_Timeout is set, _Seq_Timeout_Step
+      holds 5, and the sequence does not advance to step 6.
+  - name: The timed-out step number survives the abort
+    given: A step timeout that aborted the sequence
+    when: _Seq_Step has returned to 0
+    then: _Seq_Timeout_Step still holds the step that failed.
+  - name: A held sequence does not time out
+    given: hold_allowed is true and a running sequence
+    when: _Cmd_Seq_Hold is held for twice the step timeout
+    then: No timeout occurs, and the step gets its full allowance after the hold is released.
+  - name: Leaving automatic aborts the sequence
+    given: A running sequence at step 4
+    when: The machine is put into manual
+    then: _Seq_Step goes to 0 and _Sts_Seq_Running goes false.
+  - name: The cycle completes back to idle
+    given: step_count of 8 and a running sequence at step 8
+    when: Step 8 completes
+    then: _Seq_Step returns to 0, _Sts_Seq_Running goes false and _Sts_Seq_Idle goes true.
+  - name: An out-of-range step register recovers
+    given: _Seq_Step forced to 99
+    when: The block is scanned
+    then: The sequence returns to idle rather than running in an unreachable step.

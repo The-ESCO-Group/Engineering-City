@@ -48,6 +48,13 @@ class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: Monotonic per-project event sequence, used for WebSocket replay.
     event_seq: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    #: Head of the canonical engineering model. Revision 0 means "nothing has
+    #: been merged yet", so an agent always has a real base to propose against
+    #: rather than a null every caller has to special-case.
+    current_revision_number: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: Monotonic per-project release candidate counter.
+    release_candidate_seq: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     #: Running totals enforced against the configured project budgets.
     tokens_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     cost_used_micros: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
