@@ -26,9 +26,9 @@ export interface CityMapHudProps {
 }
 
 const districts: DistrictLabel[] = [
-  { id: "intake", label: "North Review", detail: "Project intake · 1 queued", x: "18%", y: "24%" },
-  { id: "automation", label: "Automation Core", detail: "Logic review · 1 active", x: "37%", y: "18%" },
-  { id: "hmi", label: "HMI District", detail: "Tag review · 1 active", x: "68%", y: "25%" },
+  { id: "intake", label: "North Review", detail: "Project intake · 1 queued", x: "23%", y: "43%" },
+  { id: "automation", label: "Automation Core", detail: "Logic review · 1 active", x: "40%", y: "34%" },
+  { id: "hmi", label: "HMI District", detail: "Tag review · 1 active", x: "66%", y: "42%" },
   { id: "electrical", label: "Electrical Works", detail: "I/O review · 1 active", x: "84%", y: "48%" },
   { id: "qa", label: "QA Campus", detail: "Validation · 1 waiting", x: "67%", y: "68%" },
   { id: "documentation", label: "Documentation Quarter", detail: "Reports · package ready", x: "39%", y: "76%" },

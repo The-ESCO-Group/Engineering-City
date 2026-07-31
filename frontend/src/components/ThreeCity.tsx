@@ -143,9 +143,9 @@ interface FirstPersonLook {
 const HUB: Point2 = [4, 20];
 const LANDMARK: Point2 = [-5, -11];
 const PARK: Point2 = [50, 52];
-const OVERVIEW_POSITION: Vec3 = [126, 210, 132];
-const OVERVIEW_TARGET: Vec3 = [0, 2, 0];
-const OVERVIEW_VERTICAL_SIZE = 116;
+const OVERVIEW_POSITION: Vec3 = [138, 99, 152];
+const OVERVIEW_TARGET: Vec3 = [0, 0, 5];
+const OVERVIEW_FOV = 44;
 const FIRST_PERSON_START: Vec3 = [38, 1.86, 78];
 const FIRST_PERSON_TARGET: Vec3 = [4, 3.1, 18];
 const FIRST_PERSON_BOUNDS = {
@@ -303,7 +303,7 @@ const ROOT_STYLE: CSSProperties = {
   position: "absolute",
   inset: 0,
   overflow: "hidden",
-  background: "#173b54"
+  background: "#4d8398"
 };
 
 const CANVAS_MOUNT_STYLE: CSSProperties = {
@@ -582,9 +582,9 @@ function addFacadeBands(
 
 function createWorldGround(scene: THREE.Scene, palette: MaterialPalette) {
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(1400, 1400),
+    new THREE.PlaneGeometry(1800, 1800),
     new THREE.MeshStandardMaterial({
-      color: 0x122a38,
+      color: 0x17343f,
       roughness: 0.98,
       metalness: 0.02
     })
@@ -606,6 +606,32 @@ function createWorldGround(scene: THREE.Scene, palette: MaterialPalette) {
   urbanGround.position.y = 0.004;
   urbanGround.receiveShadow = true;
   scene.add(urbanGround);
+
+  const chunkGeometry = new THREE.BoxGeometry(1, 1, 1);
+  const chunkMatrices: THREE.Matrix4[][] = [[], [], [], []];
+  const chunkSize = 16;
+  for (let chunkX = -42; chunkX <= 42; chunkX += 1) {
+    for (let chunkZ = -42; chunkZ <= 42; chunkZ += 1) {
+      const x = chunkX * chunkSize;
+      const z = chunkZ * chunkSize;
+      if (Math.abs(x) < 142 && Math.abs(z) < 108) continue;
+      const variant = Math.abs((chunkX * 17 + chunkZ * 31 + chunkX * chunkZ * 3) % 4);
+      chunkMatrices[variant].push(
+        boxMatrix(x, -0.045, z, chunkSize + 0.035, 0.08, chunkSize + 0.035)
+      );
+    }
+  }
+  const chunkMaterials = [0x173743, 0x193b46, 0x153540, 0x1b3d47].map(
+    (color) =>
+      new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.99,
+        metalness: 0.01
+      })
+  );
+  chunkMatrices.forEach((matrices, index) => {
+    addInstancedBoxes(scene, chunkGeometry, matrices, chunkMaterials[index], false);
+  });
 
   createWaterBand(scene, palette, [0, -33], [219, 7.2]);
   createWaterBand(scene, palette, [0, 27.5], [219, 6.4]);
@@ -2296,7 +2322,7 @@ export function ThreeCity({
   viewMode
 }: ThreeCityProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const firstPersonCameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
@@ -2335,8 +2361,8 @@ export function ThreeCity({
     try {
       setRenderError(null);
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x173b54);
-      scene.fog = new THREE.Fog(0x173b54, 185, 430);
+      scene.background = new THREE.Color(0x4d8398);
+      scene.fog = new THREE.Fog(0x4d8398, 285, 660);
 
       renderer = new THREE.WebGLRenderer({
         antialias: true,
@@ -2361,7 +2387,7 @@ export function ThreeCity({
       mount.appendChild(renderer.domElement);
       rendererRef.current = renderer;
 
-      const camera = new THREE.OrthographicCamera(-105, 105, 63, -63, 0.1, 450);
+      const camera = new THREE.PerspectiveCamera(OVERVIEW_FOV, 1, 0.1, 1200);
       camera.position.set(...OVERVIEW_POSITION);
       camera.zoom = 1;
       camera.lookAt(...OVERVIEW_TARGET);
@@ -2385,8 +2411,8 @@ export function ThreeCity({
       controls.maxPolarAngle = THREE.MathUtils.degToRad(69);
       controls.minAzimuthAngle = -Infinity;
       controls.maxAzimuthAngle = Infinity;
-      controls.minZoom = 0.68;
-      controls.maxZoom = 2.25;
+      controls.minDistance = 105;
+      controls.maxDistance = 390;
       controls.enabled = viewModeRef.current === "overview";
       controls.update();
       controlsRef.current = controls;
@@ -2576,14 +2602,7 @@ export function ThreeCity({
         const width = Math.max(1, Math.round(bounds.width));
         const height = Math.max(1, Math.round(bounds.height));
         const aspect = width / height;
-        const verticalSize = Math.max(
-          OVERVIEW_VERTICAL_SIZE,
-          132 / Math.max(0.75, aspect)
-        );
-        camera.left = (-verticalSize * aspect) / 2;
-        camera.right = (verticalSize * aspect) / 2;
-        camera.top = verticalSize / 2;
-        camera.bottom = -verticalSize / 2;
+        camera.aspect = aspect;
         camera.updateProjectionMatrix();
         firstPersonCamera.aspect = aspect;
         firstPersonCamera.updateProjectionMatrix();
@@ -2789,7 +2808,7 @@ export function ThreeCity({
       <div className="three-city-mode-badge" style={MODE_BADGE_STYLE}>
         {viewMode === "first-person"
           ? "OPS CITY · FIRST PERSON · WASD TO MOVE"
-          : "OPS CITY · DRAG TO ORBIT 360° · SCROLL TO ZOOM"}
+          : "OPS CITY · FLAT WORLD · DRAG TO ORBIT 360° · SCROLL TO ZOOM"}
       </div>
 
       {viewMode === "first-person" && (

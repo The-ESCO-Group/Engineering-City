@@ -44,7 +44,7 @@ export function City() {
               type="button"
               className="is-active"
               aria-pressed="true"
-              title="Map view: drag to orbit 360°, scroll or pinch to zoom"
+              title="Flat-world map: drag to orbit 360°, scroll or pinch to zoom"
               onClick={() => changeViewMode("overview")}
             >
               <Map aria-hidden="true" />
