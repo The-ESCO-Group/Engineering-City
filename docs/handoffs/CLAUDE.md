@@ -134,11 +134,81 @@ could rename.
 | --- | --- | --- |
 | 0 | Repository audit, ownership map, ADR | ✅ complete |
 | 1 | Canonical project core, revisions, change sets | ✅ complete |
-| 2 | Change-set validation, conflicts, merge, rename impact | ⏳ |
-| 3 | Logic IR, template registry, cross-discipline validators | ⏳ |
+| 2 | Change-set validation, conflicts, merge, rename impact | ✅ complete |
+| 3 | Logic IR, template registry, cross-discipline validators | ✅ complete |
 | 4 | Requirements / Tag Architecture / PLC Logic agents, approval gates | ⏳ |
-| 5 | Rockwell generators, release core, workstation adapter interface | ⏳ |
-| 6 | Line 4 demo fixture, end-to-end release workflow | ⏳ |
+| 5 | Rockwell generators, release core, workstation adapter interface | ✅ generators, adapter, fixture |
+| 6 | Line 4 demo fixture, end-to-end release workflow | ⏳ fixture done |
+
+### Commits
+
+| Commit | Scope |
+| --- | --- |
+| `3317c5e` | Repository audit, ownership map, ADR 0001 |
+| `99d9dcf` | Canonical project core, contracts, instruction catalogue, templates |
+| `54d4311` | Change-set merge engine and cross-discipline validators |
+| `7cb7036` | Savepoint-aware event broadcast (two silent defects) |
+| `3ba46e1` | Deterministic Rockwell import-candidate generation |
+| `ee9f51f` | Workstation adapter interface and the Line 4 demo fixture |
+
+---
+
+## Milestones 2, 3 and 5 — what exists now
+
+**One door into the model.** `app.engineering` is the only thing that writes to a
+canonical object. Not a style preference: conflict detection, the
+protected-object rule, the traceability rule and the human gate are guarantees
+only if there is no second path. A merge checks scope, detects conflicts,
+validates, applies the human gate, then applies all of it or none of it inside a
+savepoint.
+
+A **dry run takes the same code path** with the savepoint rolled back, and
+records a `MergeResult` of its own. A rehearsal that runs different code proves
+nothing about the real thing, and “we checked and it would have conflicted” is
+information a reviewer wants.
+
+**25 validators, 64 stable result codes.** Severity is a judgement rather than a
+reflex: only `ERROR` blocks a release, because treating every warning as a
+blocker trains people to bypass the gate, and every `ERROR` carries a comment
+saying why proceeding would produce something wrong. An unhandled HMI *write*
+binding is an `ERROR` while an unresolved *read* is a `WARNING` — the write is
+invisible, since the button depresses, the value is accepted, nothing happens,
+and it reaches the plant floor.
+
+**Twelve things are reported as `UNSUPPORTED` rather than passed over.**
+Structured-text and function-block routines, Add-On Instructions whose
+destructive operands are unknown, states whose transitions were never recorded,
+HMI expression bindings. “We did not check this” has to stay distinguishable
+from “we checked and it was fine”.
+
+**Generation is byte-identical for a given revision.** No clock, no generated
+ids, no iteration order the code did not choose. That is what makes a manifest
+checksum mean anything and what lets a regenerated package be diffed against an
+approved one. Generated output is round-tripped back through the real L5X parser
+and compared to the model it came from, which earns `ROUND_TRIP_PARSED` and
+nothing above it.
+
+**The workstation adapter is off, and with it off
+`ROCKWELL_IMPORT_VERIFIED` is unreachable.** The local adapter cannot be
+constructed unless an administrator enabled it; it may only launch executables
+on an allowlist, matched on the resolved absolute path so a symlink cannot
+smuggle a different binary past it; and a verification job with no named human
+approver refuses to start.
+
+### Two defects worth recording
+
+Both were found by attacking the change-set merge, not by any test, and both
+were silent.
+
+* **A savepoint rollback emptied the whole event broadcast buffer.** SQLAlchemy
+  fires `after_soft_rollback` for a `SAVEPOINT` as well as for the outer
+  transaction. The merge does its apply inside `begin_nested()`, so a dry run
+  cancelled the live delivery of every event the surrounding request had already
+  recorded. Rows committed, REST history complete, WebSocket quiet.
+* **`after_commit` fires when a savepoint commits.** Events were being published
+  before the outer transaction landed — so a rollback afterwards left a client
+  holding a change that never happened, which is exactly what the
+  persist-then-broadcast ordering exists to prevent.
 
 ---
 
