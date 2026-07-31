@@ -7,6 +7,7 @@
 - Milestone 1 commit: `7a2f4d2`
 - Milestone 2 commit: `676a8e0`
 - Milestone 3 commit: `d8a77c2`
+- Milestone 4 commit: `b3bce84`
 - Product world commit: `fae0776`
 - Contract version consumed: `1.0.0`
 - Backend application version: `0.1.0`
@@ -222,6 +223,55 @@ Milestone 4 validation:
 - 1440×900 Chromium visual QA passed for the corrected full-height workspace,
   Requirements, Devices & I/O, Tags, PLC, Change Sets, Findings, Approvals,
   Tasks, and the task-to-city semantic deep link
+
+## Milestone 5 cross-discipline delivery agents
+
+Five GPT-owned plugin capabilities now run after the backend approval gate:
+
+- Electrical and I/O audits canonical devices, signals, points, and address
+  assignments for conflicts, incompatible types/directions, missing
+  descriptions, missing fail states, and required unassigned signals
+- HMI Engineering audits screens, pinned templates, tag bindings, and navigation
+  and can produce a deterministic FactoryTalk View ME tag-binding CSV candidate
+- Alarm Engineering audits identifiers, triggers, drive coverage, messages,
+  response guidance, and critical-review needs and can produce deterministic
+  FactoryTalk View ME alarm and cross-reference CSV candidates
+- Testing and Commissioning audits requirement/interlock coverage, verification
+  steps, prerequisites, and expected results without inventing physical behavior
+- Documentation and Release captures one immutable canonical snapshot and
+  generates the configured report artifacts with checkpointed retries
+
+The four engineering-domain plugins are deliberately read-only. They query the
+canonical Project Core, preserve object/evidence identifiers, return structured
+audit issues, and report `canonical_writes: 0`; the current backend plugin
+boundary does not expose the validated change-set executor. Safety-relevant
+results therefore remain human-review observations rather than silently created
+findings or merged changes.
+
+Target-aware candidate generation supports FactoryTalk View ME CSV artifacts
+only when an exact product/version is configured. Missing and unsupported
+targets fail closed. Display XML remains explicitly unavailable because no
+approved vendor schema and versioned template assets are installed. Candidates
+stay generated/not-import-verified and are not persisted outside the canonical
+release service.
+
+The Documentation agent's supporting report system already provides the 19
+required catalog entries and real HTML, PDF, DOCX, XLSX, CSV, and JSON files
+(plus legacy Markdown). Every format carries the captured revision, target,
+reviewed/unsupported files, templates/generators, evidence, findings, human
+approvals, validation level, timestamp, report version, source-snapshot hash,
+and an appropriate draft/verification disclaimer. OOXML members and embedded
+timestamps are canonicalized so identical snapshots produce stable hashes.
+
+Milestone 5 validation:
+
+- delivery/report plugin suite passed: 21/21
+- scoped Ruff passed
+- scoped strict mypy passed: 17 source files
+- deterministic bytes validated for all six required export formats, including
+  repeated XLSX generation across different wall-clock seconds
+- unsafe report filenames are rejected before storage and unsupported requested
+  providers/formats produce warnings rather than fake files
 
 ## Milestone 0 audit
 
