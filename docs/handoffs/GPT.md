@@ -59,3 +59,4 @@ Delivery agents under `backend/app/agents/delivery/**` and report providers unde
 - `a5b31b83076e77131ca3b20c71093370165ea40d` — brought the city to life with moving traffic and pedestrians, animated infrastructure, street-level detail, cleaner spectator chrome, and updated visual regression previews.
 - `52e67f18acfcb0cf43229441638000e8c5e6786a` — preserved the composed city homepage while adding unrestricted horizontal Map orbit, wheel/pinch zoom, grab affordances, reset behavior, and end-to-end interaction coverage.
 - `6f052f5dd8604283a93a13b14d8b0f1a5ab9d88b` — replaced the overview diorama projection with a broad perspective flat world, fog-blended voxel terrain chunks, retuned spatial labels, and updated overview/walk previews.
+- `6f848a7d44d66eed8146aca1f00df7f9cecd043a` — moved the opening overview about one-third closer so individual buildings read at metropolitan scale while preserving the flat-world horizon, 360° orbit, zoom, reset, and Walk mode.
