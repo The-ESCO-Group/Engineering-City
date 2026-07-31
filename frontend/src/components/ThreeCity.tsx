@@ -143,7 +143,7 @@ interface FirstPersonLook {
 const HUB: Point2 = [4, 20];
 const LANDMARK: Point2 = [-5, -11];
 const PARK: Point2 = [50, 52];
-const OVERVIEW_POSITION: Vec3 = [138, 99, 152];
+const OVERVIEW_POSITION: Vec3 = [104, 75, 115];
 const OVERVIEW_TARGET: Vec3 = [0, 0, 5];
 const OVERVIEW_FOV = 44;
 const FIRST_PERSON_START: Vec3 = [38, 1.86, 78];
