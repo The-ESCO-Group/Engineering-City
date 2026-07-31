@@ -1,0 +1,431 @@
+# Sol product and delivery handoff
+
+## Current baseline
+
+- Branch: `master`
+- Audited commit: `fa9b396`
+- Product world commit: `fae0776`
+- Contract version consumed: `1.0.0`
+- Backend application version: `0.1.0`
+- Frontend application version: `0.1.0`
+- Generated client version: not yet generated; the current local integration is handwritten and incomplete
+- Audit date: 2026-07-31
+
+The working tree is shared with the backend owner. Sol-owned delivery, reporting,
+and frontend integration work is present but not yet committed. Claude-owned core
+files also have concurrent edits. Product commits must stage explicit owned paths
+and must not absorb contract, parser, Project Core, workflow, security, or core
+model changes.
+
+## Ownership boundary
+
+Sol owns:
+
+- `frontend/**`
+- `desktop/**`
+- `backend/app/agents/delivery/**`
+- `backend/app/reporting/**`
+- future delivery generators under `backend/app/generators/**`
+- `backend/tests_delivery/**`
+- `scripts/product/**`
+- `docs/product/**`
+- this handoff
+
+Claude owns:
+
+- `contracts/**`
+- `backend/app/{api,core,database,models,parsers,orchestration,security}`
+- `backend/app/agents/{base,review}`
+- `backend/tests/**`
+- `scripts/backend/**`
+- `docs/backend/**`
+
+No product milestone may hand-edit a contract or invent a parallel Project Core
+schema. Missing backend surface is tracked below as a numbered request.
+
+## Milestone 0 audit
+
+### Contract and backend surface
+
+Contract `1.0.0` is generated and drift-checked. It currently publishes:
+
+- 50 HTTP operations and one project WebSocket
+- 25 domain enums and 80 domain definitions
+- 27 persisted project event types
+- authentication, projects, files, workflow control, tasks, parsers, agents,
+  findings, recommendations, approvals, reports, model configuration, and event
+  replay
+
+The contract is complete for the evidence-based review platform that exists now,
+but not for the full production platform in the Sol 5.6 brief. There are no
+contracted resources for canonical requirements, devices and I/O, tags, PLC
+programs/routines, HMI, alarms, tests, revisions, changesets, clarifications,
+validation, releases, artifact trees, release ZIPs, or audit-trail reads.
+
+### Screens implemented
+
+| Surface | Baseline state |
+| --- | --- |
+| Engineering City | Functional full-screen Three.js map and optional Walk mode |
+| Projects | Live/demo cards; creation and workspace actions are not implemented |
+| Tasks | Static demonstration board |
+| Findings and evidence | Live/demo list; fact, inference, limitations, confidence, and exact citations remain separate |
+| Approvals | First pending decision with explicit rationale and Accept/Reject |
+| Reports | Live artifact list/download plus a synthetic JSON demonstration export |
+| Agents, Audit Trail, Settings | Placeholder route |
+| Intake, Project Core, Tags, PLC, HMI, Alarms, Evidence, Validation, Releases | Not implemented |
+
+Several visible controls are currently inert. They must be implemented, disabled
+with a reason, or removed before final acceptance.
+
+### Districts implemented
+
+The current world contains 26 procedural district specifications, eight
+selectable workflow anchors, and 15 additional spatial labels. It provides a
+dense central skyline, low-rise perimeter, roads, bridges, canals, utilities,
+renewable energy, water treatment, testing, data-center, logistics, maintenance,
+harbor, park, traffic, pedestrians, map orbit/zoom/reset, and bounded first-person
+inspection.
+
+The following canonical semantic destinations still need explicit client nodes:
+
+- Requirements Hall
+- ESCO Project Core
+- Template Library
+- Tag Foundry
+- Ladder Logic Lab
+- Alarm Center
+- Port Terminal
+
+### Semantic location mapping
+
+The current `BuildingId` union contains only:
+
+`intake`, `automation`, `hmi`, `electrical`, `qa`, `documentation`, `approval`,
+and `release`.
+
+Agent markers, occupancy, and route animation in the Three.js scene still read
+the synthetic domain records directly. Live agents currently affect the activity
+strip only. Backend semantic locations have not yet been mapped to deterministic
+world nodes and `agent.location_changed` currently has no backend caller.
+
+### Event types consumed
+
+The frontend opens the project socket, resumes from a stored `seq`, and
+invalidates query groups for agent, finding, approval, report, and project/task
+events. It does not yet maintain a deterministic world reducer or persisted
+timeline.
+
+Missing reliability behavior:
+
+- exponential reconnect backoff and jitter
+- strict ordering and sequence-gap recovery
+- duplicate rejection
+- REST polling fallback
+- persisted recent event history and replay controls
+- typed ping/error frames
+- acknowledgement/escalation treatment for approval, failure, and release events
+
+The backend socket also has a replay-to-subscribe race that can delay one event
+until the next reconnect.
+
+### Delivery agents implemented
+
+Current Sol-owned starter capability:
+
+- `engineering_report_delivery`
+- accepted-finding-only snapshot
+- checkpoint per provider/format pair
+- traceable stored artifacts and `report.created`
+
+Still missing:
+
+- Electrical and I/O Agent
+- HMI Engineering Agent
+- Alarm Engineering Agent
+- Testing and Commissioning Agent
+- complete Documentation and Release Agent
+- target-aware HMI/alarm/testing generator registries
+
+The starter delivery agent currently depends on pending integration edits in
+Claude-owned review handler code. That dispatcher boundary needs backend-owner
+resolution before the product commit can claim integrated delivery.
+
+### Report formats and providers
+
+Registered providers:
+
+- discrepancy matrix
+- accepted-findings test plan
+
+Registered formats:
+
+- HTML
+- Markdown
+
+The artifacts are real stored files with size, SHA-256, provider/version, and
+finding traceability. Required PDF, DOCX, XLSX, CSV, and JSON exporters and the
+full report catalog are not yet implemented. The current snapshot also lacks
+revision, target profile, reviewed/unsupported files, templates, approvals,
+validation level, and report timestamp/version metadata.
+
+### Desktop status
+
+The Tauri 2 Windows shell builds the frontend, uses a restrictive local CSP,
+ships MSI/NSIS configuration, and has minimal dialog/opener permissions. It does
+not yet start or monitor the backend, expose a real connection screen, provide
+support logs/notifications, or open an authorized project directory.
+
+The current loopback validator uses string prefixes and must be replaced with
+structural URL parsing before it is a security boundary.
+
+### Product scripts
+
+Present: `setup.ps1`, `dev.ps1`, `run-demo.ps1`, `test.ps1`, and
+`build-desktop.ps1`.
+
+Missing or incomplete:
+
+- `package-release.ps1`
+- backend environment setup
+- backend-first development startup
+- effective demo-mode configuration
+- explicit native-command exit-code checks
+- lint, backend, delivery, contract, E2E, accessibility, visual, and Rust tests in the aggregate product test
+
+### Performance baseline
+
+- The world uses instanced/merged repeated geometry and static shadow updates.
+- The current city has a clean production bundle and a headless automation
+  quality fallback.
+- `ThreeCity.tsx` is 3,545 lines and constructs the world synchronously.
+- There is no LOD, progressive loading, runtime quality selection, or formal FPS
+  instrumentation.
+- The interactive runtime is currently capped at 30 FPS instead of targeting 60
+  with a measured fallback.
+
+### Accessibility baseline
+
+Present: semantic native controls, visible city focus styles, screen-reader
+labels, reduced motion, an accessible building selection layer, camera reset,
+and a non-required Walk mode.
+
+Missing: high-contrast mode, scalable HUD text, a complete non-3D city list,
+keyboard-only approval coverage, motion-sickness controls, and automated
+accessibility checks. Some HUD copy is smaller than the 1440×900 readability
+target, and the legacy shell enforces an 1180-pixel minimum body width.
+
+## Baseline validation
+
+Passed on the audited working tree:
+
+- frontend lint
+- frontend strict typecheck
+- frontend unit tests: 3/3
+- frontend production build: 1,655 modules
+- generated-contract drift check
+- delivery tests: 3/3
+- delivery plugin discovery with no registration errors
+- prior Chromium city workflow: 1/1
+
+The normal pytest configuration excludes `backend/tests_delivery`, and the
+current product test script does not run backend, delivery, contract, E2E, or
+desktop checks. That is a quality-gate defect, not evidence those checks are
+unnecessary.
+
+## Known limitations and product truth
+
+- The city is visually strong but its agent presence is not yet driven by real
+  event history.
+- Ambient vehicles and pedestrians are deterministic decoration, not engineering
+  agents. They must remain visually subordinate and must never imply workflow
+  progress.
+- Live browser integration is blocked by default backend CORS configuration for
+  port 4173; the product can use a same-origin development proxy, but the
+  documented backend origins must still be corrected for supported direct use.
+- The frontend types are handwritten and exhibit contract drift. A generated,
+  version-pinned client is required.
+- Do not label a generated report "verified" until a contracted validation level
+  says so.
+- The backend does not support direct PLC control, `.ACD` parsing, applying
+  design changes, or raw model reasoning. The product will not add those
+  capabilities.
+
+## Commands
+
+```powershell
+# Frontend
+npm --prefix frontend run lint
+npm --prefix frontend run typecheck
+npm --prefix frontend run test
+npm --prefix frontend run build
+npm --prefix frontend run test:e2e
+
+# Contracts and backend
+.venv\Scripts\python.exe scripts\backend\generate_contracts.py --check
+.venv\Scripts\python.exe -m pytest backend\tests
+.venv\Scripts\python.exe -m pytest backend\tests_delivery
+.venv\Scripts\python.exe -m ruff check backend scripts
+.venv\Scripts\python.exe -m mypy
+
+# Desktop
+cargo test --manifest-path desktop\src-tauri\Cargo.toml
+.\scripts\product\build-desktop.ps1
+```
+
+## Requests for Claude
+
+### CLAUDE-REQUEST-S001
+
+Status: OPEN
+
+Need: Allow the documented local frontend and every published HTTP method
+through backend CORS.
+
+Reason: The frontend runs at `http://127.0.0.1:4173`; backend defaults allow
+5173 and 1420 only. Credentialed requests from the supported product origin fail
+preflight. `PUT` is also absent although model configuration publishes a PUT
+route.
+
+Proposed schema/API: Add localhost and 127.0.0.1 port 4173 to configured origins
+and add `PUT` to allowed methods. This is backend configuration, not a contract
+shape change.
+
+Acceptance criteria: Credentialed preflights for login, GET, multipart upload,
+approval POST, and model-configuration PUT succeed from the documented product
+origin.
+
+### CLAUDE-REQUEST-S002
+
+Status: OPEN
+
+Need: Publish a lossless typed socket frame union and eliminate the
+replay-to-subscribe race.
+
+Reason: The client cannot safely discriminate ping/error frames, and an event
+committed during socket handshake can be missed until reconnect.
+
+Proposed schema/API: `WebSocketFrame = EventEnvelope | WebSocketHello |
+WebSocketPing | WebSocketError`; subscribe before replay and discard queued
+envelopes whose sequence is already sent.
+
+Acceptance criteria: A concurrency test proves an event committed during
+handshake is delivered exactly once, and generated TypeScript discriminates
+every frame.
+
+### CLAUDE-REQUEST-S003
+
+Status: OPEN
+
+Need: Stable semantic city locations and orchestration-driven movement events.
+
+Reason: The frontend must never infer locations from model prose or coordinates.
+The declared `agent.location_changed` event currently has no producer.
+
+Proposed schema/API: Publish the supported semantic location IDs or expose a
+location-capability endpoint; emit transitions at assignment, task start,
+waiting/approval, completion, and release.
+
+Acceptance criteria: The synthetic workflow produces deterministic, replayable
+location events that map to known city nodes without coordinates.
+
+### CLAUDE-REQUEST-S004
+
+Status: OPEN
+
+Need: Versioned intake and Project Core contracts.
+
+Reason: Generic project attributes cannot safely represent the target profile,
+standards, requirements, devices/I/O, tags, PLC, HMI, alarms, and tests required
+by the product.
+
+Proposed schema/API: Paginated revision-aware resources with source evidence,
+cross-references, filters, stable deep-link identifiers, and explicit unsupported
+states.
+
+Acceptance criteria: The client can render and deep-link every canonical
+engineering object without inventing a parallel schema.
+
+### CLAUDE-REQUEST-S005
+
+Status: OPEN
+
+Need: Revisions, changesets, clarification resolution, and richer human decision
+contracts.
+
+Reason: The current approval request supports only a boolean and notes. It
+cannot represent Request Changes, Accept Risk, or Defer, nor can it review a
+structured before/after proposal.
+
+Proposed schema/API: Changeset/revision resources, operations, evidence/risk,
+dry-run conflicts and impact, clarification tasks, reviewer comments, and a
+closed decision enum with required-rationale policy.
+
+Acceptance criteria: Structured diffs and all required decisions are auditable,
+permission-aware, and contract-generated.
+
+### CLAUDE-REQUEST-S006
+
+Status: OPEN
+
+Need: Validation, release, artifact, and generation contracts.
+
+Reason: Release readiness, real generation commands, import verification,
+artifact trees, final approval, and a ZIP cannot be truthfully implemented from
+the current report list.
+
+Proposed schema/API: Revision-bound validation runs and gates; release
+candidates; generation jobs; artifact metadata containing hash, generator,
+target, validation level, diagnostics, and download; import-verification request;
+final approval; release ZIP; corresponding events.
+
+Acceptance criteria: Every Release Center control derives its availability and
+disabled reason from backend data and every downloaded artifact is traceable.
+
+### CLAUDE-REQUEST-S007
+
+Status: OPEN
+
+Need: Paginated audit reads and action capabilities.
+
+Reason: The UI must not duplicate authorization policy or expose actions that
+will inevitably fail.
+
+Proposed schema/API: Project-filtered audit endpoint plus per-resource allowed
+actions and exact disabled reasons.
+
+Acceptance criteria: Audit Trail is readable and the UI can disable every
+restricted action before submission with a backend-sourced explanation.
+
+### CLAUDE-REQUEST-S008
+
+Status: OPEN
+
+Need: A stable delivery-plugin execution boundary owned by the backend.
+
+Reason: Documentation describes a read-only plugin context, while the current
+starter receives mutable `TaskContext`, directly accesses the database/storage,
+and depends on edits in Claude-owned handler code.
+
+Proposed schema/API: Claude-owned dispatcher and persistence adapter with an
+immutable delivery context and typed result. Sol-owned plugins stay inside the
+reserved delivery/reporting directories.
+
+Acceptance criteria: Delivery runs after accepted human decisions without a
+Sol commit modifying review handlers, orchestration, models, or storage core.
+
+### CLAUDE-REQUEST-S009
+
+Status: OPEN
+
+Need: Reconcile contradictory historical sections in `docs/handoffs/CLAUDE.md`.
+
+Reason: The document first states the completed backend and later says parsers,
+workflow, agents, reports, and WebSockets do not exist. Endpoint counts and
+plugin status are also stale in the historical section.
+
+Proposed schema/API: Documentation-only correction with a single dated current
+state and a separately marked historical roadmap.
+
+Acceptance criteria: The handoff reports one unambiguous current backend state,
+accurate endpoint/event counts, and current plugin limitations.
