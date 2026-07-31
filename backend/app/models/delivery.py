@@ -384,6 +384,12 @@ class TestCase(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Base
     """
 
     __tablename__ = "test_cases"
+
+    #: pytest collects any class named ``Test*`` and warns that it cannot,
+    #: because this one takes constructor arguments. The warning is noise on
+    #: every run of every module that imports the models, and renaming an
+    #: engineering entity to suit a test runner would be the wrong trade.
+    __test__ = False
     __table_args__ = (
         UniqueConstraint("project_id", "reference", name="uq_test_cases_project_id_reference"),
         Index("ix_test_cases_project_id_test_type", "project_id", "test_type"),
@@ -440,6 +446,12 @@ class TestStep(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Base
     """
 
     __tablename__ = "test_steps"
+
+    #: pytest collects any class named ``Test*`` and warns that it cannot,
+    #: because this one takes constructor arguments. The warning is noise on
+    #: every run of every module that imports the models, and renaming an
+    #: engineering entity to suit a test runner would be the wrong trade.
+    __test__ = False
     __table_args__ = (
         UniqueConstraint(
             "test_case_id", "step_number", name="uq_test_steps_test_case_id_step_number"
