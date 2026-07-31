@@ -8,6 +8,7 @@
 - Milestone 2 commit: `676a8e0`
 - Milestone 3 commit: `d8a77c2`
 - Milestone 4 commit: `b3bce84`
+- Milestone 5 commit: `a89b45e`
 - Product world commit: `fae0776`
 - Contract version consumed: `1.0.0`
 - Backend application version: `0.1.0`
@@ -272,6 +273,52 @@ Milestone 5 validation:
   repeated XLSX generation across different wall-clock seconds
 - unsafe report filenames are rejected before storage and unsupported requested
   providers/formats produce warnings rather than fake files
+
+## Milestone 6 reports and Release Logistics
+
+The former report-card page is now a complete Release Center within the main
+ESCO shell. It consumes only generated API/event types and derives conservative
+state when the backend has not reported a fact:
+
+- 13 release-readiness checks cover profile, mandatory questions,
+  requirements, tags/I/O, logic, HMI/alarms, QA, test coverage, critical
+  findings, approvals, generators, import verification, and artifact hashes
+- the exact `00 Manifest` through `06 Audit` package tree preserves filename,
+  kind, size, SHA-256, generator, target, validation level, creation time,
+  source revision, diagnostics, and safe download availability
+- all 19 required report entries remain visible even when absent, with six
+  required-format indicators and API-backed downloads only; the browser never
+  fabricates a report file or success notification
+- candidate, validation, grouped-gate, artifact, import-verification, and
+  release state come from contract events; stale verification from an older
+  candidate cannot satisfy a newer one
+- Run Validation, Create Release Candidate, Generate Artifacts, Request Import
+  Verification, Request Final Approval, and Download Release ZIP are
+  role/prerequisite/contract-aware and always display an exact disabled reason
+- the project-package route to Release Logistics is restrained, replayable,
+  reduced-motion aware, and links to the semantic 3D city destination
+
+The current contract publishes report downloads but not release mutations,
+artifact downloads, import-verification requests, or a release ZIP descriptor.
+Those controls remain disabled in live mode until backend-supplied operations
+and download links exist. Demo mode is prominently synthetic and never invokes
+generation APIs.
+
+Both Engineering Workspace and Release Center are lazy route chunks. The city
+home no longer loads their tables, evidence viewers, report catalog, or scoped
+CSS up front; the main production JavaScript chunk fell from 650.11 kB to
+464.72 kB, with 131.03 kB and 54.26 kB feature chunks loaded on demand.
+
+Milestone 6 validation:
+
+- generated contract drift check passed at contract `1.0.0`
+- frontend lint and strict typecheck passed
+- Release Center tests passed: 7/7
+- full frontend unit suite passed: 96/96
+- frontend production build passed: 1,705 modules, no chunk-budget warning
+- 1440×900 Chromium QA passed for report catalog, readiness, explicit disabled
+  operation reasons, exact seven-folder artifact tree, reduced-motion-aware
+  route controls, and Release Logistics semantic city navigation
 
 ## Milestone 0 audit
 

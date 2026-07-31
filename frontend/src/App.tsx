@@ -1,17 +1,28 @@
-import { useMemo } from "react";
+import { lazy, Suspense, useMemo } from "react";
 import { NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Activity, AlertTriangle, Archive, Bell, Bot, Building2, ChevronDown, ClipboardCheck, Clock3, FileText, Filter, FolderKanban, ListChecks, LogOut, Menu, Plus, Search, Settings, ShieldAlert, Wifi } from "lucide-react";
-import { reportDownloadUrl } from "./api/client";
 import { useEngineeringData } from "./api/live";
 import { City } from "./components/City";
 import { ConnectionCenter } from "./components/ConnectionCenter";
 import { agents as demoAgents, findings as demoFindings, projects } from "./domain";
-import {
-  EngineeringWorkspace,
-  workspaceOperationsFromEngineering,
-  workspaceSourceFromEngineering,
-  type WorkspaceView
-} from "./features/workspace";
+import { releaseOperationsFromEngineering, releaseSourceFromEngineering } from "./features/release/integration";
+import type { ReleaseCenterView } from "./features/release/ReleaseCenter";
+import { workspaceOperationsFromEngineering, workspaceSourceFromEngineering } from "./features/workspace/integration";
+import type { WorkspaceView } from "./features/workspace/types";
+
+const EngineeringWorkspace = lazy(async () => {
+  const feature = await import("./features/workspace/EngineeringWorkspace");
+  return { default: feature.EngineeringWorkspace };
+});
+
+const ReleaseCenter = lazy(async () => {
+  const feature = await import("./features/release/ReleaseCenter");
+  return { default: feature.ReleaseCenter };
+});
+
+function FeatureLoading({ label }: { label: string }) {
+  return <div className="feature-loading" role="status"><span className="brand-mark">E</span><b>Loading {label}…</b></div>;
+}
 
 function titleCase(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -30,6 +41,9 @@ function Shell() {
     location.pathname === "/tasks" ||
     location.pathname === "/findings" ||
     location.pathname === "/approvals";
+  const isReleaseShell = location.pathname === "/reports" ||
+    location.pathname === "/release" ||
+    location.pathname.startsWith("/release/");
   const engineering = useEngineeringData();
   const projectReference = engineering.project?.client_reference || "NO PROJECT";
   const projectName = engineering.project?.name || "Select an authorized workspace";
@@ -53,7 +67,7 @@ function Shell() {
     .slice(0, 2)
     .toUpperCase() || (engineering.dataMode === "demo" ? "DM" : "--");
   const connectionLabel = titleCase(engineering.connection);
-  return <div className={`app${isCityHome ? " city-home" : ""}${isWorkspaceShell ? " engineering-workspace-shell" : ""}`}>
+  return <div className={`app${isCityHome ? " city-home" : ""}${isWorkspaceShell ? " engineering-workspace-shell" : ""}${isReleaseShell ? " release-center-shell" : ""}`}>
     <header className="topbar">
       <button className="menu"><Menu /></button>
       <div className="brand-mark">E</div><div className="brand"><strong>ESCO</strong><span>ENGINEERING CITY</span></div>
@@ -77,12 +91,14 @@ function Shell() {
         <Route path="/approvals" element={<EngineeringWorkspacePage initialView="approvals" />} />
         <Route path="/workspace" element={<EngineeringWorkspacePage initialView="requirements" />} />
         <Route path="/workspace/:view" element={<WorkspaceRoute />} />
-        <Route path="/reports" element={<Reports />} />
+        <Route path="/reports" element={<ReleaseCenterPage initialView="reports" />} />
+        <Route path="/release" element={<ReleaseCenterPage initialView="overview" />} />
+        <Route path="/release/:view" element={<ReleaseRoutePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<SimplePage />} />
       </Routes>
     </main>
-    {!isCityHome && !isWorkspaceShell && <ActivityPanel />}
+    {!isCityHome && !isWorkspaceShell && !isReleaseShell && <ActivityPanel />}
   </div>;
 }
 
@@ -122,12 +138,48 @@ function EngineeringWorkspacePage({ initialView }: { initialView: WorkspaceView 
     [engineering, navigate]
   );
   return (
-    <EngineeringWorkspace
-      source={source}
-      initialView={initialView}
-      operations={operations}
-      onReturnToCity={() => navigate("/")}
-    />
+    <Suspense fallback={<FeatureLoading label="engineering workspace" />}>
+      <EngineeringWorkspace
+        source={source}
+        initialView={initialView}
+        operations={operations}
+        onReturnToCity={() => navigate("/")}
+      />
+    </Suspense>
+  );
+}
+
+const RELEASE_VIEWS = new Set<ReleaseCenterView>(["overview", "artifacts", "reports"]);
+
+function ReleaseRoutePage() {
+  const { view } = useParams();
+  const initialView = view && RELEASE_VIEWS.has(view as ReleaseCenterView)
+    ? view as ReleaseCenterView
+    : "overview";
+  return <ReleaseCenterPage key={initialView} initialView={initialView} />;
+}
+
+function ReleaseCenterPage({ initialView }: { initialView: ReleaseCenterView }) {
+  const engineering = useEngineeringData();
+  const navigate = useNavigate();
+  const source = useMemo(() => releaseSourceFromEngineering(engineering), [engineering]);
+  const operations = useMemo(
+    () => releaseOperationsFromEngineering({
+      openCityLocation: (semanticLocation) => {
+        navigate(`/?location=${encodeURIComponent(semanticLocation)}`);
+      }
+    }),
+    [navigate]
+  );
+  return (
+    <Suspense fallback={<FeatureLoading label="Release Center" />}>
+      <ReleaseCenter
+        source={source}
+        operations={operations}
+        initialView={initialView}
+        onReturnToCity={() => navigate("/")}
+      />
+    </Suspense>
   );
 }
 
@@ -160,24 +212,6 @@ function Projects() {
     : [];
   const unsupported = engineering.parsers.filter((parser) => !parser.available);
   return <section className="page"><PageHeader eyebrow="PORTFOLIO" title="Engineering projects" action="New project" onAction={() => navigate("/workspace/intake")} /><div className="filters"><div className="search"><Search /><input aria-label="Search projects" placeholder="Search projects" /></div><button type="button"><Filter /> Filters</button></div>{engineering.dataMode === "live" && <p className="advisory wide"><ShieldAlert />{engineering.parsers.length - unsupported.length} parser kinds available. {unsupported.length ? `${unsupported.length} unsupported kind(s): ${unsupported.map((item) => item.file_kind).join(", ")}.` : "Uploaded formats can be checked locally before review."}</p>}<div className="project-grid">{displayedProjects.map(p => <article className="project-card" key={p.id}><div className="project-card-head"><span>{p.id}</span><em className={p.progress === 100 ? "done" : ""}>{p.status}</em></div><h3>{p.name}</h3><p>{p.customer}</p><div className="progress"><i style={{ width: `${p.progress}%` }} /></div><div className="card-stats"><span><b>{p.progress}%</b> complete</span><span><b>{p.openFindings}</b> findings</span><span><b>{p.pendingApprovals}</b> approvals</span></div><footer><Clock3 /> Updated {p.lastActivity}<button type="button" onClick={() => navigate("/workspace/requirements")}>Open workspace →</button></footer></article>)}</div>{displayedProjects.length === 0 && <div className="empty-state"><FolderKanban /><h2>No project data available</h2><p>{engineering.fallbackReason}</p></div>}</section>;
-}
-function Reports() {
-  const engineering = useEngineeringData();
-  const downloadDemo = (name:string) => {
-    const blob = new Blob([JSON.stringify({ project:"PRJ-0241", report:name, notice:"Synthetic demo data only" }, null, 2)], { type:"application/json" });
-    const anchor = document.createElement("a");
-    anchor.href = URL.createObjectURL(blob);
-    anchor.download = `${name.toLowerCase().replaceAll(" ","-")}.json`;
-    anchor.click();
-    URL.revokeObjectURL(anchor.href);
-  };
-  if (engineering.dataMode === "live") {
-    return <section className="page"><PageHeader eyebrow="DELIVERY" title="Reports & exports" /><div className="report-grid">{engineering.reports.map((report) => <article className="report-card" key={report.id}><FileText /><div><span>{report.export_format.toUpperCase()} · {report.provider_name}</span><h3>{report.title}</h3><p>{report.finding_ids.length} accepted finding{report.finding_ids.length === 1 ? "" : "s"} · {titleCase(report.status)}</p></div>{report.download_path && <a className="primary" href={reportDownloadUrl(report.download_path)}>Download generated artifact</a>}</article>)}</div>{engineering.reports.length === 0 && <div className="empty-state"><FileText /><h2>No reports generated</h2><p>The delivery task has not produced an accepted-finding artifact yet.</p></div>}<p className="advisory wide"><ShieldAlert />Generated reports remain traceable to accepted finding IDs. “Generated” does not mean import-verified or human-approved.</p></section>;
-  }
-  if (engineering.dataMode === "demo") {
-    return <section className="page"><PageHeader eyebrow="DELIVERY" title="Reports & exports" /><div className="report-grid">{["Detailed discrepancy report","Executive summary","Findings register","FAT test plan","Audit export"].map((report,index)=><article className="report-card" key={report}><FileText /><div><span>JSON · DEMO</span><h3>{report}</h3><p>Generated from synthetic evidence · Version 0.{index+3}</p></div><button onClick={()=>downloadDemo(report)}>Generate demo JSON</button></article>)}</div><p className="advisory wide"><ShieldAlert />Demo exports are clearly marked and contain no real engineering analysis. Sign in to the local backend for accepted-finding reports.</p></section>;
-  }
-  return <section className="page"><PageHeader eyebrow="DELIVERY" title="Reports & exports" /><div className="empty-state"><FileText /><h2>Report data is unavailable</h2><p>{engineering.fallbackReason}</p></div></section>;
 }
 function SimplePage() { return <section className="page"><PageHeader eyebrow="WORKSPACE" title="Module overview" /><div className="empty-state"><Activity /><h2>Operational module</h2><p>This module is available from the project workspace once the backend contract is connected.</p></div></section>; }
 function ActivityPanel() {

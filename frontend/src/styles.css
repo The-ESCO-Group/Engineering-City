@@ -146,3 +146,12 @@
 .app.engineering-workspace-shell{grid-template-columns:208px minmax(0,1fr) 0}
 .engineering-workspace-shell>main{grid-column:2/4;min-width:0;overflow:hidden}
 .engineering-workspace-shell .eng-workspace-main{grid-column:auto;grid-row:auto;display:block}
+.app.release-center-shell{grid-template-columns:208px minmax(0,1fr) 0}
+.release-center-shell>main{grid-column:2/4;min-width:0;overflow:hidden}
+.release-center-shell .release-main{grid-column:auto;grid-row:auto;display:block}
+.release-center-shell .release-center{min-height:100%}
+.release-center-shell .release-shell{min-height:calc(100vh - 132px)}
+.release-center-shell .release-center:has(.release-demo-banner) .release-shell,
+.release-center-shell .release-center:has(.release-unavailable-banner) .release-shell{min-height:calc(100vh - 167px)}
+.feature-loading{min-height:100%;display:grid;place-content:center;justify-items:center;gap:12px;color:#a9c4ca;background:#06131b;font-size:12px;letter-spacing:.06em}
+.feature-loading .brand-mark{width:38px;height:38px}

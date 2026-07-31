@@ -157,6 +157,7 @@ export interface ReportRead {
   report_type: string;
   export_format: string;
   provider_name: string;
+  provider_version?: string;
   title: string;
   status: string;
   media_type: string;
