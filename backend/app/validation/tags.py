@@ -405,7 +405,6 @@ class TagAliasValidator:
 
     def check(self, context: ValidationContext) -> Iterable[Issue]:
         issues: list[Issue] = []
-        tags_by_id = {tag.id: tag for tag in context.tags}
         aliases_by_tag = {alias.alias_tag_id: alias for alias in context.tag_aliases}
 
         for tag in context.tags:
@@ -442,7 +441,7 @@ class TagAliasValidator:
 
             if alias.target_tag_id is None:
                 continue
-            target = tags_by_id.get(alias.target_tag_id)
+            target = context.tags_by_id.get(alias.target_tag_id)
             if target is None:
                 continue
             issues.extend(self._type_issues(context, tag, target))

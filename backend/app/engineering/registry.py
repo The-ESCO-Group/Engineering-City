@@ -35,6 +35,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
+from enum import Enum
 from typing import Any, cast
 
 from sqlalchemy import Boolean, Float, Integer, String, Table, Text, UniqueConstraint
@@ -468,7 +469,15 @@ def _kind(value: Any) -> str:
 
 
 def jsonable(value: Any) -> Any:
-    """Render a stored value so it survives a JSON column on any backend."""
+    """Render a stored value so it survives a JSON column on any backend.
+
+    Enums are unwrapped before the ``str`` check, not after. Every enum in this
+    domain is a ``StrEnum`` and therefore *is* a string, so leaving it wrapped
+    would put ``<TagScope.CONTROLLER: 'controller'>`` in front of a reviewer
+    where ``'controller'`` was meant.
+    """
+    if isinstance(value, Enum):
+        return jsonable(value.value)
     if value is None or isinstance(value, bool | int | float | str):
         return value
     if isinstance(value, uuid.UUID):

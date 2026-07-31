@@ -306,6 +306,10 @@ class ValidationContext:
         return grouped
 
     @cached_property
+    def tags_by_id(self) -> dict[uuid.UUID, Tag]:
+        return {tag.id: tag for tag in self.tags}
+
+    @cached_property
     def tag_aliases(self) -> list[TagAlias]:
         return self._live(TagAlias)
 

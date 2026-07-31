@@ -106,6 +106,7 @@ from app.validation.tags import (
 logger = get_logger(__name__)
 
 __all__ = [
+    "ALL_DISCIPLINES",
     "VALIDATORS",
     "VALIDATOR_FAILED_CODE",
     "Issue",

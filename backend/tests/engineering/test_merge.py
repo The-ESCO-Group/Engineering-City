@@ -303,6 +303,9 @@ def test_creating_something_that_already_exists_conflicts(db: Session, project: 
 
     assert _conflicts(db, result) == [ConflictKind.DUPLICATE_KEY]
     assert "already exists" in result.conflicts[0].message
+    # Enums are unwrapped for the reader: 'controller', not TagScope.CONTROLLER.
+    assert "scope='controller'" in result.conflicts[0].message
+    assert result.conflicts[0].proposed_value["scope"] == "controller"
     assert (
         db.execute(
             select(func.count(Tag.id)).where(

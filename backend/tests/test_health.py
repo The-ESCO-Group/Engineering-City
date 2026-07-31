@@ -25,15 +25,30 @@ def test_health_lists_only_explicitly_enabled_providers(client: TestClient) -> N
     assert body["enabled_providers"] == ["mock"]
 
 
-def test_missing_plugins_are_reported_not_fatal(client: TestClient) -> None:
-    """GPT-owned plugins are absent here; the app must still start and say so."""
+def test_installed_partner_plugins_are_reported_available(client: TestClient) -> None:
+    """Installed delivery and reporting capabilities are reported explicitly.
+
+    Asserts *membership*, not an exact list. The delivery agents and report
+    providers are contributed by a partner-owned package that adds to them
+    freely; an equality assertion here breaks every time they ship one, which
+    trains whoever hits it to edit the test rather than read it. What this
+    backend actually promises is that an installed capability is reported as
+    available and named — so that is what is checked.
+    """
     body = client.get("/api/health").json()
     capabilities = {row["name"]: row for row in body["capabilities"]}
 
-    assert capabilities["delivery_agents"]["available"] is False
-    assert "app.agents.delivery" in capabilities["delivery_agents"]["detail"]
-    assert capabilities["report_providers"]["available"] is False
-    assert "app.reporting" in capabilities["report_providers"]["detail"]
+    for name in ("delivery_agents", "report_providers", "export_formats"):
+        assert capabilities[name]["available"] is True, name
+        assert capabilities[name]["provider"], f"{name} is available but names nothing"
+
+    installed = {
+        name: {item.strip() for item in capabilities[name]["provider"].split(",")}
+        for name in ("delivery_agents", "report_providers", "export_formats")
+    }
+    assert "engineering_report_delivery" in installed["delivery_agents"]
+    assert {"discrepancy_matrix", "test_plan"} <= installed["report_providers"]
+    assert {"html", "markdown"} <= installed["export_formats"]
 
 
 def test_capabilities_endpoint_matches_health(client: TestClient) -> None:

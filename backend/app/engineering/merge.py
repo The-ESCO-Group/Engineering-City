@@ -73,16 +73,6 @@ from app.models.profile import ProjectDecision
 from app.models.project import Project
 from app.models.requirements import Requirement
 from app.models.revision import ChangeOperation, ChangeSet, MergeConflict, MergeResult
-
-# ``app.orchestration.events`` buffers not-yet-broadcast envelopes on
-# ``Session.info`` and clears them from an ``after_soft_rollback`` listener,
-# which SQLAlchemy also fires for a SAVEPOINT rollback. Without restoring the
-# buffer, a dry run would silently cancel the live broadcast of events the caller
-# recorded earlier in the same transaction. The events themselves are persisted
-# either way and clients replay from ``seq``, so this is a degradation rather
-# than data loss — but a rehearsal must not have side effects in either
-# direction. The narrower fix belongs in the listener; see the handoff note.
-from app.orchestration.events import _PENDING_KEY as _EVENT_BUFFER_KEY
 from app.orchestration.events import record_event
 from app.security import audit
 
@@ -288,8 +278,10 @@ def merge_changeset(
         )
 
     # Everything below is the merge itself. It runs identically for a dry run;
-    # only the savepoint's fate differs.
-    buffered_events = list(db.info.get(_EVENT_BUFFER_KEY, []))
+    # only the savepoint's fate differs. Rolling the savepoint back discards the
+    # events recorded inside it and leaves the caller's earlier ones intact --
+    # the event buffer is savepoint-aware, so a rehearsal has no side effect in
+    # either direction.
     savepoint = db.begin_nested()
     try:
         revision_number = allocate_revision_number(db, project)
@@ -298,12 +290,10 @@ def merge_changeset(
         )
     except Exception:
         savepoint.rollback()
-        db.info[_EVENT_BUFFER_KEY] = buffered_events
         raise
 
     if dry_run:
         savepoint.rollback()
-        db.info[_EVENT_BUFFER_KEY] = buffered_events
     else:
         savepoint.commit()
 

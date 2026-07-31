@@ -28,6 +28,7 @@ from app.core.enums import (
     ValidationDiscipline,
     ValidationSeverity,
 )
+from app.models.delivery import HMIBinding
 from app.validation.base import Issue, ValidationContext, fold, label, references
 
 __all__ = [
@@ -196,10 +197,9 @@ class HMIBindingValidator:
         flag records what a resolver concluded at import time, and a tag deleted
         or renamed since would leave it saying yes.
         """
-        if tag_id is not None:
-            match = next((tag for tag in context.tags if tag.id == tag_id), None)
-            if match is not None:
-                return match.name
+        match = context.tags_by_id.get(tag_id) if tag_id is not None else None
+        if match is not None:
+            return match.name
         cleaned = tag_name.strip()
         if not cleaned:
             return None
@@ -210,7 +210,7 @@ class HMIBindingValidator:
         return None
 
     @staticmethod
-    def _unresolved_issue(binding: Any, location: str, screen_name: str) -> Issue:
+    def _unresolved_issue(binding: HMIBinding, location: str, screen_name: str) -> Issue:
         write = binding.is_command
         return Issue(
             code=(
