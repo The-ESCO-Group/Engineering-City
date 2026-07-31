@@ -1,16 +1,69 @@
-# Claude handoff — backend, data, security, agent orchestration
+# Claude handoff — backend, project core, workflow, PLC generation, Rockwell export
 
-Owner of `backend/app/{api,core,database,models,parsers,orchestration,security}`,
-`backend/app/agents/{base,review}`, `backend/tests`, `contracts`, `infra/backend`,
-`scripts/backend`, `docs/backend`.
+Owner of `backend/app/{api,core,database,models,parsers,orchestration,security,
+engineering,generators,validation,adapters}`, `backend/app/agents/{base,review}`,
+`backend/tests`, `contracts`, `templates`, `infra/backend`, `scripts/backend`,
+`docs/backend`.
 
-**Last updated:** Milestone 6 — Claude-owned scope complete
+**Last updated:** production-platform Milestone 0
 **Contract version:** `1.0.0`
-**Tests:** 999 passing · ruff, mypy clean · 72/72 live-process smoke checks
+**Tests:** 1043 passing · ruff, mypy clean · 72/72 live-process smoke checks
 
 ---
 
-## Status
+## Scope change — review platform → production platform
+
+The brief now asks for *“from project description to human-reviewed,
+Rockwell-import-ready engineering package.”* That is a superset of what was
+built, not a replacement for it.
+
+**The decision is to extend, not fork.** See
+[`docs/backend/adr/0001-extend-the-review-platform-into-a-production-platform.md`](../backend/adr/0001-extend-the-review-platform-into-a-production-platform.md)
+for the reasoning and for four other decisions that shape everything downstream:
+how revisions are represented, why generation is deterministic code rather than a
+model, why verification is a level rather than a boolean, and what stays
+impossible.
+
+Everything already delivered keeps its role. Ingestion, the seven parsers and the
+evidence graph become the *provenance substrate* for a canonical engineering
+model; the workflow engine gains task kinds rather than being replaced; the agent
+action contract gains change-set proposals while its refusal rules stay
+untouched.
+
+### Directory mapping
+
+The brief’s suggested directories do not all match this repository. Modules are
+**not** duplicated to preserve the suggested names.
+
+| Brief | This repository |
+| --- | --- |
+| `backend/app/db/**` | `backend/app/database/**` |
+| `backend/app/providers/**` | `backend/app/agents/base/providers/**` |
+| `backend/app/agents/core/**` | `backend/app/agents/review/**` |
+| `backend/tests/core/**` | `backend/tests/**` |
+| `backend/tests/delivery/**` | `backend/tests_delivery/**` |
+| `docs/handoffs/SOL.md` | `docs/handoffs/GPT.md` (same partner agent, pre-existing filename) |
+| `assets/city/**` | `frontend/src/**` |
+
+New packages with no pre-existing equivalent: `backend/app/engineering/`
+(revisions, change sets, merge, impact), `backend/app/generators/{plc,rockwell}/`,
+`backend/app/validation/`, `backend/app/adapters/`, and `templates/`.
+
+### Production milestones
+
+| Milestone | Scope | State |
+| --- | --- | --- |
+| 0 | Repository audit, ownership map, ADR | ✅ complete |
+| 1 | Canonical project core, revisions, change sets | ⏳ |
+| 2 | Change-set validation, conflicts, merge, rename impact | ⏳ |
+| 3 | Logic IR, template registry, cross-discipline validators | ⏳ |
+| 4 | Requirements / Tag Architecture / PLC Logic agents, approval gates | ⏳ |
+| 5 | Rockwell generators, release core, workstation adapter interface | ⏳ |
+| 6 | Line 4 demo fixture, end-to-end release workflow | ⏳ |
+
+---
+
+## Status — review platform (delivered)
 
 | Milestone | Scope | State |
 | --- | --- | --- |
