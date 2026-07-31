@@ -1,0 +1,523 @@
+.connection-center {
+  width: min(460px, 100%);
+  max-height: min(820px, calc(100vh - 32px));
+  overflow-y: auto;
+  color: #dceaf0;
+  background: linear-gradient(180deg, #0c2630 0%, #071a22 100%);
+  border: 1px solid #315261;
+  border-radius: 10px;
+  box-shadow: 0 24px 70px #001017b3;
+  scrollbar-color: #4f8295 #0a2028;
+}
+
+.connection-center__header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 72px;
+  padding: 14px 16px;
+  background: #0b222bd9;
+  border-bottom: 1px solid #294652;
+  backdrop-filter: blur(16px);
+}
+
+.connection-center__eyebrow {
+  display: block;
+  margin-bottom: 4px;
+  color: #63d9ee;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.connection-center h2,
+.connection-center h3,
+.connection-center p,
+.connection-center dl,
+.connection-center dd {
+  margin: 0;
+}
+
+.connection-center h2 {
+  color: #f4fbfd;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+.connection-center h3 {
+  color: #edf8fb;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.connection-center__header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.connection-center__icon-button,
+.connection-center__primary-button,
+.connection-center__secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid #3b6474;
+  border-radius: 6px;
+  color: #e8f7fa;
+  background: #102e39;
+  cursor: pointer;
+}
+
+.connection-center__icon-button {
+  width: 36px;
+  padding: 0;
+}
+
+.connection-center__icon-button svg,
+.connection-center__primary-button svg,
+.connection-center__secondary-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.connection-center__icon-button:hover:not(:disabled),
+.connection-center__secondary-button:hover:not(:disabled) {
+  border-color: #68cadd;
+  background: #173b47;
+}
+
+.connection-center button:disabled,
+.connection-center input:disabled,
+.connection-center select:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.connection-center button:focus-visible,
+.connection-center input:focus-visible,
+.connection-center select:focus-visible {
+  outline: 3px solid #89e9fa;
+  outline-offset: 2px;
+}
+
+.connection-center__state {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 11px;
+  margin: 14px 16px 0;
+  padding: 12px;
+  border: 1px solid #365762;
+  border-radius: 7px;
+  background: #0c2933;
+}
+
+.connection-center__state.is-ok {
+  border-color: #317966;
+  background: #0d302d;
+}
+
+.connection-center__state.is-attention {
+  border-color: #876a35;
+  background: #302814;
+}
+
+.connection-center__state.is-danger {
+  border-color: #8e4850;
+  background: #321d24;
+}
+
+.connection-center__state-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  color: #76dcec;
+  background: #071a21b3;
+  border-radius: 50%;
+}
+
+.connection-center__state.is-ok .connection-center__state-icon {
+  color: #72dbb0;
+}
+
+.connection-center__state.is-attention .connection-center__state-icon {
+  color: #f2bd5d;
+}
+
+.connection-center__state.is-danger .connection-center__state-icon {
+  color: #ff9da6;
+}
+
+.connection-center__state-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.connection-center__state strong {
+  display: block;
+  margin-bottom: 3px;
+  color: #f5fbfc;
+  font-size: 12px;
+}
+
+.connection-center__state p,
+.connection-center__hint,
+.connection-center__empty,
+.connection-center__capabilities span,
+.connection-center__capabilities small {
+  color: #a6bec7;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.connection-center__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 16px 0 !important;
+  padding: 9px 10px;
+  color: #ffc1c6;
+  font-size: 11px;
+  line-height: 1.4;
+  background: #3b1c23;
+  border: 1px solid #984b56;
+  border-radius: 6px;
+}
+
+.connection-center__error svg {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+}
+
+.connection-center__section {
+  padding: 16px;
+  border-bottom: 1px solid #24414c;
+}
+
+.connection-center__section:last-child {
+  border-bottom: 0;
+}
+
+.connection-center__section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.connection-center__section-heading svg {
+  width: 15px;
+  height: 15px;
+  color: #68d9eb;
+}
+
+.connection-center__identity {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+}
+
+.connection-center__avatar {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  color: #07202a;
+  background: #75dced;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.connection-center__identity-copy {
+  min-width: 0;
+}
+
+.connection-center__identity-copy > strong,
+.connection-center__identity-copy > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-center__identity-copy > strong {
+  color: #f1f9fb;
+  font-size: 12px;
+}
+
+.connection-center__identity-copy > span {
+  margin-top: 2px;
+  color: #9eb7c0;
+  font-size: 10px;
+}
+
+.connection-center__roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.connection-center__roles span {
+  padding: 2px 5px;
+  color: #bcebf3;
+  background: #123642;
+  border: 1px solid #315967;
+  border-radius: 3px;
+  font-size: 9px;
+}
+
+.connection-center__secondary-button {
+  padding: 0 10px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.connection-center__login {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+}
+
+.connection-center__login label,
+.connection-center__select-label {
+  color: #a9c1c9;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.connection-center__login label:nth-of-type(2) {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.connection-center__login input,
+.connection-center select {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  color: #eff9fb;
+  background: #071b23;
+  border: 1px solid #365966;
+  border-radius: 5px;
+}
+
+.connection-center__login input:nth-of-type(2) {
+  grid-column: 2;
+}
+
+.connection-center__primary-button {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  color: #06232c;
+  background: #67d9eb;
+  border-color: #8ce8f6;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.connection-center__primary-button:hover:not(:disabled) {
+  background: #91ebf8;
+}
+
+.connection-center__login .connection-center__hint {
+  grid-column: 1 / -1;
+}
+
+.connection-center__select-label {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.connection-center select {
+  appearance: auto;
+}
+
+.connection-center__hint {
+  margin-top: 7px !important;
+}
+
+.connection-center__versions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid #2b4a56;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.connection-center__versions > div {
+  padding: 9px 10px;
+  border-right: 1px solid #2b4a56;
+  border-bottom: 1px solid #2b4a56;
+}
+
+.connection-center__versions > div:nth-child(2n) {
+  border-right: 0;
+}
+
+.connection-center__versions > div:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.connection-center__versions dt {
+  color: #8faab4;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.connection-center__versions dd {
+  margin-top: 3px;
+  color: #f0f8fa;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+}
+
+.connection-center__compatibility {
+  margin-top: 9px !important;
+  padding-left: 10px;
+  color: #adc4cb;
+  border-left: 3px solid #59737d;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.connection-center__compatibility.is-compatible {
+  color: #a7ddc8;
+  border-left-color: #49b889;
+}
+
+.connection-center__compatibility.is-incompatible {
+  color: #ffb5bb;
+  border-left-color: #e66e79;
+}
+
+.connection-center__capabilities {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connection-center__capabilities li {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 9px;
+  background: #0a2028;
+  border: 1px solid #294955;
+  border-radius: 6px;
+}
+
+.connection-center__capability-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 2px 5px;
+  border: 1px solid #6b7e85;
+  border-radius: 3px;
+  color: #b7c6cb !important;
+  font-size: 8px !important;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.connection-center__capability-state.is-available {
+  color: #a8ebcf !important;
+  background: #11372d;
+  border-color: #3f9375;
+}
+
+.connection-center__capability-state.is-unavailable {
+  color: #ffc1c6 !important;
+  background: #381e25;
+  border-color: #944b55;
+}
+
+.connection-center__capabilities strong,
+.connection-center__capabilities span,
+.connection-center__capabilities small {
+  display: block;
+}
+
+.connection-center__capabilities strong {
+  margin-bottom: 2px;
+  color: #eff9fb;
+  font-size: 11px;
+}
+
+.connection-center__capabilities small {
+  margin-top: 3px;
+  color: #829ca6;
+}
+
+.connection-center__empty {
+  padding: 12px;
+  background: #0a2028;
+  border: 1px dashed #395966;
+  border-radius: 6px;
+}
+
+@keyframes connection-center-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.connection-center .is-spinning {
+  animation: connection-center-spin 0.8s linear infinite;
+}
+
+@media (max-width: 600px) {
+  .connection-center {
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .connection-center__login {
+    grid-template-columns: 1fr;
+  }
+
+  .connection-center__login label:nth-of-type(2),
+  .connection-center__login input:nth-of-type(2) {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .connection-center__identity {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .connection-center__secondary-button {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connection-center .is-spinning {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .connection-center,
+  .connection-center__state,
+  .connection-center__section,
+  .connection-center__capabilities li {
+    border-color: CanvasText;
+  }
+}

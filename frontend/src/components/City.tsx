@@ -1,11 +1,13 @@
 import { useCallback, useState } from "react";
 import { Footprints, Map, Pause, Play, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { useEngineeringData } from "../api/live";
 import { useUI } from "../store";
 import { CityHomeChrome, type CityHomeLayer, type CityViewMode } from "./CityHomeChrome";
 import { CityMapHud } from "./CityMapHud";
 import { ThreeCity, type CityLabelPositions } from "./ThreeCity";
 
 export function City() {
+  const engineering = useEngineeringData();
   const [viewResetKey, setViewResetKey] = useState(0);
   const [activeLayer, setActiveLayer] = useState<CityHomeLayer>("overview");
   const [viewMode, setViewMode] = useState<CityViewMode>("overview");
@@ -15,6 +17,33 @@ export function City() {
   }, []);
   const { selectedBuilding, selectBuilding, paused, togglePause, reducedMotion, setReducedMotion, speed, setSpeed, zoom, setZoom } = useUI();
   const isWalking = viewMode === "first-person";
+  const liveActivityAgents = engineering.dataMode === "unavailable"
+    ? []
+    : engineering.agents.map((agent) => ({
+        id: agent.id,
+        name: agent.display_name,
+        state: agent.status === "working" || agent.status === "walking"
+          ? "active" as const
+          : agent.status === "waiting" || agent.status === "blocked"
+            ? "waiting" as const
+            : "complete" as const,
+        task: agent.current_activity || agent.location || "Ready"
+      }));
+  const activeReviewCount = liveActivityAgents?.filter((agent) => agent.state === "active").length ?? 3;
+  const citySummary = {
+    activeReviews: activeReviewCount,
+    openFindings: engineering.dataMode === "demo"
+      ? engineering.project?.counts.findings_open || 0
+      : engineering.findings.filter((finding) => finding.status === "open").length,
+    pendingApprovals: engineering.dataMode === "demo"
+      ? engineering.project?.counts.approvals_pending || 0
+      : engineering.approvals.filter((approval) => approval.status === "pending").length,
+    releaseReadiness: engineering.dataMode === "demo"
+      ? 68
+      : engineering.project?.status === "completed" ? 100 : null
+  };
+  const projectReference = engineering.project?.client_reference || "NO PROJECT";
+  const projectName = engineering.project?.name || "Local project data unavailable";
   const resetCityView = () => {
     setZoom(1);
     selectBuilding(null);
@@ -33,8 +62,8 @@ export function City() {
     >
       <div className="city-toolbar">
         <div className="city-command-identity">
-          <span className="eyebrow">PRJ-0241 · ENGINEERING WORLD</span>
-          <h2>Line 4 operations city</h2>
+          <span className="eyebrow">{projectReference} · ENGINEERING WORLD</span>
+          <h2>{projectName}</h2>
         </div>
         {isWalking ? (
           <button className="city-walk-exit" type="button" onClick={() => changeViewMode("overview")}>
@@ -65,9 +94,9 @@ export function City() {
           </div>
         )}
         <div className="city-command-demo" aria-label="Synthetic demonstration status">
-          <span>Demo</span>
+          <span>{engineering.dataMode === "live" ? "Local" : engineering.dataMode === "demo" ? "Demo" : "Offline"}</span>
           <i aria-hidden="true" />
-          <b>{paused ? "Workflow paused" : "3 reviews active"}</b>
+          <b>{paused ? "Workflow paused" : `${activeReviewCount} reviews active`}</b>
         </div>
         <div className="tool-row">
           <button className="icon-button" onClick={togglePause} aria-label={paused ? "Play timeline" : "Pause timeline"}>{paused ? <Play /> : <Pause />}</button>
@@ -102,13 +131,16 @@ export function City() {
           zoom={zoom}
           resetKey={viewResetKey}
           viewMode={viewMode}
+          showWorkflowAgents={engineering.dataMode === "demo"}
           onLabelPositionsChange={updateLabelPositions}
         />
         {!isWalking && (
           <CityMapHud
             selectedBuilding={selectedBuilding}
             selectBuilding={selectBuilding}
-            projectLabel="PRJ-0241 · Line 4 Cartoner Upgrade"
+            projectLabel={`${projectReference} · ${projectName}`}
+            dataMode={engineering.dataMode}
+            summary={citySummary}
             labelPositions={labelPositions}
           />
         )}
@@ -120,6 +152,8 @@ export function City() {
           onLocate={resetCityView}
           viewMode={viewMode}
           paused={paused}
+          dataMode={engineering.dataMode}
+          activityAgents={liveActivityAgents}
         />
       </div>
       <div className="timeline">

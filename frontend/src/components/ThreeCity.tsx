@@ -12,6 +12,7 @@ export interface ThreeCityProps {
   zoom: number;
   resetKey: number;
   viewMode: "overview" | "first-person";
+  showWorkflowAgents: boolean;
   onLabelPositionsChange?: (positions: CityLabelPositions) => void;
 }
 
@@ -2914,6 +2915,7 @@ export function ThreeCity({
   zoom,
   resetKey,
   viewMode,
+  showWorkflowAgents,
   onLabelPositionsChange
 }: ThreeCityProps) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -2927,6 +2929,7 @@ export function ThreeCity({
   const selectRef = useRef(selectBuilding);
   const animationRef = useRef({ paused, reducedMotion, speed });
   const viewModeRef = useRef(viewMode);
+  const showWorkflowAgentsRef = useRef(showWorkflowAgents);
   const labelPositionsChangeRef = useRef(onLabelPositionsChange);
   const pressedKeysRef = useRef(new Set<string>());
   const firstPersonLookRef = useRef<FirstPersonLook>({ yaw: 0, pitch: 0 });
@@ -2937,6 +2940,7 @@ export function ThreeCity({
   selectRef.current = selectBuilding;
   animationRef.current = { paused, reducedMotion, speed };
   viewModeRef.current = viewMode;
+  showWorkflowAgentsRef.current = showWorkflowAgents;
   labelPositionsChangeRef.current = onLabelPositionsChange;
 
   useEffect(() => {
@@ -3314,6 +3318,9 @@ export function ThreeCity({
             firstPersonCamera.position.y = FIRST_PERSON_START[1];
           }
         }
+        agentMarkers.forEach((marker) => {
+          marker.root.visible = showWorkflowAgentsRef.current;
+        });
         if (!state.paused && !state.reducedMotion) {
           const lifeDelta = delta * Math.max(0.1, state.speed);
           animationElapsed += lifeDelta;
@@ -3512,7 +3519,7 @@ export function ThreeCity({
       >
         {buildings.map((building) => {
           const selected = selectedBuilding === building.id;
-          const occupancy = occupancyFor(building.id);
+          const occupancy = showWorkflowAgents ? occupancyFor(building.id) : 0;
           return (
             <button
               key={building.id}

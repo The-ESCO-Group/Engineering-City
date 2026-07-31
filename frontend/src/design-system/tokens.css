@@ -1,0 +1,45 @@
+:root {
+  --esco-bg-canvas: #07131b;
+  --esco-bg-shell: #081722;
+  --esco-bg-panel: #0c202c;
+  --esco-bg-elevated: #102a37;
+  --esco-line: rgb(113 214 228 / 20%);
+  --esco-line-strong: rgb(113 214 228 / 38%);
+  --esco-text: #edf9fa;
+  --esco-text-muted: #88a7ae;
+  --esco-cyan: #61e3ee;
+  --esco-orange: #ff7a1a;
+  --esco-purple: #b36cff;
+  --esco-green: #46d38d;
+  --esco-warning: #ffb84c;
+  --esco-danger: #ff6464;
+  --esco-radius-sm: 3px;
+  --esco-radius-md: 7px;
+  --esco-focus: 0 0 0 2px #061017, 0 0 0 4px var(--esco-cyan);
+  --esco-font-ui: Inter, "Segoe UI", sans-serif;
+  --esco-font-mono: "Cascadia Code", "Segoe UI Mono", monospace;
+}
+
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--esco-focus);
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --esco-line: rgb(213 250 255 / 58%);
+    --esco-line-strong: rgb(231 252 255 / 88%);
+    --esco-text-muted: #c5d8dc;
+  }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --esco-line: CanvasText;
+    --esco-line-strong: CanvasText;
+    --esco-text: CanvasText;
+    --esco-text-muted: CanvasText;
+    --esco-cyan: Highlight;
+    --esco-orange: Highlight;
+  }
+}

@@ -21,7 +21,7 @@ export interface CityOperationsSummary {
   activeReviews: number;
   openFindings: number;
   pendingApprovals: number;
-  releaseReadiness: number;
+  releaseReadiness: number | null;
 }
 
 export interface CityMapHudProps {
@@ -29,6 +29,7 @@ export interface CityMapHudProps {
   selectBuilding: (id: BuildingId) => void;
   projectLabel?: string;
   summary?: Partial<CityOperationsSummary>;
+  dataMode?: "demo" | "live" | "unavailable";
   className?: string;
   labelPositions?: Record<string, { deltaX: number; deltaY: number; visible: boolean }>;
 }
@@ -69,15 +70,30 @@ const defaultSummary: CityOperationsSummary = {
   releaseReadiness: 68,
 };
 
+const districtPurposes: Record<BuildingId, string> = {
+  intake: "Project intake",
+  automation: "PLC and logic",
+  hmi: "HMI engineering",
+  electrical: "Devices and I/O",
+  qa: "Independent review",
+  documentation: "Reports and records",
+  approval: "Named human decisions",
+  release: "Release logistics"
+};
+
 export function CityMapHud({
   selectedBuilding,
   selectBuilding,
   projectLabel = "Line 4 operations city",
   summary,
+  dataMode = "demo",
   className,
   labelPositions,
 }: CityMapHudProps) {
-  const operations = { ...defaultSummary, ...summary };
+  const operations = dataMode === "demo"
+    ? { ...defaultSummary, ...summary }
+    : { activeReviews: 0, openFindings: 0, pendingApprovals: 0, releaseReadiness: null, ...summary };
+  const hasProjectData = dataMode !== "unavailable";
   const rootClassName = ["city-map-hud", className].filter(Boolean).join(" ");
 
   return (
@@ -85,6 +101,11 @@ export function CityMapHud({
       <nav className="city-map-hud__districts" aria-label="Engineering workflow districts">
         {districts.map((district) => {
           const selected = selectedBuilding === district.id;
+          const detail = dataMode === "demo"
+            ? district.detail
+            : dataMode === "live"
+              ? districtPurposes[district.id]
+              : "Project data unavailable";
           const projection = labelPositions?.[district.id];
           const position = {
             "--city-map-hud-x": projection
@@ -101,12 +122,12 @@ export function CityMapHud({
               type="button"
               className={`city-map-hud__district${selected ? " is-selected" : ""}${projection && !projection.visible ? " is-offscreen" : ""}`}
               style={position}
-              aria-label={`${district.label}: ${district.detail}`}
+              aria-label={`${district.label}: ${detail}`}
               aria-pressed={selected}
               onClick={() => selectBuilding(district.id)}
             >
               <span className="city-map-hud__district-name">{district.label}</span>
-              <span className="city-map-hud__district-detail">{district.detail}</span>
+              <span className="city-map-hud__district-detail">{detail}</span>
             </button>
           );
         })}
@@ -137,38 +158,39 @@ export function CityMapHud({
       <aside className="city-map-hud__operations" aria-label="City operations summary">
         <header>
           <span>City overview</span>
-          <small>Demo</small>
+          <small>{dataMode === "demo" ? "Demo" : dataMode === "live" ? "Local" : "Offline"}</small>
         </header>
         <p title={projectLabel}>{projectLabel}</p>
         <dl>
           <div>
             <dt>Active reviews</dt>
-            <dd>{operations.activeReviews}</dd>
+            <dd>{hasProjectData ? operations.activeReviews : "—"}</dd>
           </div>
           <div className="is-alert">
             <dt>Open findings</dt>
-            <dd>{operations.openFindings}</dd>
+            <dd>{hasProjectData ? operations.openFindings : "—"}</dd>
           </div>
           <div>
             <dt>Pending approvals</dt>
-            <dd>{operations.pendingApprovals}</dd>
+            <dd>{hasProjectData ? operations.pendingApprovals : "—"}</dd>
           </div>
           <div>
             <dt>Release readiness</dt>
-            <dd>{operations.releaseReadiness}%</dd>
+            <dd>{operations.releaseReadiness === null ? "Not reported" : `${operations.releaseReadiness}%`}</dd>
           </div>
         </dl>
         <div
           className="city-map-hud__readiness"
           role="img"
-          aria-label={`Release readiness ${operations.releaseReadiness} percent`}
+          aria-label={operations.releaseReadiness === null ? "Release readiness not reported" : `Release readiness ${operations.releaseReadiness} percent`}
         >
-          <span style={{ width: `${Math.max(0, Math.min(100, operations.releaseReadiness))}%` }} />
+          <span style={{ width: `${operations.releaseReadiness === null ? 0 : Math.max(0, Math.min(100, operations.releaseReadiness))}%` }} />
         </div>
         <button
           type="button"
           className="city-map-hud__action"
           onClick={() => selectBuilding("qa")}
+          disabled={!hasProjectData || operations.openFindings === 0}
           aria-label="View active alerts in QA Campus"
         >
           Review alerts

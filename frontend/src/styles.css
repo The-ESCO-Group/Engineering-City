@@ -135,3 +135,10 @@
   .city-home .city-command-identity{display:none}
   .city-home .city-toolbar{grid-template-columns:1fr auto auto}
 }
+
+/* Product shell connection and account affordances. */
+.topbar .user{display:grid;place-items:center;text-decoration:none}
+.sidebar-logout{display:grid;width:30px;height:30px;padding:0;place-items:center;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer}
+.sidebar-logout:hover{border-color:var(--line);color:#fff}
+.settings-page{align-items:stretch;background:linear-gradient(160deg,#0b1d26,#0b1015 60%)}
+.settings-page>.connection-center{margin:0 auto}

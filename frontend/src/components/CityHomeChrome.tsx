@@ -38,6 +38,13 @@ export interface CityHomeChromeProps {
   onZoomOut?: () => void;
   viewMode?: CityViewMode;
   paused?: boolean;
+  dataMode?: "live" | "demo" | "unavailable";
+  activityAgents?: Array<{
+    id: string;
+    name: string;
+    state: "active" | "waiting" | "complete";
+    task: string;
+  }>;
 }
 
 interface MapControlProps {
@@ -63,14 +70,15 @@ function MapControl({ label, onClick, icon: Icon }: MapControlProps) {
 function CityMinimap({
   onLocate,
   onZoomIn,
-  onZoomOut
-}: Pick<CityHomeChromeProps, "onLocate" | "onZoomIn" | "onZoomOut">) {
+  onZoomOut,
+  dataMode = "demo"
+}: Pick<CityHomeChromeProps, "onLocate" | "onZoomIn" | "onZoomOut" | "dataMode">) {
   return (
     <aside className="city-home-chrome__minimap" aria-label="Engineering city minimap">
       <div className="city-home-chrome__minimap-panel">
         <div className="city-home-chrome__minimap-header" aria-hidden="true">
           <span>Campus vector</span>
-          <span className="city-home-chrome__live"><i /> Live</span>
+          <span className="city-home-chrome__live"><i /> {dataMode === "unavailable" ? "Offline" : dataMode === "demo" ? "Demo" : "Live"}</span>
         </div>
         <svg
           className="city-home-chrome__minimap-svg"
@@ -123,16 +131,23 @@ function CityMinimap({
   );
 }
 
-function CityActivityTicker({ paused = false }: { paused?: boolean }) {
-  const activeAgents = agents.filter((agent) => agent.state === "active");
+function CityActivityTicker({
+  paused = false,
+  dataMode = "demo",
+  activityAgents = agents
+}: Pick<CityHomeChromeProps, "paused" | "dataMode" | "activityAgents">) {
+  const activeAgents = activityAgents.filter((agent) => agent.state === "active");
 
   return (
-    <section className="city-home-chrome__activity" aria-label="Synthetic demo workflow activity">
+    <section
+      className="city-home-chrome__activity"
+      aria-label={dataMode === "live" ? "Live workflow activity" : dataMode === "demo" ? "Synthetic demo workflow activity" : "Workflow activity unavailable"}
+    >
       <header>
-        <span className="city-home-chrome__demo-tag">Demo</span>
+        <span className="city-home-chrome__demo-tag">{dataMode === "live" ? "Local" : dataMode === "demo" ? "Demo" : "Offline"}</span>
         <span className={`city-home-chrome__activity-state${paused ? " is-paused" : ""}`}>
           <i aria-hidden="true" />
-          {paused ? "Paused" : "Live activity"}
+          {paused ? "Paused" : dataMode === "unavailable" ? "Unavailable" : "Live activity"}
         </span>
         <b>{activeAgents.length} active</b>
       </header>
@@ -159,7 +174,9 @@ export function CityHomeChrome({
   onZoomIn,
   onZoomOut,
   viewMode = "overview",
-  paused = false
+  paused = false,
+  dataMode = "demo",
+  activityAgents = agents
 }: CityHomeChromeProps) {
   const isWalking = viewMode === "first-person";
   const rootClassName = ["city-home-chrome", isWalking && "is-walking", className].filter(Boolean).join(" ");
@@ -168,8 +185,12 @@ export function CityHomeChrome({
     <div className={rootClassName}>
       {!isWalking && (
         <div className="city-home-chrome__bottom-console">
-          <CityMinimap onLocate={onLocate} onZoomIn={onZoomIn} onZoomOut={onZoomOut} />
-          <CityActivityTicker paused={paused} />
+          <CityMinimap onLocate={onLocate} onZoomIn={onZoomIn} onZoomOut={onZoomOut} dataMode={dataMode} />
+          <CityActivityTicker
+            paused={paused}
+            dataMode={dataMode}
+            activityAgents={activityAgents}
+          />
           <nav className="city-home-chrome__layer-dock" aria-label="Engineering city map layers">
             {LAYERS.map(({ id, label, icon: Icon }) => {
               const selected = id === activeLayer;
