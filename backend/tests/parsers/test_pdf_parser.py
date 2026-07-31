@@ -27,7 +27,15 @@ from app.core.config import Settings
 from app.core.enums import AnchorType, DocumentRole, EvidenceKind, FileKind
 from app.core.errors import ParserError
 from app.models.evidence import MAX_EXCERPT_CHARS
-from app.parsers.base import ParseContext, Parser, ParseResult, WarningCode
+from app.parsers.base import (
+    MAX_ANCHOR_KEY_CHARS,
+    MAX_DISPLAY_LOCATION_CHARS,
+    MAX_SOURCE_LABEL_CHARS,
+    ParseContext,
+    Parser,
+    ParseResult,
+    WarningCode,
+)
 from app.parsers.pdf_parser import (
     MAX_TEXT_RANGE_ANCHORS,
     MIN_PAGE_CHARACTERS,
@@ -566,11 +574,107 @@ def test_line_citations_are_capped_without_truncating_the_page_text(
     path = write_pdf(tmp_path, "Very_Long.pdf", [lines])
 
     result = parse(path, settings)
+    truncated = [w for w in result.warnings if w.code == WarningCode.TRUNCATED]
 
     assert len(result.content["pages"][0]["lines"]) == len(lines)
     assert result.summary["text_range_anchor_count"] == MAX_TEXT_RANGE_ANCHORS
     assert "page:1" in result.anchors_by_key
     assert str(MAX_TEXT_RANGE_ANCHORS) in warning_with(result, WarningCode.TRUNCATED)
+    assert [w.location for w in truncated] == ["page 1"]
+    assert "stop part-way down the page" in truncated[0].message
+    assert [item.kind for item in result.unsupported] == ["line_citations_truncated"]
+    assert result.unsupported[0].location == "page 1"
+
+
+def test_every_page_the_citation_cap_reaches_is_named_not_only_the_first(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """A whole page with no line-level citation must not hide behind "page 3".
+
+    Five pages of 400 lines exhaust the 1,000-range cap part-way down page 3,
+    leaving pages 4 and 5 with no character-range citation whatsoever. A warning
+    naming only the page the cap fell on would tell a reader that page 3 was the
+    only page affected.
+    """
+    per_page = 400
+    pages = [
+        [f"Page {number} line {index:03d} of the generated record" for index in range(per_page)]
+        for number in range(1, 6)
+    ]
+    path = write_pdf(tmp_path, "Five_Long_Pages.pdf", pages)
+
+    result = parse(path, settings)
+    ranges_per_page = {
+        number: sum(
+            1
+            for anchor in result.anchors
+            if anchor.anchor_type is AnchorType.PDF_TEXT_RANGE
+            and anchor.structured_location["page"] == number
+        )
+        for number in range(1, 6)
+    }
+    truncated = [w for w in result.warnings if w.code == WarningCode.TRUNCATED]
+
+    assert result.summary["text_range_anchor_count"] == MAX_TEXT_RANGE_ANCHORS
+    assert ranges_per_page == {1: 400, 2: 400, 3: 200, 4: 0, 5: 0}
+    assert [len(page["lines"]) for page in result.content["pages"]] == [per_page] * 5
+    assert all(f"page:{number}" in result.anchors_by_key for number in range(1, 6))
+
+    assert len(truncated) == 1
+    assert truncated[0].location == "pages 3-5"
+    assert "Citations for page 3 stop part-way down the page." in truncated[0].message
+    assert "No line on pages 4-5 has a character-range citation at all." in truncated[0].message
+    assert [item.kind for item in result.unsupported] == ["line_citations_truncated"]
+    assert result.unsupported[0].location == "pages 3-5"
+
+
+def test_a_page_of_only_whitespace_is_recorded_as_a_page_that_yielded_nothing(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """Whitespace is not content: counting it contradicts ``has_text_layer``.
+
+    The page below really does extract as ``'   \\n   '`` (asserted directly
+    against pypdf, so this test cannot pass vacuously). Recorded as-is it gave a
+    document with ``has_text_layer`` False and ``total_characters`` 7, and two
+    blank ``lines`` entries on a page the contract says yielded nothing.
+    """
+    path = write_pdf(tmp_path, "Whitespace_Only.pdf", [["   ", "   "]])
+
+    assert PdfReader(str(path)).pages[0].extract_text() == "   \n   "
+
+    result = parse(path, settings)
+    page = result.content["pages"][0]
+
+    assert page["text"] == ""
+    assert page["character_count"] == 0
+    assert page["lines"] == []
+    assert page["has_text_layer"] is False
+    assert result.content["document"]["total_characters"] == 0
+    assert result.content["document"]["has_text_layer"] is False
+    assert result.summary["total_characters"] == 0
+    assert result.summary["text_line_count"] == 0
+    assert result.summary["pages_without_text_layer"] == 1
+
+    assert WarningCode.NO_TEXT_LAYER in codes(result)
+    assert [item.kind for item in result.unsupported] == ["page_without_text_layer"]
+    assert result.anchors_by_key["page:1"].evidence_kind is EvidenceKind.UNSUPPORTED_CONTENT
+    assert result.anchors_by_key["page:1"].excerpt == ""
+
+
+def test_a_long_source_label_stays_within_the_columns_it_is_stored_in(
+    settings: Settings,
+) -> None:
+    """Bounded in ``AnchorDraft.__post_init__``; asserted here on a PDF anchor."""
+    member = "Line3_Project_Package/" + "deeply_nested_folder/" * 20 + "Testing_Notes.pdf"
+
+    result = parse(TESTING_NOTES, settings, archive_member_path=member)
+
+    assert len(member) > 400
+    for anchor in result.anchors:
+        assert len(anchor.source_label) <= MAX_SOURCE_LABEL_CHARS
+        assert len(anchor.display_location) <= MAX_DISPLAY_LOCATION_CHARS
+        assert len(anchor.key) <= MAX_ANCHOR_KEY_CHARS
+    assert result.anchors_by_key["page:1"].source_label.startswith("Testing_Notes.pdf (")
 
 
 def test_a_page_that_cannot_be_decoded_is_recorded_rather_than_dropped(

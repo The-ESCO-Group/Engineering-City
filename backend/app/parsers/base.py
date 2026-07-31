@@ -34,6 +34,12 @@ from app.core.config import Settings
 from app.core.enums import AnchorType, DocumentRole, EvidenceKind, FileKind
 from app.models.evidence import MAX_EXCERPT_CHARS
 
+#: Bounds matching the columns in :mod:`app.models.evidence`. Kept here because
+#: this is where every anchor is built, so no parser has to remember them.
+MAX_SOURCE_LABEL_CHARS = 255
+MAX_DISPLAY_LOCATION_CHARS = 512
+MAX_ANCHOR_KEY_CHARS = 400
+
 
 class WarningCode:
     """Stable warning codes. Clients and reports branch on these."""
@@ -118,6 +124,16 @@ class AnchorDraft:
         # record via its evidence.
         if len(self.excerpt) > MAX_EXCERPT_CHARS:
             self.excerpt = self.excerpt[: MAX_EXCERPT_CHARS - 3] + "..."
+
+        # Bounded against the columns these are stored in, here rather than in
+        # each parser. A long filename or a deep archive member path composes a
+        # label and a location that overflow `String(255)` / `String(512)`;
+        # SQLite silently stores the excess, so the demo works and a PostgreSQL
+        # deployment raises on the same upload. Truncating at the source keeps
+        # the two backends behaving the same.
+        self.source_label = truncate(self.source_label, MAX_SOURCE_LABEL_CHARS)
+        self.display_location = truncate(self.display_location, MAX_DISPLAY_LOCATION_CHARS)
+        self.key = truncate(self.key, MAX_ANCHOR_KEY_CHARS)
 
     @property
     def content_hash(self) -> str:

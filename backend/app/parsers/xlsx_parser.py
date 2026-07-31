@@ -24,6 +24,17 @@ a cell a formula is Excel's own type for it, never the look of its text: a
 string cell that happens to begin with ``=`` is a string, and recording it as an
 unevaluated formula would turn a documented value into a null.
 
+A cell Excel marks as an error (``data_type "e"``: ``#REF!``, ``#DIV/0!``,
+``#N/A``) is Excel's own report that a calculation failed. Its marker text is
+kept as the cell's value — it is what the file stores, and blanking it would
+make a broken cell read like a field the schedule deliberately left empty — but
+the same text typed into a cell by hand is an ordinary string, and a consumer
+reading ``records`` cannot tell those two apart from the value alone. So each
+record carries an ``errors`` map, keyed like ``values``, naming the columns
+whose cell Excel flagged, and every such cell is named in a warning. Which
+error it is, and what the failed formula was going to produce, are not
+inferred: the marker is recorded, not read.
+
 Nothing here interprets the sheet. A header called "Trip Condition" is recorded
 as a string; whether ``AIR_PRESS_PSI < 60.0`` agrees with the logic is a
 question for an agent, not for a parser.
@@ -46,7 +57,8 @@ Content shape (``ParseResult.content``)::
                         "header_row", "header_cells": [str], "headers": [str],
                         "record_keys": [str], "first_data_row", "last_data_row",
                         "column_count",
-                        "records": [{"row", "ref", "values", "formulas"}]}]
+                        "records": [{"row", "ref", "values", "formulas",
+                                     "errors"}]}]
 
     cell              {"ref", "column", "column_index", "value", "formula",
                        "data_type"}
@@ -142,6 +154,9 @@ _ZIP_SIGNATURE = b"PK"
 
 #: Excel's own type for a formula cell. Nothing else makes a cell a formula.
 _TYPE_FORMULA = "f"
+#: Excel's own type for an error cell (``#REF!``, ``#DIV/0!``, ``#N/A``, ...).
+#: As with formulas, the type is what decides: a hand-typed "#REF!" is a string.
+_TYPE_ERROR = "e"
 #: openpyxl hands back a wrapper rather than a string for an array or data-table
 #: formula; both are still formula cells and carry ``data_type == "f"``.
 _FORMULA_WRAPPERS = (ArrayFormula, DataTableFormula)
@@ -170,6 +185,11 @@ class _Cell:
         if self.formula is not None:
             return self.formula
         return "" if self.value is None else str(self.value)
+
+    @property
+    def is_error(self) -> bool:
+        """Whether Excel typed this cell as an error, rather than it looking like one."""
+        return self.data_type == _TYPE_ERROR
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -216,6 +236,8 @@ class _SheetScan:
     table_shape: dict[str, tuple[int, int]]
     rows: tuple[_Row, ...]
     formula_refs: tuple[str, ...]
+    #: ``(ref, marker text)`` for every cell Excel typed as an error.
+    error_refs: tuple[tuple[str, str], ...]
     shortened_refs: tuple[str, ...]
     #: ``(ref, python type name)`` for values whose type was not recognised.
     unrecognised_values: tuple[tuple[str, str], ...]
@@ -443,6 +465,7 @@ def _scan_sheet(sheet: Any) -> _SheetScan:
     """Read one worksheet into plain data, applying the row and column bounds."""
     rows: list[_Row] = []
     formula_refs: list[str] = []
+    error_refs: list[tuple[str, str]] = []
     shortened_refs: list[str] = []
     unrecognised: list[tuple[str, str]] = []
     comments: list[tuple[str, str, str]] = []
@@ -476,6 +499,8 @@ def _scan_sheet(sheet: Any) -> _SheetScan:
             cells.append(cell)
             if cell.formula is not None:
                 formula_refs.append(cell.ref)
+            if cell.is_error:
+                error_refs.append((cell.ref, cell.text))
             if note == "__shortened__":
                 shortened_refs.append(cell.ref)
             elif note is not None:
@@ -508,6 +533,7 @@ def _scan_sheet(sheet: Any) -> _SheetScan:
         table_shape=table_shape,
         rows=tuple(rows),
         formula_refs=tuple(formula_refs),
+        error_refs=tuple(error_refs),
         shortened_refs=tuple(shortened_refs),
         unrecognised_values=tuple(unrecognised),
         row_limit_reached=row_limit_reached,
@@ -671,7 +697,9 @@ class XlsxParser:
     #: 1.1.0 — anchors carry the table's ``detection``, heuristic headers and
     #: uncovered row blocks are disclosed, and a string beginning with ``=`` is
     #: no longer recorded as a formula.
-    version: str = "1.1.0"
+    #: 1.2.0 — a cell Excel typed as an error is named in a warning and listed in
+    #: the record's ``errors``, so it is no longer indistinguishable from text.
+    version: str = "1.2.0"
     handles: tuple[FileKind, ...] = (FileKind.XLSX,)
 
     def parse(self, context: ParseContext) -> ParseResult:
@@ -954,6 +982,17 @@ class XlsxParser:
                 f"not model; it was recorded as text.",
                 location=f"{scan.location}, cell {ref}",
             )
+        for ref, marker in scan.error_refs:
+            budget.warn(
+                WarningCode.STRUCTURE_UNRECOGNISED,
+                f"Cell {ref} is typed by Excel as an error cell and holds the marker "
+                f"'{truncate(marker, MAX_HEADER_CHARS_IN_MESSAGE)}'. That is Excel "
+                f"reporting a calculation that failed, not a value the workbook states, "
+                f"so the marker is recorded as the cell's value and the column is named "
+                f"under the record's 'errors'. What the cell was meant to hold is not "
+                f"established here.",
+                location=f"{scan.location}, cell {ref}",
+            )
         for ref in scan.formula_refs:
             budget.warn(
                 WarningCode.FORMULA_NOT_EVALUATED,
@@ -1179,11 +1218,17 @@ class XlsxParser:
             by_column = row.by_column
             values: dict[str, Any] = {}
             formulas: dict[str, str] = {}
+            errors: dict[str, str] = {}
             for key, column in zip(keys, columns, strict=True):
                 cell = by_column.get(column)
                 values[key] = None if cell is None else cell.value
                 if cell is not None and cell.formula is not None:
                     formulas[key] = cell.formula
+                if cell is not None and cell.is_error:
+                    # The marker stays in ``values`` — it is what the file holds —
+                    # and is repeated here so a reader of the record can tell it
+                    # from the same characters typed in as text.
+                    errors[key] = cell.text
             outside = [
                 cell.ref for cell in row.cells if cell.column < min_col or cell.column > max_col
             ]
@@ -1202,6 +1247,7 @@ class XlsxParser:
                     "ref": f"{first_letter}{number}:{last_letter}{number}",
                     "values": values,
                     "formulas": formulas,
+                    "errors": errors,
                 }
             )
 
@@ -1413,6 +1459,7 @@ class XlsxParser:
             "unread_sheet_names": list(workbook["unread_sheet_names"]),
             "populated_cell_count": sum(scan.populated_cell_count for scan in scans),
             "formula_cell_count": sum(len(scan.formula_refs) for scan in scans),
+            "error_cell_count": sum(len(scan.error_refs) for scan in scans),
             "merged_range_count": sum(len(scan.merged_ranges) for scan in scans),
             "hidden_row_count": sum(len(scan.hidden_rows) for scan in scans),
             "hidden_column_count": sum(len(scan.hidden_columns) for scan in scans),

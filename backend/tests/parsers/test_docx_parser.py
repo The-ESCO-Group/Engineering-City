@@ -29,14 +29,24 @@ import pytest
 from docx import Document
 from docx.document import Document as DocumentClass
 from docx.enum.style import WD_STYLE_TYPE
+from docx.oxml.document import CT_Document
 from docx.oxml.ns import qn
 from docx.table import Table
+from docx.text.paragraph import Paragraph
 
 from app.core.config import Settings
 from app.core.enums import AnchorType, DocumentRole, EvidenceKind, FileKind
 from app.core.errors import ParserError
 from app.parsers import docx_parser as docx_parser_module
-from app.parsers.base import AnchorDraft, ParseContext, Parser, ParseResult, WarningCode
+from app.parsers.base import (
+    MAX_DISPLAY_LOCATION_CHARS,
+    MAX_SOURCE_LABEL_CHARS,
+    AnchorDraft,
+    ParseContext,
+    Parser,
+    ParseResult,
+    WarningCode,
+)
 from app.parsers.docx_parser import DocxParser
 from app.parsers.registry import parser_for
 
@@ -160,7 +170,7 @@ def description(settings: Settings) -> ParseResult:
 def test_the_parser_declares_itself_for_docx_files() -> None:
     parser = DocxParser()
     assert parser.name == "docx"
-    assert parser.version == "1.1.0"
+    assert parser.version == "1.2.0"
     assert parser.handles == (FileKind.DOCX,)
     assert isinstance(parser, Parser)
 
@@ -172,7 +182,7 @@ def test_the_registry_resolves_docx_to_this_parser() -> None:
 def test_the_result_is_labelled_with_the_docx_artifact_kind(description: ParseResult) -> None:
     assert description.artifact_kind == FileKind.DOCX.value
     assert description.parser_name == "docx"
-    assert description.parser_version == "1.1.0"
+    assert description.parser_version == "1.2.0"
 
 
 def test_content_exposes_the_documented_top_level_shape(description: ParseResult) -> None:
@@ -318,6 +328,7 @@ def test_every_paragraph_records_the_documented_field_set(description: ParseResu
             "index",
             "text",
             "style",
+            "style_id",
             "heading_level",
             "list_level",
             "is_list_item",
@@ -378,6 +389,65 @@ def test_the_bullet_list_under_operating_modes_is_flagged_without_inventing_a_le
     assert [row["section_path"] for row in items] == [[TITLE, "2. Operating Modes"]] * 3
     assert [row["list_level"] for row in items] == [None, None, None]
     assert description.summary["list_item_count"] == 3
+
+
+def test_the_list_paragraph_style_on_its_own_is_not_read_as_list_membership(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """Word gives "List Paragraph" to any indented block, including plain prose.
+
+    Unlike "List Bullet", the style name is not evidence of anything: Word applies
+    it to block quotes and indented notes that carry no numbering at all. Calling
+    such a paragraph a list item invents structure the document never states, and
+    inflates ``list_item_count`` with it.
+    """
+    document = Document()
+    document.add_heading("1. Scope", level=1)
+    document.add_paragraph("This indented note is not a list.", style="List Paragraph")
+    result = parse_path(save(document, tmp_path / "list_paragraph.docx"), settings)
+
+    row = only_paragraph_containing(result, "indented note")
+    assert row["style"] == "List Paragraph"
+    assert row["is_list_item"] is False
+    assert row["list_level"] is None
+    assert result.summary["list_item_count"] == 0
+
+
+def test_a_list_paragraph_that_carries_numbering_is_still_a_list_item(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """A real numbered list must not lose its membership to the narrowing above."""
+    document = Document()
+    document.add_heading("1. Scope", level=1)
+    paragraph = document.add_paragraph("Stop CV101 and CV102.", style="List Paragraph")
+    paragraph._p.get_or_add_pPr().get_or_add_numPr().get_or_add_ilvl().val = 0
+    result = parse_path(save(document, tmp_path / "numbered_list_paragraph.docx"), settings)
+
+    row = only_paragraph_containing(result, "Stop CV101")
+    assert row["is_list_item"] is True
+    assert row["list_level"] == 0
+    assert result.summary["list_item_count"] == 1
+
+
+def test_a_numbering_level_that_is_not_a_number_is_reported_rather_than_dropped(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """A stated level that was discarded must not look like a level never stated."""
+    document = Document()
+    document.add_heading("1. Scope", level=1)
+    paragraph = document.add_paragraph("Stop CV101 and CV102.", style="List Bullet")
+    numPr = paragraph._p.get_or_add_pPr().get_or_add_numPr()
+    append_child(numPr, qn("w:ilvl"), {qn("w:val"): "two"})
+    result = parse_path(save(document, tmp_path / "bad_ilvl.docx"), settings)
+
+    row = only_paragraph_containing(result, "Stop CV101")
+    assert row["is_list_item"] is True
+    assert row["list_level"] is None
+
+    unrecognised = warnings_with(result, WarningCode.STRUCTURE_UNRECOGNISED)
+    assert len(unrecognised) == 1
+    assert "'two'" in unrecognised[0].message
+    assert unrecognised[0].location == "bad_ilvl.docx / paragraph 1"
 
 
 def test_an_explicit_numbering_level_is_recorded_when_the_paragraph_states_one(
@@ -537,6 +607,34 @@ def test_a_blank_header_cell_gets_a_positional_key_and_is_reported(
 # ---------------------------------------------------------------------------
 
 
+def test_a_heading_anchor_names_a_body_paragraph_index_and_the_section_above_it(
+    description: ParseResult,
+) -> None:
+    """ "heading 17" in a seven-heading document sends a reviewer counting to nothing.
+
+    The number always was the body-paragraph index — the same index space as the
+    ``paragraph N`` anchors — so the unit says so. The section segment names the
+    heading this heading sits *under*; using its own ``section_path`` made the
+    segment a repeat of the excerpt, which points at no place to navigate from.
+
+    The two locations are pinned literally against the committed fixture: 17 is
+    the seventh and last heading, and 7 headings is the whole document.
+    """
+    assert description.summary["heading_count"] == 7
+
+    last = description.anchors_by_key["heading:17"]
+    assert last.excerpt == SECTION_6
+    assert last.display_location == (
+        f"Functional_Description.docx / {TITLE} / heading at paragraph 17"
+    )
+    assert last.structured_location["paragraph_index"] == 17
+
+    root = description.anchors_by_key["heading:0"]
+    assert root.excerpt == TITLE
+    assert root.display_location == "Functional_Description.docx / heading at paragraph 0"
+    assert root.structured_location["path"] == []
+
+
 def test_every_anchor_carries_the_source_label_and_a_docx_anchor_type(
     description: ParseResult,
 ) -> None:
@@ -590,6 +688,37 @@ def test_an_archive_member_label_reaches_every_anchor(settings: Settings) -> Non
     label = "Functional_Description.docx (docs/Functional_Description.docx)"
     assert {anchor.source_label for anchor in result.anchors} == {label}
     assert result.anchors_by_key["paragraph:12"].display_location.startswith(label)
+
+
+def test_a_deep_archive_member_path_still_yields_a_bounded_label_and_location(
+    settings: Settings,
+) -> None:
+    """``AnchorDraft`` bounds these centrally; a docx anchor must not escape the bound.
+
+    ``source_label`` is stored in ``String(255)`` and ``display_location`` in
+    ``String(512)``. SQLite stores the excess silently, so an unbounded label
+    works in the demo and raises on PostgreSQL.
+    """
+    member = "/".join(["deeply_nested_folder"] * 20) + "/Functional_Description.docx"
+    context = ParseContext(
+        file_id=FILE_ID,
+        project_id=PROJECT_ID,
+        path=DESCRIPTION_PATH,
+        filename=DESCRIPTION_PATH.name,
+        file_kind=FileKind.DOCX,
+        document_role=DocumentRole.FUNCTIONAL_DESCRIPTION,
+        settings=settings,
+        archive_member_path=member,
+    )
+    assert len(context.source_label) > MAX_SOURCE_LABEL_CHARS
+
+    result = DocxParser().parse(context)
+
+    assert result.anchors
+    for anchor in result.anchors:
+        assert len(anchor.source_label) == MAX_SOURCE_LABEL_CHARS
+        assert anchor.source_label.endswith("...")
+        assert len(anchor.display_location) <= MAX_DISPLAY_LOCATION_CHARS
 
 
 def test_an_empty_paragraph_is_recorded_but_not_anchored(
@@ -1282,6 +1411,155 @@ def test_body_text_marked_outline_level_nine_is_not_promoted_to_a_heading(
 
     assert only_paragraph_containing(result, "Air pressure")["heading_level"] is None
     assert [heading["text"] for heading in result.content["headings"]] == ["1. Scope"]
+
+
+# ---------------------------------------------------------------------------
+# Styles the document names but the styles part does not define
+# ---------------------------------------------------------------------------
+
+
+def test_a_paragraph_style_the_document_does_not_define_is_disclosed_not_reported_as_normal(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """python-docx substitutes the default style for an id the styles part lacks.
+
+    ``get_by_id`` falls back to "Normal" rather than raising, so a paragraph whose
+    XML says ``w:pStyle w:val="ESCOHeading1"`` is recorded as being in the default
+    style — a positive statement about the document that the document does not
+    make, and the reason its heading level was never looked for. The record has to
+    carry the id that was asked for and say the substitution happened.
+    """
+    document = Document()
+    document.add_heading("1. Scope", level=1)
+    first = document.add_paragraph("Air pressure trips below 60 psi.")
+    second = document.add_paragraph("The jam detector stops CV101.")
+    for paragraph in (first, second):
+        append_child(paragraph._p.get_or_add_pPr(), qn("w:pStyle"), {qn("w:val"): "ESCOHeading1"})
+    result = parse_path(save(document, tmp_path / "undefined_style.docx"), settings)
+
+    row = only_paragraph_containing(result, "Air pressure")
+    assert row["style"] == "Normal"
+    assert row["style_id"] == "ESCOHeading1"
+    assert result.anchors_by_key["paragraph:1"].structured_location["style_id"] == "ESCOHeading1"
+
+    unrecognised = warnings_with(result, WarningCode.STRUCTURE_UNRECOGNISED)
+    # Reported once per distinct style, not once per paragraph carrying it.
+    assert len(unrecognised) == 1
+    assert "'ESCOHeading1'" in unrecognised[0].message
+    assert "'Normal'" in unrecognised[0].message
+    assert unrecognised[0].location == "undefined_style.docx / paragraph 1"
+
+
+def test_a_defined_style_is_not_reported_as_substituted(tmp_path: Path, settings: Settings) -> None:
+    """The disclosure above must stay silent for every style a document really has."""
+    document = Document()
+    document.add_heading("1. Scope", level=1)
+    document.add_paragraph("Air pressure trips below 60 psi.")
+    document.add_paragraph("Stop CV101 and CV102.", style="List Bullet")
+    result = parse_path(save(document, tmp_path / "defined_styles.docx"), settings)
+
+    assert result.warnings == []
+    assert [row["style_id"] for row in result.content["paragraphs"]] == [
+        "Heading1",
+        "",
+        "ListBullet",
+    ]
+
+
+def test_a_style_that_cannot_be_resolved_at_all_is_reported(
+    tmp_path: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A paragraph with no style name must not read as one in the default style.
+
+    Swallowing the failure also demotes every heading in that style to body text,
+    which reparents every paragraph after it.
+    """
+    document = Document()
+    document.add_heading("1. Scope", level=1)
+    path = save(document, tmp_path / "broken_styles.docx")
+
+    def explode(self: Any) -> Any:
+        raise KeyError("no style with id 'Heading1'")
+
+    monkeypatch.setattr(Paragraph, "style", property(explode))
+    result = parse_path(path, settings)
+
+    row = result.content["paragraphs"][0]
+    assert row["style"] == ""
+    assert row["style_id"] == "Heading1"
+    assert row["heading_level"] is None
+
+    unrecognised = warnings_with(result, WarningCode.STRUCTURE_UNRECOGNISED)
+    assert any("could not be resolved" in warning.message for warning in unrecognised)
+    assert any("KeyError" in warning.message for warning in unrecognised)
+
+
+# ---------------------------------------------------------------------------
+# When the inspection itself fails
+# ---------------------------------------------------------------------------
+
+
+def test_sections_that_cannot_be_listed_are_reported_not_silently_skipped(
+    tmp_path: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A disclosure that quietly fails to appear is worse than no disclosure.
+
+    Header and footer text is reported as unsupported rather than extracted; if
+    the section walk fails, the document simply looks like one with no page
+    furniture, and the "UNCONTROLLED COPY" stamp a reviewer looks for is gone from
+    the record with nothing standing where it was.
+    """
+    document = Document()
+    document.add_heading("1. Scope", level=1)
+    document.sections[0].header.paragraphs[0].text = "UNCONTROLLED COPY"
+    path = save(document, tmp_path / "furniture.docx")
+
+    def explode(self: Any) -> Any:
+        raise RuntimeError("the section properties chain is broken")
+
+    monkeypatch.setattr(DocumentClass, "sections", property(explode))
+    result = parse_path(path, settings)
+
+    assert unsupported_kinds(result) == []
+    unrecognised = warnings_with(result, WarningCode.STRUCTURE_UNRECOGNISED)
+    assert len(unrecognised) == 1
+    assert "no page header or footer was inspected" in unrecognised[0].message
+    assert "RuntimeError" in unrecognised[0].message
+    assert unrecognised[0].location == "furniture.docx"
+
+
+def test_body_children_that_cannot_be_enumerated_are_reported_not_silently_skipped(
+    tmp_path: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The unread-container check is the only guard against a false clean parse.
+
+    ``_check_unread_body_children`` is what stops a content control that swallowed
+    half the document from being invisible, so its own failure cannot be the one
+    thing that goes unsaid. The body is made readable for the walk and unreadable
+    for the check, which is the only ordering in which the failure is reachable.
+    """
+    document = Document()
+    document.add_heading("1. Scope", level=1)
+    path = save(document, tmp_path / "detached_body.docx")
+
+    original = CT_Document.body
+    reads = {"count": 0}
+
+    def flaky(self: Any) -> Any:
+        reads["count"] += 1
+        if reads["count"] > 1:
+            raise RuntimeError("the body element was detached")
+        return original.__get__(self, type(self))
+
+    monkeypatch.setattr(CT_Document, "body", property(flaky))
+    result = parse_path(path, settings)
+
+    assert [row["text"] for row in result.content["paragraphs"]] == ["1. Scope"]
+    unrecognised = warnings_with(result, WarningCode.STRUCTURE_UNRECOGNISED)
+    assert len(unrecognised) == 1
+    assert "could not be enumerated" in unrecognised[0].message
+    assert "possibly incomplete" in unrecognised[0].message
+    assert "RuntimeError" in unrecognised[0].message
 
 
 # ---------------------------------------------------------------------------

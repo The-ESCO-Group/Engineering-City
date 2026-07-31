@@ -850,7 +850,7 @@ class _Reader:
         where: str,
     ) -> list[int]:
         if _child(routine, "RLLContent") is None:
-            self._report_non_ladder(routine, routine_type, where)
+            self._report_absent_ladder_body(routine, routine_type, where)
             return []
         self._note_repeated_containers(routine, "RLLContent", where)
         elements = _items(routine, "RLLContent", "Rung")
@@ -958,19 +958,42 @@ class _Reader:
             return list(range(len(elements)))
         return list(parsed)
 
-    def _report_non_ladder(self, routine: Element, routine_type: str, where: str) -> None:
+    def _report_absent_ladder_body(self, routine: Element, routine_type: str, where: str) -> None:
+        """Report what stands in place of a ladder body, without inferring why.
+
+        A routine carrying an ``<STContent>`` body is a capability boundary: the
+        body is in the export and this parser does not read it. A routine with no
+        body element at all is not a boundary — there is nothing there to read,
+        and describing a routine the export declares as ``RLL`` as "not ladder
+        logic" would assert the opposite of what the file says. The two are
+        reported differently because they are different facts, and each message
+        names the declared ``Type`` and the body elements actually seen rather
+        than drawing a conclusion from either.
+        """
+        declared = routine_type or "unstated"
         bodies = [
             strip_namespace(child.tag)
             for child in routine
             if strip_namespace(child.tag).endswith("Content")
         ]
-        detail = (
-            f"Routine type '{routine_type or 'unstated'}' is not ladder logic "
-            f"({', '.join(bodies) or 'no recognised body element'}). Its logic is "
-            "not extracted, so this routine contributes no rungs, instructions or "
-            "tag references."
+        if not bodies:
+            self.result.warn(
+                WarningCode.STRUCTURE_UNRECOGNISED,
+                f"This routine declares Type '{declared}' but carries no body "
+                "element, so the export holds no logic for it to read. It "
+                "contributes no rungs, instructions or tag references.",
+                location=where,
+            )
+            return
+        found = ", ".join(f"<{body}>" for body in bodies)
+        self.result.mark_unsupported(
+            "routine_body",
+            f"This routine declares Type '{declared}' and its body is {found}, "
+            "not the <RLLContent> ladder body this parser reads. Its logic is not "
+            "extracted, so this routine contributes no rungs, instructions or tag "
+            "references.",
+            location=where,
         )
-        self.result.mark_unsupported("routine_body", detail, location=where)
 
     # -- tasks --------------------------------------------------------------
 
@@ -1045,7 +1068,7 @@ class _Reader:
                         self.alarm_references.append(
                             {
                                 "tag": operand_text,
-                                "rung_index": number,
+                                "rung": number,
                                 "program": program,
                                 "routine": routine,
                             }

@@ -20,7 +20,7 @@ with a surge hopper and a pneumatic diverter.
 
 | File | Kind | Purpose |
 | --- | --- | --- |
-| `Conveyor_Line3.L5X` | L5X | Controller, 3 modules, 1 UDT, 1 AOI, 5 routines, 16 rungs, controller + program tags |
+| `Conveyor_Line3.L5X` | L5X | Controller, 4 modules (Local + 3 I/O), 1 UDT, 1 AOI, 5 program routines, 18 rungs, controller + program tags |
 | `Interlock_Schedule.xlsx` | XLSX | Interlock table, a named table, and a **hidden** `Superseded` sheet |
 | `IO_List.csv` | CSV | 13 points across DI/DO/AI |
 | `Alarm_List.csv` | CSV | **Semicolon**-delimited, to exercise delimiter sniffing |

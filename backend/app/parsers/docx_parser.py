@@ -11,8 +11,14 @@ Three things it is deliberate about.
 
 *Location.* A paragraph index on its own ("paragraph 12") is useless to a
 reviewer opening the document, so every anchor's display location names the
-containing heading. Each paragraph also carries the full ``section_path`` it sits
-under, which is what makes a citation checkable.
+section it sits under. Each paragraph also carries the full ``section_path``,
+which is what makes a citation checkable. Every number in a display location is a
+body-paragraph index and nothing else: a heading reads "heading at paragraph 17",
+not "heading 17", because 17 is its position among the body's paragraphs and not
+its position among the headings — a document with seven headings really does have
+a "heading at paragraph 17". A heading is located under its *parent* section
+rather than under itself, so the segment is a place to navigate from instead of a
+repeat of the excerpt.
 
 *Silence.* Word files carry a lot that plain-text extraction drops: images,
 charts, embedded objects, footnotes, text boxes, headers and footers, tracked
@@ -23,7 +29,12 @@ read this" is never indistinguishable from "there was nothing there".
 
 *Guessing.* List level comes from the paragraph's own ``w:numPr/w:ilvl`` or it is
 recorded as ``None``. A style called "List Bullet" tells us the paragraph is a
-list item; it does not tell us its depth, so no depth is invented.
+list item; it does not tell us its depth, so no depth is invented. Word's
+built-in "List Paragraph" is deliberately **not** read as a list style: Word
+applies it to any indented block, including block quotes and plain indented
+prose, so on its own it says nothing about list membership. A "List Paragraph"
+counts as a list item only when it also carries ``w:numPr``, which is the
+paragraph stating it itself.
 
 XML note: python-docx reads the package's OOXML parts with lxml configured with
 ``resolve_entities=False``, and this module never parses XML itself — it walks the
@@ -101,10 +112,13 @@ _TEXT_TAGS = (_W + "t", _W + "delText")
 _HEADING_STYLE_RE = re.compile(r"^heading\s*([1-9])$", re.IGNORECASE)
 #: The document title behaves as the outline root, so it is level 0.
 _TITLE_STYLE_RE = re.compile(r"^title$", re.IGNORECASE)
-#: "List Bullet", "List Number", "List Paragraph", "List Continue 2", ...
-_LIST_STYLE_RE = re.compile(
-    r"^list\s*(bullet|number|paragraph|continue)(\s*[1-9])?$", re.IGNORECASE
-)
+#: "List Bullet", "List Number", "List Continue 2", ... Styles whose *name* is
+#: evidence of list membership. "List Paragraph" is excluded on purpose: it is
+#: what Word applies to any indented block — a block quote, an indented note —
+#: and reading it as a list would invent membership the document never states.
+#: Such a paragraph is still a list item when it carries ``w:numPr``, which
+#: ``_has_numbering`` picks up.
+_LIST_STYLE_RE = re.compile(r"^list\s*(bullet|number|continue)(\s*[1-9])?$", re.IGNORECASE)
 
 #: Tag -> (unsupported kind, detail). One entry per thing knowingly skipped.
 _TAG_FEATURES: dict[str, tuple[str, str]] = {
@@ -372,6 +386,10 @@ class _StyleFacts:
     style_id: str = ""
     #: Heading level reached through ``w:basedOn``, if the style itself is not one.
     inherited_level: int | None = None
+    #: Why the style could not be resolved at all, or ``""`` when it was. A
+    #: paragraph whose style is unknown is recorded with no style name, and that
+    #: has to be visible rather than look like a paragraph in the default style.
+    failure: str = ""
 
 
 def _paragraph_style_id(paragraph: Any) -> str:
@@ -386,13 +404,18 @@ def _paragraph_style_id(paragraph: Any) -> str:
 
 
 def _style_facts(paragraph: Any) -> _StyleFacts:
-    """Resolve the paragraph's style. Callers cache this by ``_paragraph_style_id``."""
+    """Resolve the paragraph's style. Callers cache this by ``_paragraph_style_id``.
+
+    A failure is carried back on the result rather than swallowed: the caller
+    reports it once per distinct style, so "this paragraph has no style name"
+    never has to be read as "this paragraph is in the default style".
+    """
     try:
         style = paragraph.style
-    except (KeyError, ValueError):
-        return _StyleFacts()
+    except (KeyError, ValueError) as exc:
+        return _StyleFacts(failure=f"the styles part raised {type(exc).__name__}")
     if style is None:
-        return _StyleFacts()
+        return _StyleFacts(failure="python-docx resolved it to no style object")
     return _StyleFacts(
         name=str(getattr(style, "name", "") or ""),
         style_id=str(getattr(style, "style_id", "") or ""),
@@ -483,19 +506,25 @@ def _heading_level(paragraph: Any, facts: _StyleFacts) -> int | None:
     return facts.inherited_level
 
 
-def _numbering_level(paragraph: Any) -> int | None:
-    """Explicit ``w:numPr/w:ilvl`` on the paragraph, else ``None``.
+def _numbering_level(paragraph: Any) -> tuple[int | None, str]:
+    """``(level, unreadable_value)`` from the paragraph's own ``w:numPr/w:ilvl``.
 
     A style-defined level is not chased: ``None`` is honest, whereas 0 would
     invent a depth the paragraph never states.
+
+    The second element is the raw ``w:val`` when the paragraph *does* state a
+    level and it is not a number. That case is returned rather than folded into
+    ``None`` so the caller can say a stated level was discarded — otherwise it is
+    indistinguishable from a paragraph that stated no level at all.
     """
     values = paragraph._p.xpath("./w:pPr/w:numPr/w:ilvl/@w:val")
     if not values:
-        return None
+        return None, ""
+    raw = str(values[0])
     try:
-        return int(str(values[0]))
+        return int(raw), ""
     except ValueError:
-        return None
+        return None, raw
 
 
 def _has_numbering(paragraph: Any) -> bool:
@@ -617,7 +646,11 @@ class DocxParser:
     """Normalises a ``.docx`` into headings, paragraphs and tables."""
 
     name: str = "docx"
-    version: str = "1.1.0"
+    #: 1.2.0 — a heading's display location names its body-paragraph index
+    #: ("heading at paragraph 17") and the section above it rather than itself,
+    #: and paragraphs record the ``w:pStyle`` id their XML names alongside the
+    #: style that was resolved for it.
+    version: str = "1.2.0"
     handles: tuple[FileKind, ...] = (FileKind.DOCX,)
 
     def parse(self, context: ParseContext) -> ParseResult:
@@ -720,29 +753,75 @@ class _DocumentBuilder:
 
     # -- paragraphs -------------------------------------------------------
 
-    def _paragraph_style(self, paragraph: Any) -> _StyleFacts:
-        """Style facts for this paragraph, resolved once per distinct style.
+    def _paragraph_style(self, paragraph: Any, index: int) -> tuple[str, _StyleFacts]:
+        """``(requested style id, style facts)``, resolved once per distinct style.
 
         Every paragraph in a document usually carries one of a handful of styles,
         and resolving one costs a scan of the styles part; caching turns a
-        per-paragraph cost into a per-style one.
+        per-paragraph cost into a per-style one. Reporting is done on the cache
+        miss, so a style that resolves oddly is disclosed once rather than once
+        per paragraph carrying it.
+
+        The requested id — the paragraph's own ``w:pStyle/@w:val`` — is returned
+        alongside the resolution because the two can differ; see
+        :meth:`_report_style_resolution`.
         """
         key = _paragraph_style_id(paragraph)
         facts = self._style_cache.get(key)
         if facts is None:
             facts = _style_facts(paragraph)
             self._style_cache[key] = facts
-        return facts
+            self._report_style_resolution(key, facts, index)
+        return key, facts
+
+    def _report_style_resolution(self, requested: str, facts: _StyleFacts, index: int) -> None:
+        """Disclose a style name that is not the one the paragraph's XML asks for.
+
+        python-docx's ``get_by_id`` falls back to the default paragraph style when
+        a style id is not defined in the styles part, so ``w:pStyle w:val="X"``
+        with no ``X`` defined is reported as "Normal" — a positive statement about
+        the document that the document does not make. Recording the substitution
+        keeps ``style`` usable without letting it be read as verbatim.
+        """
+        location = f"{self._label} / paragraph {index}"
+        if facts.failure:
+            self._result.warn(
+                WarningCode.STRUCTURE_UNRECOGNISED,
+                f"The paragraph style {requested or '(the document default)'!r} could "
+                f"not be resolved: {facts.failure}. Paragraphs carrying it are recorded "
+                "with no style name, and no heading level was read from it — so a "
+                "heading in that style is recorded as body text.",
+                location=location,
+            )
+            return
+        if requested and facts.style_id != requested:
+            self._result.warn(
+                WarningCode.STRUCTURE_UNRECOGNISED,
+                f"Paragraph style id {requested!r} is not defined as a paragraph style "
+                f"in this document, so the default style {facts.name!r} was substituted "
+                "for it. Paragraphs carrying it record the substitute as their style, "
+                "not the id their XML names, and any heading level was read from the "
+                "substitute.",
+                location=location,
+            )
 
     def _add_paragraph(self, paragraph: Any) -> None:
         index = self._paragraph_index
         self._paragraph_index += 1
 
         text = str(paragraph.text or "").strip()
-        facts = self._paragraph_style(paragraph)
+        requested_style_id, facts = self._paragraph_style(paragraph, index)
         style_name, style_id = facts.name, facts.style_id
         level = _heading_level(paragraph, facts)
-        list_level = _numbering_level(paragraph)
+        list_level, unreadable_level = _numbering_level(paragraph)
+        if unreadable_level:
+            self._result.warn(
+                WarningCode.STRUCTURE_UNRECOGNISED,
+                f"The paragraph states a numbering level of {unreadable_level!r}, which "
+                "is not a number. No list level was recorded for it, so it reads as a "
+                "list item whose depth the paragraph never stated.",
+                location=f"{self._label} / paragraph {index}",
+            )
         # A numbered heading is a heading first; calling it a list item would
         # misdescribe the structure a reviewer navigates by.
         is_list_item = level is None and (
@@ -771,6 +850,9 @@ class _DocumentBuilder:
                 "index": index,
                 "text": text,
                 "style": style_name,
+                # The id the paragraph's own XML names, which is not always the
+                # style that was resolved: see ``_report_style_resolution``.
+                "style_id": requested_style_id,
                 "heading_level": level,
                 "list_level": list_level,
                 "is_list_item": is_list_item,
@@ -778,7 +860,13 @@ class _DocumentBuilder:
             }
         )
 
-        location = self._paragraph_location(index, section_path, is_heading=level is not None)
+        # A heading is located under the section *containing* it, not under
+        # itself: repeating its own text would name no place to navigate from.
+        location = self._paragraph_location(
+            index,
+            ancestors if level is not None else section_path,
+            is_heading=level is not None,
+        )
         self._note_features(paragraph._p, location)
         self._note_dropped_text(paragraph._p, location)
 
@@ -796,6 +884,7 @@ class _DocumentBuilder:
                         "paragraph_index": index,
                         "level": level,
                         "style": style_name,
+                        "style_id": requested_style_id,
                         "path": ancestors,
                     },
                     excerpt=truncate(text),
@@ -811,6 +900,7 @@ class _DocumentBuilder:
                 structured_location={
                     "paragraph_index": index,
                     "style": style_name,
+                    "style_id": requested_style_id,
                     "section_path": section_path,
                     "is_list_item": is_list_item,
                     "list_level": list_level,
@@ -821,7 +911,14 @@ class _DocumentBuilder:
         )
 
     def _paragraph_location(self, index: int, section_path: list[str], *, is_heading: bool) -> str:
-        unit = f"heading {index}" if is_heading else f"paragraph {index}"
+        """Where to open the document, in one grammar.
+
+        ``index`` is a body-paragraph index in both cases, so a heading says so
+        rather than presenting the number as a count of headings — the seventh of
+        seven headings in the demo fixture sits at paragraph 17, and "heading 17"
+        would send a reviewer counting to something that is not there.
+        """
+        unit = f"heading at paragraph {index}" if is_heading else f"paragraph {index}"
         section = _section_display(section_path)
         return f"{self._label} / {section} / {unit}" if section else f"{self._label} / {unit}"
 
@@ -1022,7 +1119,17 @@ class _DocumentBuilder:
         """
         try:
             sections = list(self._document.sections)
-        except Exception:
+        except Exception as exc:
+            # Returning quietly would delete the disclosure itself: the document
+            # would look like one with no page furniture at all.
+            self._result.warn(
+                WarningCode.STRUCTURE_UNRECOGNISED,
+                "The document's sections could not be listed "
+                f"({type(exc).__name__}), so no page header or footer was inspected. "
+                "Document-control text such as a revision or 'UNCONTROLLED COPY' "
+                "block lives there and is neither recorded nor reported as skipped.",
+                location=self._label,
+            )
             return
         for number, section in enumerate(sections, start=1):
             for attribute, kind, label in _HEADER_FOOTER_PARTS:
@@ -1055,7 +1162,18 @@ class _DocumentBuilder:
         """
         try:
             children = list(self._document.element.body)
-        except Exception:
+        except Exception as exc:
+            # This check is the only thing standing between an unknown container
+            # and a result that looks like a complete parse, so its own failure
+            # has to be louder than silence.
+            self._result.warn(
+                WarningCode.STRUCTURE_UNRECOGNISED,
+                "The document body's children could not be enumerated "
+                f"({type(exc).__name__}), so it is not known whether any container "
+                "holding paragraphs or tables was left unread. Treat the paragraphs "
+                "and tables recorded here as possibly incomplete.",
+                location=self._label,
+            )
             return
         #: Tag -> count, in order of first appearance, so the report is stable.
         unread: dict[str, int] = {}

@@ -36,9 +36,11 @@ from app.parsers.text_parser import MAX_LINE_ANCHORS, MAX_SECTION_ANCHORS, TextP
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOTES_PATH = REPO_ROOT / "fixtures" / "demo_project" / "Site_Notes_Ambiguous.txt"
 
-#: Read from the column an anchor is eventually stored in, so the bound the
-#: parser has to respect is asserted rather than restated.
+#: Read from the columns an anchor is eventually stored in, so the bounds the
+#: parser has to respect are asserted rather than restated.
 DISPLAY_LOCATION_LIMIT = EvidenceAnchor.display_location.type.length
+SOURCE_LABEL_LIMIT = EvidenceAnchor.source_label.type.length
+ANCHOR_KEY_LIMIT = EvidenceAnchor.anchor_key.type.length
 
 FILE_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 PROJECT_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
@@ -186,7 +188,11 @@ def test_the_summary_reports_shape_without_carrying_the_text(notes: ParseResult)
     assert summary["paragraph_count"] == 4
     assert summary["bullet_count"] == 4
     assert summary["line_anchor_count"] == 13
-    assert summary["anchor_count"] == len(notes.anchors)
+    assert summary["section_anchor_count"] == 1
+    # Measured from the committed fixture, not restated from the parser's own
+    # output: one whole-file anchor, one section anchor for the single
+    # underlined heading, and one line anchor per non-blank line (16 - 3).
+    assert summary["anchor_count"] == 15
     assert "60 psi" not in json.dumps(summary)
 
 
@@ -203,6 +209,49 @@ def test_every_anchor_carries_the_source_label_and_a_bounded_excerpt(notes: Pars
     assert types[0] is AnchorType.FILE_WHOLE
     assert types[1] is AnchorType.FILE_SECTION
     assert set(types[2:]) == {AnchorType.FILE_LINE}
+
+
+def test_no_two_anchors_share_a_key(notes: ParseResult, tmp_path: Path, settings: Settings) -> None:
+    """A duplicate key silently costs a citation, so uniqueness is asserted on the list.
+
+    ``anchors_by_key`` is a dict, and persistence keeps the first draft per key
+    and only logs the rest, so a colliding key fails nowhere: the second anchor
+    is dropped and a line quietly stops being citable. Counting the raw list
+    against the deduplicated mapping is the only place that shows it.
+    """
+    keys = [anchor.key for anchor in notes.anchors]
+    assert len(notes.anchors_by_key) == len(notes.anchors)
+    assert len(set(keys)) == len(keys)
+
+    # Sections and lines are keyed in different namespaces; a file with several
+    # of each is where a collision would first appear.
+    body = (
+        "preamble before any heading\n"
+        "\n"
+        "Commissioning\n"
+        "=============\n"
+        "notes under the underlined heading\n"
+        "\n"
+        "OPEN ITEMS\n"
+        "- hopper level unknown\n"
+    )
+    multi = parse_bytes(tmp_path, settings, body.encode("utf-8"))
+    multi_keys = [anchor.key for anchor in multi.anchors]
+
+    assert len(multi.anchors_by_key) == len(multi.anchors)
+    assert len(set(multi_keys)) == len(multi_keys)
+    assert multi_keys == [
+        "file",
+        "section:1-2",
+        "section:3-6",
+        "section:7-8",
+        "line:1",
+        "line:3",
+        "line:4",
+        "line:5",
+        "line:7",
+        "line:8",
+    ]
 
 
 def test_blank_lines_get_no_anchor(notes: ParseResult) -> None:
@@ -281,7 +330,8 @@ def test_underlined_and_all_caps_headings_partition_the_file(
         ("OPEN ITEMS", 7, 8),
     ]
     covered = [row["line"] for section in sections for row in section["lines"]]
-    assert covered == [row["line"] for row in result.content["lines"]]
+    assert covered == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert result.content["line_count"] == 8
     assert result.summary["headings_detected"] == 2
 
 
@@ -364,6 +414,30 @@ def test_an_all_caps_last_line_is_not_a_heading_over_nothing(
 
     assert [s["title"] for s in result.content["sections"]] == [""]
     assert result.summary["headings_detected"] == 0
+
+
+def test_a_long_upper_case_sentence_is_prose_in_caps_not_a_heading(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """The length bound is the only thing separating a shouted sentence from a title.
+
+    Both lines below sit in the same position — upper case, with lower-case prose
+    under them — so the short one is titled and the long one must not be. A title
+    invented over a shouted sentence would group the lines under a heading the
+    author never wrote, which is the failure the caps inference exists to bound.
+    """
+    shouted = "THE PANEL DRAWING SAYS 60 PSI AND COMMISSIONING SAYS 39 PSI, UNRESOLVED"
+    short = "AIR PRESSURE"
+    assert len(shouted) == 71  # over the 60-character bound
+    assert len(short) == 12  # under it
+
+    def sections(caps: str, name: str) -> list[tuple[str, str]]:
+        body = f"site walkdown notes.\n\n{caps}\nfollow-up needed with the panel builder.\n"
+        result = parse_bytes(tmp_path, settings, body.encode("utf-8"), name=name)
+        return [(s["title"], s["title_source"]) for s in result.content["sections"]]
+
+    assert sections(shouted, "shouted.txt") == [("", "")]
+    assert sections(short, "short.txt") == [("", ""), ("AIR PRESSURE", "caps")]
 
 
 def test_more_sections_than_the_cap_is_reported_as_truncated(
@@ -648,6 +722,47 @@ def test_a_very_long_heading_is_shortened_in_the_label_but_not_in_the_content(
     assert anchor.structured_location["title"] == title.strip()
     assert len(anchor.display_location) <= DISPLAY_LOCATION_LIMIT
     assert anchor.display_location.endswith("(lines 1-3)")
+
+
+def test_a_long_filename_and_archive_path_still_produce_a_bounded_label(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """Every anchor label is bounded against the column it is stored in.
+
+    ``source_label`` and ``display_location`` are ``String(255)`` and
+    ``String(512)``, and both are composed here from ``ParseContext.source_label``
+    — a filename plus, for a file lifted out of a zip, its member path. SQLite
+    stores the overflow silently, so an over-long label works in the demo and
+    raises on a stricter backend. The bound itself lives in ``AnchorDraft``; what
+    is asserted here is that the labels this parser composes actually reach it.
+    """
+    path = tmp_path / "notes.txt"
+    title = "Air pressure interlock threshold reconciliation " * 4
+    path.write_text(f"{title}\n{'=' * 10}\nthe gauge reads 60 psi\n", encoding="utf-8")
+    context = ParseContext(
+        file_id=FILE_ID,
+        project_id=PROJECT_ID,
+        path=path,
+        filename="site notes " * 18 + "final.txt",
+        file_kind=FileKind.TEXT,
+        document_role=DocumentRole.OTHER,
+        settings=settings,
+        archive_member_path="packages/line3/" + "deeply nested folder/" * 10 + "notes.txt",
+    )
+    assert len(context.source_label) > SOURCE_LABEL_LIMIT  # the input really is over-long
+
+    result = TextParser().parse(context)
+
+    assert result.anchors
+    for anchor in result.anchors:
+        assert len(anchor.source_label) <= SOURCE_LABEL_LIMIT
+        assert len(anchor.display_location) <= DISPLAY_LOCATION_LIMIT
+        assert len(anchor.key) <= ANCHOR_KEY_LIMIT
+    # The section label is the longest composition the parser builds (label,
+    # heading and span), so it is the one that has to be cut to the column.
+    assert len(result.anchors_by_key["section:1-3"].display_location) == DISPLAY_LOCATION_LIMIT
+    # The full heading is still recorded; only the label was shortened.
+    assert result.content["sections"][0]["title"] == title.strip()
 
 
 def test_a_single_very_long_line_is_recorded_in_full_but_the_excerpt_is_bounded(

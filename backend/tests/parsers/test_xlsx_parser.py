@@ -18,6 +18,7 @@ import datetime as dt
 import json
 import uuid
 import zipfile
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,15 @@ from openpyxl.worksheet.table import Table
 from app.core.config import Settings
 from app.core.enums import AnchorType, DocumentRole, EvidenceKind, FileKind
 from app.core.errors import ParserError
-from app.parsers.base import MAX_EXCERPT_CHARS, AnchorDraft, ParseContext, ParseResult, WarningCode
+from app.parsers.base import (
+    MAX_DISPLAY_LOCATION_CHARS,
+    MAX_EXCERPT_CHARS,
+    MAX_SOURCE_LABEL_CHARS,
+    AnchorDraft,
+    ParseContext,
+    ParseResult,
+    WarningCode,
+)
 from app.parsers.xlsx_parser import (
     MAX_CELL_CHARS,
     MAX_COLUMNS_PER_ROW,
@@ -322,6 +331,7 @@ def test_the_incomplete_interlock_keeps_its_blank_fields_blank(schedule: ParseRe
     assert record["values"]["Fail-Safe Behaviour"] is None
     assert record["values"]["Notes"] == "Threshold to be confirmed by process engineering."
     assert record["formulas"] == {}
+    assert record["errors"] == {}
 
     keys = schedule.anchors_by_key
     assert "cell:Interlocks!C10" not in keys
@@ -420,8 +430,13 @@ def test_the_summary_reports_shape_without_carrying_the_cell_values(
     assert summary["merged_range_count"] == 1
     assert summary["named_table_count"] == 1
     assert summary["candidate_table_count"] == 3
-    assert summary["anchor_count"] == len(schedule.anchors)
-    assert summary["warning_count"] == len(schedule.warnings)
+    assert summary["error_cell_count"] == 0
+    # Measured from the committed fixture, not read back off the same parse:
+    # comparing the summary to ``len(schedule.anchors)`` holds even when both are
+    # zero, so it survives the parser losing every anchor it should have made.
+    assert summary["anchor_count"] == 90
+    assert summary["warning_count"] == 5
+    assert summary["unsupported_count"] == 0
     assert [sheet["record_count"] for sheet in summary["sheets"]] == [6, 2, 1]
     assert "ILK-003" not in json.dumps(summary)
 
@@ -436,11 +451,73 @@ def test_every_anchor_carries_the_source_label_and_a_bounded_excerpt(
         assert len(anchor.excerpt) <= MAX_EXCERPT_CHARS
 
     keys = [anchor.key for anchor in schedule.anchors]
-    assert len(set(keys)) == len(keys)
+    # Counts measured from the committed fixture rather than a uniqueness check:
+    # the anchor sink drops a repeated key on the floor, so a key collision can
+    # only ever show up as a *missing* anchor, never as a duplicated one.
+    assert len(keys) == 90
+    assert Counter(anchor.anchor_type for anchor in schedule.anchors) == {
+        AnchorType.XLSX_CELL: 71,
+        AnchorType.XLSX_RANGE: 15,
+        AnchorType.XLSX_WORKSHEET: 3,
+        AnchorType.XLSX_WORKBOOK: 1,
+    }
     assert keys[0] == "workbook"
     assert schedule.anchors[0].anchor_type is AnchorType.XLSX_WORKBOOK
     assert keys[1:4] == ["sheet:Interlocks", "sheet:Revisions", "sheet:Superseded"]
     assert {anchor.anchor_type for anchor in schedule.anchors[1:4]} == {AnchorType.XLSX_WORKSHEET}
+
+
+def test_the_cells_no_candidate_table_covers_are_not_citable_and_that_is_disclosed(
+    schedule: ParseResult,
+) -> None:
+    """Only cells inside a candidate table get a cell anchor. Which ones is pinned here.
+
+    The fixture's two title rows sit above the declared table, so ``A1`` and
+    ``A2`` are recorded as cells but cannot be cited individually. That is a real
+    limitation of this parser, and the exact set is asserted so it cannot widen
+    silently: a table that stopped being detected would take dozens of citable
+    cells with it while every other assertion in this file still passed.
+    """
+    populated = {
+        f"cell:{sheet['name']}!{cell['ref']}"
+        for sheet in schedule.content["worksheets"]
+        for row in sheet["rows"]
+        for cell in row["cells"]
+    }
+    cited = {anchor.key for anchor in schedule.anchors if anchor.key.startswith("cell:")}
+
+    assert len(populated) == 73
+    assert len(cited) == 71
+    assert cited <= populated
+    assert populated - cited == {"cell:Interlocks!A1", "cell:Interlocks!A2"}
+
+    # The rows those two cells sit on are named in a warning, so "no records and
+    # no citations came from here" is in the record rather than left to be noticed.
+    uncovered = warnings_with(schedule, WarningCode.STRUCTURE_UNRECOGNISED)
+    assert any("rows 1-2" in warning.message for warning in uncovered)
+
+
+def test_a_long_filename_still_produces_a_label_the_column_can_hold(
+    settings: Settings,
+) -> None:
+    """Every anchor is stamped with the source label, and the column bounds it."""
+    context = ParseContext(
+        file_id=FILE_ID,
+        project_id=PROJECT_ID,
+        path=SCHEDULE_PATH,
+        filename="I" * 300 + ".xlsx",
+        file_kind=FileKind.XLSX,
+        document_role=DocumentRole.INTERLOCK_SCHEDULE,
+        settings=settings,
+        archive_member_path="package/" + "deep/" * 40 + "Interlock_Schedule.xlsx",
+    )
+
+    result = XlsxParser().parse(context)
+
+    assert result.anchors
+    for anchor in result.anchors:
+        assert len(anchor.source_label) <= MAX_SOURCE_LABEL_CHARS
+        assert len(anchor.display_location) <= MAX_DISPLAY_LOCATION_CHARS
 
 
 def test_the_workbook_anchor_names_the_hidden_sheet(schedule: ParseResult) -> None:
@@ -1075,6 +1152,93 @@ def test_a_string_that_begins_with_an_equals_sign_is_a_string_not_a_formula(
     assert cell["data_type"] == "s"
     assert WarningCode.FORMULA_NOT_EVALUATED not in codes(result)
     assert result.summary["formula_cell_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# What is and is not an error value
+# ---------------------------------------------------------------------------
+
+
+def test_an_error_cell_is_reported_and_marked_in_the_record(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """``#REF!`` in a setpoint column is a broken cell, not a documented setpoint.
+
+    The marker text survives in ``values`` — deleting it would make the cell read
+    like ILK-007's genuinely empty field — but a consumer reading records has to
+    be able to tell it apart from the same characters typed in as text, which is
+    what ``errors`` and the warning are for.
+    """
+    workbook, sheet = new_workbook("Setpoints")
+    sheet["A1"] = "Tag"
+    sheet["B1"] = "Trip Setpoint"
+    sheet["A2"] = "AIR_PRESS_PSI"
+    sheet["B2"] = "#REF!"
+    sheet["A3"] = "HOPPER_LEVEL_PCT"
+    sheet["B3"] = "#DIV/0!"
+
+    result = parse_workbook(tmp_path, settings, workbook)
+    table = table_on(result, "Setpoints")
+    reported = [
+        warning
+        for warning in warnings_with(result, WarningCode.STRUCTURE_UNRECOGNISED)
+        if warning.location == "Sheet 'Setpoints', cell B2"
+    ]
+
+    assert record_at(table, 2)["values"]["Trip Setpoint"] == "#REF!"
+    assert record_at(table, 2)["errors"] == {"Trip Setpoint": "#REF!"}
+    assert record_at(table, 3)["errors"] == {"Trip Setpoint": "#DIV/0!"}
+    assert record_at(table, 2)["formulas"] == {}
+    assert result.summary["error_cell_count"] == 2
+    assert len(reported) == 1
+    assert "#REF!" in reported[0].message
+    assert "error cell" in reported[0].message
+    # The parser says what Excel typed, not what the cell was meant to hold.
+    assert "was meant to hold is not established" in reported[0].message
+
+
+def test_a_text_cell_that_reads_like_an_error_is_not_reported_as_one(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """Excel's type decides here too: sniffing the text would invent a broken cell."""
+    workbook, sheet = new_workbook("Typed")
+    sheet["A1"] = "Tag"
+    sheet["B1"] = "Notes"
+    sheet["A2"] = "AIR_PRESS_PSI"
+    sheet["B2"] = "#REF! appeared here before rev B; value confirmed as 60.0"
+    # openpyxl types a bare "#REF!" as an error; this text is a string, and the
+    # committed workbook stores it as one.
+    assert sheet["B2"].data_type == "s"
+
+    result = parse_workbook(tmp_path, settings, workbook)
+    record = record_at(table_on(result, "Typed"), 2)
+
+    assert record["values"]["Notes"].startswith("#REF!")
+    assert record["errors"] == {}
+    assert result.summary["error_cell_count"] == 0
+    assert [warning.location for warning in result.warnings] == ["Sheet 'Typed', row 1"]
+
+
+def test_error_cells_do_not_bury_the_other_warnings(tmp_path: Path, settings: Settings) -> None:
+    """The per-code cap applies here as it does to formulas, and says how many it held back."""
+    workbook, sheet = new_workbook("Broken")
+    sheet["A1"] = "Tag"
+    sheet["B1"] = "Trip Setpoint"
+    over_cap = MAX_WARNINGS_PER_CODE + 5
+    for offset in range(over_cap):
+        sheet.cell(row=2 + offset, column=1, value=f"TAG_{offset:03d}")
+        sheet.cell(row=2 + offset, column=2, value="#REF!")
+
+    result = parse_workbook(tmp_path, settings, workbook)
+    structure = warnings_with(result, WarningCode.STRUCTURE_UNRECOGNISED)
+
+    # The sheet's heuristic-header disclosure carries the same code, so it is the
+    # last thing held back: 55 error cells plus that one row-1 warning, of which
+    # 50 are emitted and 6 are counted in the suppression notice.
+    assert result.summary["error_cell_count"] == over_cap
+    assert len(structure) == MAX_WARNINGS_PER_CODE + 1
+    assert f"A further {over_cap - MAX_WARNINGS_PER_CODE + 1} " in structure[-1].message
+    assert all(record["errors"] for record in table_on(result, "Broken")["records"])
 
 
 # ---------------------------------------------------------------------------

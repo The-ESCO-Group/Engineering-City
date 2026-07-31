@@ -20,7 +20,15 @@ from app.core.config import Settings
 from app.core.enums import AnchorType, DocumentRole, EvidenceKind, FileKind
 from app.core.errors import ParserError
 from app.parsers import xml_parser as xml_parser_module
-from app.parsers.base import MAX_EXCERPT_CHARS, ParseContext, Parser, ParseResult, WarningCode
+from app.parsers.base import (
+    MAX_DISPLAY_LOCATION_CHARS,
+    MAX_EXCERPT_CHARS,
+    MAX_SOURCE_LABEL_CHARS,
+    ParseContext,
+    Parser,
+    ParseResult,
+    WarningCode,
+)
 from app.parsers.xml_parser import MAX_ANCHORS, XmlParser
 from app.security import xml_safety
 from app.security.xml_safety import XmlSafetyError, iter_with_paths, parse_xml_bytes
@@ -29,6 +37,66 @@ FIXTURE_DIR = Path(__file__).resolve().parents[3] / "fixtures" / "demo_project"
 HMI_EXPORT = FIXTURE_DIR / "HMI_Alarm_Export.xml"
 
 ALARMS = "/AlarmConfiguration/Alarms"
+
+#: Every xpath the committed export produces, in document order, written out
+#: rather than derived from the parse: a list checked against the parser's own
+#: output cannot fail, and these are the addresses a reviewer follows.
+HMI_XPATHS = [
+    "/AlarmConfiguration",
+    "/AlarmConfiguration/Comment",
+    "/AlarmConfiguration/AlarmGroups",
+    "/AlarmConfiguration/AlarmGroups/AlarmGroup[1]",
+    "/AlarmConfiguration/AlarmGroups/AlarmGroup[2]",
+    "/AlarmConfiguration/AlarmGroups/AlarmGroup[3]",
+    "/AlarmConfiguration/Alarms",
+    "/AlarmConfiguration/Alarms/Alarm[1]",
+    "/AlarmConfiguration/Alarms/Alarm[1]/Message",
+    "/AlarmConfiguration/Alarms/Alarm[2]",
+    "/AlarmConfiguration/Alarms/Alarm[2]/Message",
+    "/AlarmConfiguration/Alarms/Alarm[3]",
+    "/AlarmConfiguration/Alarms/Alarm[3]/Message",
+    "/AlarmConfiguration/Alarms/Alarm[4]",
+    "/AlarmConfiguration/Alarms/Alarm[4]/Message",
+    "/AlarmConfiguration/Alarms/Alarm[5]",
+    "/AlarmConfiguration/Alarms/Alarm[5]/Message",
+    "/AlarmConfiguration/Alarms/Alarm[6]",
+    "/AlarmConfiguration/Alarms/Alarm[6]/Message",
+]
+
+#: The six alarms as the export writes them: name, expression and message text.
+#: A parser that swapped two messages would still satisfy a count.
+HMI_ALARMS = [
+    (
+        "ALM_ESTOP",
+        "ESTOP_OK == 0",
+        "Emergency stop actuated - all line 3 conveyors stopped",
+    ),
+    (
+        "ALM_CV101_OL",
+        "CV101_OL_TRIP == 1",
+        "CV101 motor overload - reset required in Manual",
+    ),
+    (
+        "ALM_CV102_OL",
+        "CV102_OL_TRIP == 1",
+        "CV102 motor overload - reset required in Manual",
+    ),
+    (
+        "ALM_HOPPER_HIGH",
+        "HOPPER_LEVEL_PCT > 90.0",
+        "Surge hopper level high",
+    ),
+    (
+        "ALM_CV102_JAM",
+        "CV102_JAM == 1",
+        "CV102 jam detected - clear blockage before restart",
+    ),
+    (
+        "ALM_GUARD_OPEN",
+        "GUARD_DOOR_CLOSED == 0",
+        "Guard door open - line permissive dropped",
+    ),
+]
 
 
 def _parse(path: Path, settings: Settings) -> ParseResult:
@@ -93,9 +161,15 @@ def test_root_and_element_counts_match_the_hmi_export(hmi: ParseResult) -> None:
         "attributes": {"Version": "12.0", "Project": "SYNTHETIC_Line3_HMI"},
         "xpath": "/AlarmConfiguration",
     }
-    assert hmi.content["element_counts"]["Alarm"] == 6
-    assert hmi.content["element_counts"]["AlarmGroup"] == 3
-    assert hmi.content["element_counts"]["Message"] == 6
+    assert hmi.content["element_counts"] == {
+        "Alarm": 6,
+        "AlarmConfiguration": 1,
+        "AlarmGroup": 3,
+        "AlarmGroups": 1,
+        "Alarms": 1,
+        "Comment": 1,
+        "Message": 6,
+    }
     assert hmi.content["max_depth"] == 3
     assert hmi.content["namespaces"] == {}
     assert hmi.content["attribute_names"] == [
@@ -109,13 +183,17 @@ def test_root_and_element_counts_match_the_hmi_export(hmi: ParseResult) -> None:
         "Severity",
         "Version",
     ]
-    assert len(hmi.content["elements"]) == sum(hmi.content["element_counts"].values())
+    # 19 elements, counted off the committed file, not re-derived from the parse.
+    assert len(hmi.content["elements"]) == 19
 
 
 def test_every_xpath_is_unique(hmi: ParseResult) -> None:
     """An xpath two elements share is not a citation, so uniqueness is the contract."""
     xpaths = [item["xpath"] for item in hmi.content["elements"]]
 
+    # Pinned against the file: comparing the parse to itself would hold even if
+    # the parser lost half the document.
+    assert xpaths == HMI_XPATHS
     assert len(xpaths) == len(set(xpaths))
     assert len({anchor.key for anchor in hmi.anchors}) == len(hmi.anchors)
 
@@ -171,6 +249,26 @@ def test_guard_alarm_keeps_the_documented_spelling(hmi: ParseResult) -> None:
     assert "GRD_DR_CLSD" not in json.dumps(hmi.content)
 
 
+def test_all_six_alarms_keep_their_expression_and_message_verbatim(hmi: ParseResult) -> None:
+    """Counts do not catch a swap: every string an agent may cite is pinned.
+
+    ``text_node_count == 7`` holds just as well if two messages trade places, and
+    a message attached to the wrong alarm is a fabricated citation, not a
+    rounding error.
+    """
+    recorded = [
+        (
+            item["attributes"]["Name"],
+            item["attributes"]["Expression"],
+            _element(hmi, f"{item['xpath']}/Message")["text"],
+        )
+        for item in hmi.content["elements"]
+        if item["tag"] == "Alarm"
+    ]
+
+    assert recorded == HMI_ALARMS
+
+
 def test_text_nodes_hold_the_alarm_messages_and_skip_whitespace(hmi: ParseResult) -> None:
     text_nodes = hmi.content["text_nodes"]
 
@@ -190,10 +288,11 @@ def test_text_nodes_hold_the_alarm_messages_and_skip_whitespace(hmi: ParseResult
 
 
 def test_every_element_is_anchored_by_its_xpath(hmi: ParseResult) -> None:
-    assert len(hmi.anchors) == len(hmi.content["elements"])
-    assert [anchor.key for anchor in hmi.anchors] == [
-        f"element:{item['xpath']}" for item in hmi.content["elements"]
-    ]
+    assert len(hmi.anchors) == 19
+    # Against the pinned addresses, not against the parse's own element list —
+    # keys derived from the same output they are checked against agree by
+    # construction even when both are wrong.
+    assert [anchor.key for anchor in hmi.anchors] == [f"element:{xpath}" for xpath in HMI_XPATHS]
     assert {anchor.anchor_type for anchor in hmi.anchors} == {AnchorType.XML_ELEMENT}
     assert {anchor.evidence_kind for anchor in hmi.anchors} == {EvidenceKind.DIRECT}
     assert {anchor.source_label for anchor in hmi.anchors} == {"HMI_Alarm_Export.xml"}
@@ -325,6 +424,113 @@ def test_namespaces_are_recorded_and_tags_are_stripped(tmp_path: Path, settings:
     # another attribute on the same element.
     assert result.content["attribute_names"] == ["Name", "{urn:esco:meta}lang"]
     assert "namespace_prefix" in [item.kind for item in result.unsupported]
+    # An element records the URI its own name resolved in; an unqualified one
+    # carries no such key at all, so the field is never a claim about a document
+    # that has no namespaces.
+    assert _element(result, "/Root/Note")["namespace"] == "urn:esco:meta"
+    assert _element(result, "/Root/Item")["namespace"] == "urn:esco:default"
+
+
+def test_two_tags_that_strip_to_the_same_name_keep_their_namespaces(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """Stripping the tag collapses two different names onto one xpath.
+
+    ``/Root/Item[1]`` and ``/Root/Item[2]`` are the same tag in the record but
+    different element names in the file. Without the URI on each element the
+    collision is unrecoverable, and a reviewer reading the record cannot tell
+    which vendor namespace a value came from.
+    """
+    document = _write(
+        tmp_path,
+        "nscollide.xml",
+        '<Root xmlns="urn:a" xmlns:b="urn:b"><Item Name="from-a"/><b:Item Name="from-b"/></Root>',
+    )
+
+    result = _parse(document, settings)
+
+    assert [item["xpath"] for item in result.content["elements"]] == [
+        "/Root",
+        "/Root/Item[1]",
+        "/Root/Item[2]",
+    ]
+    assert _element(result, "/Root/Item[1]")["namespace"] == "urn:a"
+    assert _element(result, "/Root/Item[2]")["namespace"] == "urn:b"
+    assert result.anchors_by_key["element:/Root/Item[2]"].structured_location == {
+        "xpath": "/Root/Item[2]",
+        "tag": "Item",
+        "attributes": {"Name": "from-b"},
+        "namespace": "urn:b",
+    }
+
+
+def test_the_namespace_boundary_says_the_recorded_xpath_is_a_local_name_path(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """The xpath is not a namespace-aware expression; a reviewer must be told so."""
+    document = _write(tmp_path, "nspath.xml", '<Root xmlns="urn:a"><Item Name="A"/></Root>')
+
+    result = _parse(document, settings)
+    boundary = [item for item in result.unsupported if item.kind == "namespace_prefix"]
+
+    assert len(boundary) == 1
+    detail = boundary[0].detail.lower()
+    assert "local-name" in detail
+    assert "not a namespace-aware xpath" in detail
+
+
+def test_a_declared_prefix_that_nothing_uses_is_disclosed_not_reported_as_absent(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """'namespaces' is built from the names that were recorded, not from the file.
+
+    A prefix declared on the root and used by no tag or attribute is resolved
+    away before this parser sees the tree, so the parse alone shows an empty
+    'namespaces' and namespace_count 0 — which reads as "this document declares
+    none". That is a claim about the file the parse did not establish.
+    """
+    document = _write(
+        tmp_path,
+        "unused_ns.xml",
+        '<Root xmlns:m="urn:esco:meta"><Item Name="A"/></Root>',
+    )
+
+    result = _parse(document, settings)
+    boundary = [item for item in result.unsupported if item.kind == "namespace_prefix"]
+
+    assert result.content["namespaces"] == {}
+    assert result.summary["namespace_count"] == 0
+    assert len(boundary) == 1
+    assert "xmlns:m" in boundary[0].detail
+    # It states what was seen and what was recorded, and claims nothing else.
+    assert "start tag in the source declares" in boundary[0].detail
+    assert "namespace_count is 0" in boundary[0].detail
+    assert boundary[0].location == "/Root"
+
+
+def test_no_namespace_declaration_is_claimed_from_an_attribute_value_that_mentions_it(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """Reading the start tag back must not turn a value into a declaration."""
+    plain = _write(tmp_path, "plain_root.xml", '<Root Note="see xmlns=urn:x"><Item/></Root>')
+
+    result = _parse(plain, settings)
+
+    assert [item.kind for item in result.unsupported] == [
+        "xml_comment_or_pi",
+        "excerpt_not_verbatim",
+    ]
+
+
+def test_a_default_declaration_the_document_uses_is_reported_once_not_twice(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """The used-namespace boundary and the unused-declaration one are exclusive."""
+    document = _write(tmp_path, "used_ns.xml", '<Root xmlns="urn:a"><Item/></Root>')
+
+    result = _parse(document, settings)
+
+    assert [item.kind for item in result.unsupported].count("namespace_prefix") == 1
 
 
 def test_text_in_mixed_content_is_not_dropped(tmp_path: Path, settings: Settings) -> None:
@@ -638,6 +844,34 @@ def test_the_empty_warning_does_not_claim_markup_it_did_not_see(
 # ---------------------------------------------------------------------------
 # Hostile and degenerate input
 # ---------------------------------------------------------------------------
+
+
+def test_a_long_filename_still_composes_a_label_the_column_can_hold(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """An anchor from a deep archive member must not overflow its column.
+
+    SQLite stores an over-long value happily, so an unbounded label is invisible
+    until a stricter backend rejects the upload.
+    """
+    document = _write(tmp_path, "long.xml", '<Root><Item Name="A"/></Root>')
+    context = ParseContext(
+        file_id=uuid.UUID(int=1),
+        project_id=uuid.UUID(int=2),
+        path=document,
+        filename="C" * 300 + ".xml",
+        file_kind=FileKind.XML,
+        document_role=DocumentRole.HMI_EXPORT,
+        settings=settings,
+        archive_member_path="deep/" * 60 + "member.xml",
+    )
+
+    result = XmlParser().parse(context)
+
+    assert result.anchors
+    for anchor in result.anchors:
+        assert len(anchor.source_label) <= MAX_SOURCE_LABEL_CHARS
+        assert len(anchor.display_location) <= MAX_DISPLAY_LOCATION_CHARS
 
 
 def test_external_entity_is_refused_and_the_secret_is_never_exposed(

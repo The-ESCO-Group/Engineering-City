@@ -12,7 +12,11 @@ agent to make by comparing files, and it can only make it because the string
 Four things are worth knowing about the recorded shape:
 
 * **Tags are namespace-stripped** so an xpath stays readable and matchable
-  across documents; the namespaces in use are recorded separately. Attribute
+  across documents; the namespaces in use are recorded separately, and an
+  element whose own tag was qualified additionally records the URI it resolved
+  in, so two siblings that strip to the same tag stay tellable apart. A recorded
+  xpath is therefore a *local-name* path — it addresses elements the way
+  ``local-name()`` does and is not a namespace-aware XPath expression. Attribute
   names are kept exactly as parsed (``{uri}local`` when qualified), because two
   attributes on one element can strip to the same name.
 * **Every run of character data is recorded exactly once, and nothing is
@@ -45,6 +49,7 @@ ancestor, which is quadratic on the flat vendor exports this parser exists for.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Iterable, Iterator
 from pathlib import Path
@@ -74,8 +79,17 @@ MAX_EXCERPT_TEXT_CHARS = 500
 MAX_NAMED_MIXED_CONTENT = 10
 
 #: How much of the source is re-read to say what a document that recorded as
-#: empty actually carries. Bounded: the file itself may be large.
+#: empty actually carries, and to read the root element's start tag. Bounded:
+#: the file itself may be large.
 EMPTY_DOCUMENT_SCAN_BYTES = 64 * 1024
+
+#: One namespace declaration in a start tag whose quoted values have already
+#: been removed: ``xmlns="..."`` or ``xmlns:prefix="..."``.
+_XMLNS_DECLARATION = re.compile(r"(?:^|\s)xmlns(?::([\w.\-]+))?\s*=")
+
+#: A quoted attribute value, removed before looking for declarations so that a
+#: value that happens to contain ``xmlns=`` is not read as one.
+_ATTRIBUTE_VALUE = re.compile(r"=\s*\"[^\"]*\"|=\s*'[^']*'")
 
 
 def _collapse(text: str) -> str:
@@ -162,6 +176,16 @@ def _namespace_uris(element: Element) -> list[str]:
         if isinstance(name, str) and name.startswith("{"):
             uris.append(name[1:].split("}", 1)[0])
     return uris
+
+
+def _element_namespace(tag: str) -> str:
+    """The URI an element's own name resolved in, or ``""`` when unqualified.
+
+    Recorded per element because the tag in an xpath is stripped: without it,
+    ``/Root/Item[1]`` and ``/Root/Item[2]`` coming from two different namespaces
+    are indistinguishable in the record.
+    """
+    return tag[1:].split("}", 1)[0] if tag.startswith("{") else ""
 
 
 def _namespace_labels(root_tag: str, uris: Iterable[str]) -> dict[str, str]:
@@ -301,11 +325,73 @@ def _discarded_markup(path: Path) -> str:
     return " and ".join(found)
 
 
+def _read_start_tag(text: str, start: int) -> str:
+    """The ``<...>`` beginning at ``start``, honouring quoted attribute values."""
+    quote = ""
+    for position in range(start, len(text)):
+        char = text[position]
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char == ">":
+            return text[start : position + 1]
+    return ""  # not terminated within the bytes read; claim nothing
+
+
+def _root_start_tag(path: Path) -> str:
+    """The root element's start tag as the source file writes it.
+
+    The hardened parser resolves ``xmlns`` declarations away before this module
+    sees a tree, so a declaration nothing in the document uses leaves no trace in
+    the parse at all. Reading the start tag back is the only way to say that one
+    was there, and it is a statement about what the head of the file shows —
+    nothing is claimed when the tag is not found within the bounded read.
+    """
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(EMPTY_DOCUMENT_SCAN_BYTES)
+    except OSError:  # pragma: no cover - the file was readable moments earlier
+        return ""
+    text = head.decode("utf-8", errors="replace")
+    index = 0
+    while True:
+        start = text.find("<", index)
+        if start == -1:
+            return ""
+        if text.startswith("<!--", start):
+            end = text.find("-->", start + 4)
+            if end == -1:
+                return ""
+            index = end + 3
+            continue
+        if text.startswith("<?", start) or text.startswith("<!", start):
+            # A prolog or a processing instruction. DTDs never reach here: the
+            # safety layer refuses them before the parse returns.
+            end = text.find(">", start)
+            if end == -1:
+                return ""
+            index = end + 1
+            continue
+        return _read_start_tag(text, start)
+
+
+def _declared_namespace_prefixes(start_tag: str) -> list[str]:
+    """Namespace prefixes declared on a start tag, in document order.
+
+    ``""`` for a default ``xmlns=``. Quoted values are removed first so that an
+    attribute whose *value* contains ``xmlns=`` is not counted as a declaration.
+    """
+    without_values = _ATTRIBUTE_VALUE.sub("=", start_tag)
+    return [match.group(1) or "" for match in _XMLNS_DECLARATION.finditer(without_values)]
+
+
 class XmlParser:
     """Records the structure and text of an arbitrary XML document."""
 
     name = "xml"
-    version = "1.1.0"
+    version = "1.2.0"
     handles: tuple[FileKind, ...] = (FileKind.XML,)
 
     def parse(self, context: ParseContext) -> ParseResult:
@@ -351,6 +437,13 @@ class XmlParser:
                 "text": text,
                 "child_count": len(element),
             }
+            # Only when the tag was qualified, so the key is a fact about this
+            # element rather than a field that reads as "no namespace" on every
+            # element of every document. Without it a stripped tag shared by two
+            # namespaces is an unrecoverable collision.
+            namespace = _element_namespace(element.tag)
+            if namespace:
+                record["namespace"] = namespace
             # Mixed content: this element's text is interrupted by a child, so
             # the joined string above is not one contiguous run of the file and
             # does not include what is inside the child. Both facts are recorded
@@ -369,16 +462,19 @@ class XmlParser:
                 text_nodes.append({"xpath": xpath, "text": text})
 
             if len(result.anchors) < MAX_ANCHORS:
+                structured: dict[str, Any] = {
+                    "xpath": xpath,
+                    "tag": tag,
+                    "attributes": dict(attributes),
+                }
+                if namespace:
+                    structured["namespace"] = namespace
                 result.add_anchor(
                     AnchorDraft(
                         key=f"element:{xpath}",
                         anchor_type=AnchorType.XML_ELEMENT,
                         display_location=f"{context.filename} {xpath}",
-                        structured_location={
-                            "xpath": xpath,
-                            "tag": tag,
-                            "attributes": dict(attributes),
-                        },
+                        structured_location=structured,
                         excerpt=_excerpt(element, tag, attributes, text),
                         evidence_kind=EvidenceKind.DIRECT,
                         source_label=context.source_label,
@@ -454,11 +550,47 @@ class XmlParser:
                 "the prefixes written in the file are not recoverable. The keys of "
                 "'namespaces' are parser-assigned labels ('' for the root's "
                 "namespace, then ns1, ns2, ...) and element tags are recorded "
-                "without their namespace.",
+                "without their namespace, which makes a recorded xpath a "
+                "local-name path: it addresses elements the way local-name() does "
+                "and is not a namespace-aware XPath expression, so an XPath engine "
+                "given the source and one of these paths may match nothing. Two "
+                "siblings whose names strip to the same tag are told apart by their "
+                "positional predicate and by 'namespace' on the element record and "
+                "on the anchor, which is present whenever that element's own tag "
+                "was qualified.",
                 location=root_xpath,
             )
+        else:
+            self._report_unused_namespace_declarations(result, context.path, root_xpath)
 
         return result
+
+    @staticmethod
+    def _report_unused_namespace_declarations(
+        result: ParseResult, path: Path, root_xpath: str
+    ) -> None:
+        """Say so when the root declares namespaces that nothing in the parse used.
+
+        ``namespaces`` is built from the URIs that appear in a recorded tag or
+        attribute name, so a declared-but-unused prefix leaves it empty — and an
+        empty 'namespaces' with no boundary item reads as "this document declares
+        none", which is a claim about the file the parser has not established.
+        """
+        prefixes = _declared_namespace_prefixes(_root_start_tag(path))
+        if not prefixes:
+            return
+        named = ", ".join(f"xmlns:{prefix}" if prefix else "xmlns" for prefix in prefixes)
+        result.mark_unsupported(
+            "namespace_prefix",
+            f"The root element's start tag in the source declares {named}, but no "
+            f"recorded element tag or attribute name resolves in a namespace, so "
+            f"'namespaces' is empty and namespace_count is 0. A declaration that "
+            f"nothing in the document uses is resolved away before this parser sees "
+            f"the tree and is not recoverable from it; the empty 'namespaces' "
+            f"describes the names that were recorded, not what the file declares. "
+            f"Declarations on elements other than the root are not inspected.",
+            location=root_xpath,
+        )
 
     @staticmethod
     def _report_empty(result: ParseResult, path: Path, tag: str, root_xpath: str) -> None:

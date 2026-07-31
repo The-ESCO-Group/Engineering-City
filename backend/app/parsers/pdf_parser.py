@@ -113,10 +113,17 @@ def _normalise_page_text(raw: object) -> str:
 
     Done once, before any offset is computed, so the character ranges an anchor
     records index into exactly the string stored in ``content``.
+
+    An extraction that came back as nothing but whitespace is normalised to the
+    empty string: it is a page that yielded no text, and recording its padding
+    as content would give a page reported as having no text layer a positive
+    ``character_count`` and a list of blank lines — a document whose
+    ``total_characters`` contradicted its ``has_text_layer``.
     """
     if not raw or not isinstance(raw, str):
         return ""
-    return raw.replace("\r\n", "\n").replace("\r", "\n").translate(_CONTROL_CHARS)
+    text = raw.replace("\r\n", "\n").replace("\r", "\n").translate(_CONTROL_CHARS)
+    return text if text.strip() else ""
 
 
 def _property_text(value: object, limit: int = MAX_PROPERTY_CHARS) -> str:
@@ -441,6 +448,11 @@ class PdfParser:
     and ``lines`` — it has no character offset and therefore no range citation —
     and its presence is reported as a warning and an unsupported item.
 
+    A page whose extraction yielded only whitespace is recorded as a page that
+    yielded nothing: ``text`` is ``""``, ``lines`` is ``[]`` and
+    ``character_count`` is 0. ``has_text_layer`` and ``total_characters``
+    therefore never contradict each other.
+
     Anchors:
 
     ``page:<n>``
@@ -549,6 +561,8 @@ class PdfParser:
         illegible: list[int] = []
         annotated: list[int] = []
         overflowed: list[int] = []
+        part_cited: list[int] = []
+        uncited: list[int] = []
         first_failure = ""
         ranges = 0
 
@@ -624,7 +638,10 @@ class PdfParser:
                 )
             )
             if readable:
-                ranges = self._add_line_anchors(number, text, context, result, ranges)
+                before = ranges
+                ranges, capped = self._add_line_anchors(number, text, context, result, ranges)
+                if capped:
+                    (part_cited if ranges > before else uncited).append(number)
 
         self._report_unread(
             result,
@@ -635,6 +652,7 @@ class PdfParser:
             reason=first_failure,
         )
         self._report_annotations(result, annotated=annotated, overflowed=overflowed)
+        self._report_capped_citations(result, part_cited=part_cited, uncited=uncited)
         return payloads
 
     def _add_line_anchors(
@@ -644,8 +662,13 @@ class PdfParser:
         context: ParseContext,
         result: ParseResult,
         emitted: int,
-    ) -> int:
-        """One citable character range per non-blank line; returns the new total.
+    ) -> tuple[int, bool]:
+        """One citable character range per non-blank line.
+
+        Returns ``(new total, capped)`` — ``capped`` is True when a line on this
+        page got no character range because the document-wide cap was reached,
+        so the caller can name every affected page rather than only the page the
+        cap happened to fall on.
 
         A line longer than ``MAX_EXCERPT_CHARS`` becomes consecutive ranges of
         that size. The alternative — one range spanning the whole line — would
@@ -667,17 +690,7 @@ class PdfParser:
                 end = start + len(excerpt)
 
                 if emitted >= MAX_TEXT_RANGE_ANCHORS:
-                    if not any(
-                        warning.code == WarningCode.TRUNCATED for warning in result.warnings
-                    ):
-                        result.warn(
-                            WarningCode.TRUNCATED,
-                            f"Line-level citations stop after {MAX_TEXT_RANGE_ANCHORS} character "
-                            "ranges. The page text in the artifact is complete, but a finding "
-                            "past this point must cite its page anchor instead of a range.",
-                            f"page {number}",
-                        )
-                    return emitted
+                    return emitted, True
 
                 emitted += 1
                 result.add_anchor(
@@ -692,7 +705,40 @@ class PdfParser:
                         source_label=context.source_label,
                     )
                 )
-        return emitted
+        return emitted, False
+
+    @staticmethod
+    def _report_capped_citations(
+        result: ParseResult, *, part_cited: list[int], uncited: list[int]
+    ) -> None:
+        """Report every page the line-citation cap left without range citations.
+
+        Naming only the page the cap fell on would read as though that page were
+        the only one affected, while whole later pages silently carry no
+        line-level citation at all.
+        """
+        affected = sorted(part_cited + uncited)
+        if not affected:
+            return
+
+        label = _format_pages(affected)
+        sentences = [f"Line-level citations stop after {MAX_TEXT_RANGE_ANCHORS} character ranges."]
+        if part_cited:
+            sentences.append(
+                f"Citations for {_format_pages(part_cited)} stop part-way down the page."
+            )
+        if uncited:
+            sentences.append(
+                f"No line on {_format_pages(uncited)} has a character-range citation at all."
+            )
+        sentences.append(
+            f"The page text of {label} in the artifact is complete and each page still has its "
+            "page anchor, but a finding about the lines above must cite that page anchor rather "
+            "than a character range."
+        )
+        detail = " ".join(sentences)
+        result.warn(WarningCode.TRUNCATED, detail, label)
+        result.mark_unsupported("line_citations_truncated", detail, label)
 
     @staticmethod
     def _report_page_shortfall(result: ParseResult, *, declared: int | None, read: int) -> None:

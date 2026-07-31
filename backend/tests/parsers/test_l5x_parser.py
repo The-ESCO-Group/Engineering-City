@@ -657,22 +657,52 @@ def test_alarm_named_outputs_are_recorded_as_observations_only(demo: ParseResult
     assert demo.content["alarm_references"] == [
         {
             "tag": "ALM_ESTOP",
-            "rung_index": 0,
+            "rung": 0,
             "program": "MainProgram",
             "routine": "Alarm_Logic",
         },
         {
             "tag": "ALM_CV101_OL",
-            "rung_index": 1,
+            "rung": 1,
             "program": "MainProgram",
             "routine": "Alarm_Logic",
         },
         {
             "tag": "ALM_HOPPER_HIGH",
-            "rung_index": 2,
+            "rung": 2,
             "program": "MainProgram",
             "routine": "Alarm_Logic",
         },
+    ]
+
+
+def test_alarm_reference_rung_is_the_number_the_rung_is_addressed_by(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """``rung`` is the rung's address, which is not its ``Number`` attribute here.
+
+    Both rungs are written ``Number="7"``, so the routine falls back to positional
+    addressing and the addresses become 0 and 1. Nothing else pins that the alarm
+    observation uses the same numbering as ``rungs[].number`` and the rung anchor
+    keys, so a reader could not tell which of the two an ``alarm_references``
+    entry meant.
+    """
+    body = _program(
+        _rung(7, "XIC(A_Tag)OTE(ALM_ONE);") + _rung(7, "XIC(A_Tag)OTE(ALM_TWO);"),
+        tags='<Tag Name="A_Tag" DataType="BOOL"/>',
+    )
+    path = _write(tmp_path, "alarm_positional.L5X", _l5x(body))
+
+    result = _parse(path, settings)
+
+    assert result.content["alarm_references"] == [
+        {"tag": "ALM_ONE", "rung": 0, "program": "P1", "routine": "R1"},
+        {"tag": "ALM_TWO", "rung": 1, "program": "P1", "routine": "R1"},
+    ]
+    assert [rung["number"] for rung in result.content["rungs"]] == [0, 1]
+    assert [rung["anchor_key"] for rung in result.content["rungs"]] == [
+        "rung:P1/R1/0",
+        "rung:P1/R1/1",
     ]
 
 
@@ -759,6 +789,30 @@ def test_archive_provenance_reaches_every_anchor(settings: Settings) -> None:
     assert result.anchors
     for anchor in result.anchors:
         assert anchor.source_label == "Conveyor_Line3.L5X (logic/Conveyor_Line3.L5X)"
+
+
+def test_a_long_filename_and_member_path_still_produce_a_bounded_label(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """Anchors are stored in String(255)/String(512)/String(400) columns.
+
+    SQLite stores the overflow silently, so an unbounded label works in the demo
+    and raises on PostgreSQL. The bound belongs to ``AnchorDraft``; this asserts
+    an L5X anchor gets it.
+    """
+    filename = "Conveyor_" + "L" * 100 + ".L5X"
+    member = "package/" + "nested/" * 60 + filename
+    path = _write(tmp_path, filename, _l5x('<Modules><Module Name="Local"/></Modules>'))
+
+    result = _parse(path, settings, archive_member_path=member)
+
+    assert result.anchors
+    assert len(f"{filename} ({member})") > 255
+    for anchor in result.anchors:
+        assert len(anchor.source_label) <= 255
+        assert len(anchor.display_location) <= 512
+        assert len(anchor.key) <= 400
+    assert result.anchors[0].source_label.startswith(f"Conveyor_{'L' * 20}")
 
 
 # ---------------------------------------------------------------------------
@@ -987,8 +1041,61 @@ def test_a_non_ladder_routine_is_reported_as_unsupported_content(
     items = [item for item in result.unsupported if item.kind == "routine_body"]
     assert len(items) == 1
     assert items[0].location == "P1 / R1"
-    assert "STContent" in items[0].detail
+    assert "<STContent>" in items[0].detail
+    assert "Type 'ST'" in items[0].detail
     assert result.content["programs"][0]["routines"][0]["rungs"] == []
+    assert result.content["rungs"] == []
+
+
+def test_a_routine_declaring_ladder_with_no_body_is_a_warning_not_a_capability_boundary(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """A missing body is an oddity in the export, not a limit of this parser.
+
+    Reporting it as ``routine_body`` said "routine type 'RLL' is not ladder
+    logic" about a routine the export declares as ladder — a message that states
+    the opposite of the file. What is true is only that no body element is there.
+    """
+    body = (
+        '<Programs><Program Name="P1" MainRoutineName="R1"><Routines>'
+        '<Routine Name="R1" Type="RLL"><Description><![CDATA[Empty.]]></Description>'
+        "</Routine></Routines></Program></Programs>"
+    )
+    path = _write(tmp_path, "bodyless_ladder.L5X", _l5x(body))
+
+    result = _parse(path, settings)
+
+    assert [item for item in result.unsupported if item.kind == "routine_body"] == []
+    structural = [warning for warning in result.warnings if warning.location == "P1 / R1"]
+    assert len(structural) == 1
+    assert structural[0].code == WarningCode.STRUCTURE_UNRECOGNISED
+    assert "declares Type 'RLL'" in structural[0].message
+    assert "no body element" in structural[0].message
+    assert "not ladder logic" not in structural[0].message
+    assert result.content["programs"][0]["routines"][0]["rungs"] == []
+    assert result.content["rungs"] == []
+
+
+def test_a_routine_whose_declared_type_disagrees_with_its_body_reports_both(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """The record states the declared Type and the body seen, and concludes neither."""
+    body = (
+        '<Programs><Program Name="P1" MainRoutineName="R1"><Routines>'
+        '<Routine Name="R1" Type="RLL"><STContent><Line Number="0">'
+        "<![CDATA[Out := In1 AND In2;]]></Line></STContent></Routine>"
+        "</Routines></Program></Programs>"
+    )
+    path = _write(tmp_path, "ladder_type_st_body.L5X", _l5x(body))
+
+    result = _parse(path, settings)
+
+    items = [item for item in result.unsupported if item.kind == "routine_body"]
+    assert len(items) == 1
+    assert items[0].location == "P1 / R1"
+    assert "Type 'RLL'" in items[0].detail
+    assert "<STContent>" in items[0].detail
+    assert "is not ladder logic" not in items[0].detail
     assert result.content["rungs"] == []
 
 
