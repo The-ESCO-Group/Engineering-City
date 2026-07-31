@@ -7,9 +7,9 @@ Work began against bootstrap commit `2f47487`. Backend foundation commit `08c3cf
 ## Completed
 
 - Strict React/Vite foundation with Router, Query, Zustand, Vitest, and Playwright.
-- Immersive full-viewport Three.js WebGL operations city with a central landmark skyline, eight workflow districts, hundreds of deterministic instanced buildings, connected metropolitan blocks, a broad block-tiled flat-world perspective with free 360° orbit and zoom, first-person walking with pointer-lock mouse look, semantic agent mapping, raycast selection, and reduced motion.
+- Immersive full-viewport Three.js WebGL operations city with 23 labeled operational zones, a multi-spire central skyline, dense deterministic instanced buildings, canals, bridges, renewable energy, water treatment, testing, data-center, maintenance, logistics and harbor infrastructure, a broad block-tiled flat-world perspective with free 360° orbit and zoom, first-person walking with pointer-lock mouse look, semantic agent mapping, raycast selection, and reduced motion.
 - Deterministic city-life simulation with bidirectional traffic, pedestrian movement and idling, water and route packets, rooftop beacons, and phase-varied window lighting; all ambient motion honors pause, speed, and reduced-motion state.
-- City-first spectator chrome with a compact icon rail, unified command bar, lightweight spatial labels, functional minimap controls, clearly labeled synthetic activity strip, compact six-layer dock, and operational summary.
+- City-first spectator chrome closely matched to the expanded ESCO reference, with a compact icon rail, unified command bar, world-tracked spatial labels, functional minimap controls, clearly labeled synthetic activity strip, compact six-layer dock, and operational summary.
 - Project portfolio, task board, findings, evidence comparison, approvals, reports, activity, and workspace tabs.
 - Clearly labeled offline demo data and real synthetic JSON browser export.
 - Tauri 2 Windows shell with local-only backend URL validation, Windows application resources, and a verified non-blank WebView render.

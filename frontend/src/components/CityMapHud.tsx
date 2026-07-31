@@ -10,6 +10,13 @@ interface DistrictLabel {
   y: string;
 }
 
+interface ScenicLabel {
+  label: string;
+  x: string;
+  y: string;
+  align?: "right";
+}
+
 export interface CityOperationsSummary {
   activeReviews: number;
   openFindings: number;
@@ -23,23 +30,42 @@ export interface CityMapHudProps {
   projectLabel?: string;
   summary?: Partial<CityOperationsSummary>;
   className?: string;
+  labelPositions?: Record<string, { deltaX: number; deltaY: number; visible: boolean }>;
 }
 
 const districts: DistrictLabel[] = [
-  { id: "intake", label: "North Review", detail: "Project intake · 1 queued", x: "23%", y: "43%" },
-  { id: "automation", label: "Automation Core", detail: "Logic review · 1 active", x: "40%", y: "34%" },
-  { id: "hmi", label: "HMI District", detail: "Tag review · 1 active", x: "66%", y: "42%" },
-  { id: "electrical", label: "Electrical Works", detail: "I/O review · 1 active", x: "84%", y: "48%" },
-  { id: "qa", label: "QA Campus", detail: "Validation · 1 waiting", x: "67%", y: "68%" },
-  { id: "documentation", label: "Documentation Quarter", detail: "Reports · package ready", x: "39%", y: "76%" },
-  { id: "approval", label: "Approval Plaza", detail: "Human gate · 2 pending", x: "18%", y: "61%" },
-  { id: "release", label: "Release Logistics", detail: "Delivery · gated", x: "80%", y: "78%" },
+  { id: "intake", label: "North Review", detail: "Project intake · 1 queued", x: "28.6%", y: "37.4%" },
+  { id: "automation", label: "Automation Core", detail: "Logic review · 1 active", x: "41.8%", y: "33.4%" },
+  { id: "hmi", label: "HMI District", detail: "Tag review · 1 active", x: "64.8%", y: "35%" },
+  { id: "electrical", label: "Electrical Works", detail: "I/O review · 1 active", x: "76.7%", y: "40.7%" },
+  { id: "qa", label: "QA Campus", detail: "Validation · 1 waiting", x: "64.1%", y: "50.5%" },
+  { id: "documentation", label: "Documentation Quarter", detail: "Reports · package ready", x: "40.7%", y: "54.9%" },
+  { id: "approval", label: "Approval Plaza", detail: "Human gate · 2 pending", x: "26.9%", y: "46.9%" },
+  { id: "release", label: "Release Logistics", detail: "Delivery · gated", x: "73.8%", y: "57.5%" },
+];
+
+const scenicLabels: ScenicLabel[] = [
+  { label: "North Gateway", x: "17.9%", y: "21.7%" },
+  { label: "Research Park", x: "30.9%", y: "23.6%" },
+  { label: "Innovation District", x: "45.4%", y: "20%" },
+  { label: "Energy Plant", x: "65.3%", y: "20.4%" },
+  { label: "Water Treatment", x: "85.6%", y: "22.7%" },
+  { label: "Industrial Zone", x: "89.7%", y: "36.2%" },
+  { label: "South Gateway", x: "96.2%", y: "49.8%", align: "right" },
+  { label: "Central Park", x: "51.8%", y: "59.9%" },
+  { label: "Maintenance Depot", x: "92.3%", y: "64.6%", align: "right" },
+  { label: "Design District", x: "22.4%", y: "65.8%" },
+  { label: "Training Academy", x: "36.2%", y: "65.7%" },
+  { label: "Supply Chain Hub", x: "67%", y: "70.1%" },
+  { label: "Wind Farm", x: "5%", y: "68%" },
+  { label: "Testing Grounds", x: "29.5%", y: "75.4%" },
+  { label: "Data Center", x: "52.8%", y: "79.7%" },
 ];
 
 const defaultSummary: CityOperationsSummary = {
-  activeReviews: 3,
+  activeReviews: 31,
   openFindings: 12,
-  pendingApprovals: 2,
+  pendingApprovals: 7,
   releaseReadiness: 68,
 };
 
@@ -49,6 +75,7 @@ export function CityMapHud({
   projectLabel = "Line 4 operations city",
   summary,
   className,
+  labelPositions,
 }: CityMapHudProps) {
   const operations = { ...defaultSummary, ...summary };
   const rootClassName = ["city-map-hud", className].filter(Boolean).join(" ");
@@ -58,16 +85,21 @@ export function CityMapHud({
       <nav className="city-map-hud__districts" aria-label="Engineering workflow districts">
         {districts.map((district) => {
           const selected = selectedBuilding === district.id;
+          const projection = labelPositions?.[district.id];
           const position = {
-            "--city-map-hud-x": district.x,
-            "--city-map-hud-y": district.y,
+            "--city-map-hud-x": projection
+              ? `calc(${district.x} + ${projection.deltaX.toFixed(3)}%)`
+              : district.x,
+            "--city-map-hud-y": projection
+              ? `calc(${district.y} + ${projection.deltaY.toFixed(3)}%)`
+              : district.y,
           } as CSSProperties;
 
           return (
             <button
               key={district.id}
               type="button"
-              className={`city-map-hud__district${selected ? " is-selected" : ""}`}
+              className={`city-map-hud__district${selected ? " is-selected" : ""}${projection && !projection.visible ? " is-offscreen" : ""}`}
               style={position}
               aria-label={`${district.label}: ${district.detail}`}
               aria-pressed={selected}
@@ -79,6 +111,28 @@ export function CityMapHud({
           );
         })}
       </nav>
+
+      <div className="city-map-hud__regions" aria-hidden="true">
+        {scenicLabels.map((region) => {
+          const projection = labelPositions?.[region.label];
+          return (
+            <span
+              key={region.label}
+              className={`city-map-hud__region${region.align === "right" ? " is-right-aligned" : ""}${projection && !projection.visible ? " is-offscreen" : ""}`}
+              style={{
+                "--city-map-hud-x": projection
+                  ? `calc(${region.x} + ${projection.deltaX.toFixed(3)}%)`
+                  : region.x,
+                "--city-map-hud-y": projection
+                  ? `calc(${region.y} + ${projection.deltaY.toFixed(3)}%)`
+                  : region.y,
+              } as CSSProperties}
+            >
+              {region.label}
+            </span>
+          );
+        })}
+      </div>
 
       <aside className="city-map-hud__operations" aria-label="City operations summary">
         <header>

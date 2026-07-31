@@ -12,10 +12,20 @@ export interface ThreeCityProps {
   zoom: number;
   resetKey: number;
   viewMode: "overview" | "first-person";
+  onLabelPositionsChange?: (positions: CityLabelPositions) => void;
 }
+
+export interface CityLabelProjection {
+  deltaX: number;
+  deltaY: number;
+  visible: boolean;
+}
+
+export type CityLabelPositions = Record<string, CityLabelProjection>;
 
 type Vec3 = readonly [number, number, number];
 type Point2 = readonly [number, number];
+type DistrictAccent = "cyan" | "orange" | "purple";
 
 interface AnchorSpec {
   id: BuildingId;
@@ -27,12 +37,17 @@ interface DistrictSpec {
   label: string;
   center: Point2;
   size: Point2;
+  accent: DistrictAccent;
   density: number;
   minHeight: number;
   maxHeight: number;
   skyline: number;
   seed: number;
-  labelHeight: number;
+}
+
+interface RectangularSite {
+  center: Point2;
+  size: Point2;
 }
 
 interface MaterialPalette {
@@ -140,19 +155,19 @@ interface FirstPersonLook {
   pitch: number;
 }
 
-const HUB: Point2 = [4, 20];
-const LANDMARK: Point2 = [-5, -11];
-const PARK: Point2 = [50, 52];
-const OVERVIEW_POSITION: Vec3 = [104, 75, 115];
-const OVERVIEW_TARGET: Vec3 = [0, 0, 5];
+const HUB: Point2 = [-16, 9];
+const LANDMARK: Point2 = [-17, -37];
+const PARK: Point2 = [14, 65];
+const OVERVIEW_POSITION: Vec3 = [60, 184, 270];
+const OVERVIEW_TARGET: Vec3 = [0, 0, 30];
 const OVERVIEW_FOV = 44;
 const FIRST_PERSON_START: Vec3 = [38, 1.86, 78];
-const FIRST_PERSON_TARGET: Vec3 = [4, 3.1, 18];
+const FIRST_PERSON_TARGET: Vec3 = [-16, 3.1, 9];
 const FIRST_PERSON_BOUNDS = {
-  minX: -112,
-  maxX: 112,
-  minZ: -86,
-  maxZ: 88
+  minX: -216,
+  maxX: 174,
+  minZ: -182,
+  maxZ: 132
 };
 const MOVEMENT_KEYS = new Set([
   "KeyW",
@@ -166,137 +181,402 @@ const MOVEMENT_KEYS = new Set([
   "ShiftLeft",
   "ShiftRight"
 ]);
-const METRO_VERTICAL_STREETS = [-99, -82, -64, -45, -25, -5, 16, 37, 59, 78, 96];
-const METRO_HORIZONTAL_STREETS = [-68, -53, -18, -4, 12, 40, 55, 69];
+const CITY_BOUNDS = {
+  minX: -214,
+  maxX: 172,
+  minZ: -178,
+  maxZ: 130
+};
+const METRO_VERTICAL_STREETS = [
+  -208, -190, -172, -154, -136, -118, -100, -82, -64, -46, -28, -10, 8, 26, 44,
+  62, 80, 98, 116, 134, 152, 170
+];
+const METRO_HORIZONTAL_STREETS = [
+  -174, -158, -142, -126, -110, -94, -78, -62, -46, -30, -14, 2, 18, 34, 50,
+  66, 82, 98, 114, 130
+];
+
+const WATER_BANDS: ReadonlyArray<RectangularSite> = [
+  { center: [-18, -132], size: [402, 12.5] },
+  { center: [-18, -89], size: [402, 11.5] },
+  { center: [-12, -28], size: [390, 9] },
+  { center: [116, -73], size: [11, 178] },
+  { center: [-154, 18], size: [10, 190] },
+  { center: [28, 122], size: [316, 18] }
+];
+
+const FEATURE_SITES: ReadonlyArray<RectangularSite> = [
+  { center: [-191, -98], size: [27, 18] },
+  { center: [-106, 121], size: [30, 24] },
+  { center: [-76, 123], size: [30, 20] },
+  { center: [-124, -98], size: [25, 18] },
+  { center: [29, -165], size: [31, 18] },
+  { center: [124, -168], size: [31, 22] },
+  { center: [-32, 124], size: [27, 18] },
+  { center: [30, 119], size: [30, 18] },
+  { center: [62, 86], size: [31, 20] },
+  { center: [131, 52], size: [29, 20] },
+  { center: [96, 126], size: [65, 18] }
+];
 
 const ANCHOR_SPECS: AnchorSpec[] = [
-  { id: "intake", position: [-62, -47], lot: [12, 9] },
-  { id: "automation", position: [12, -10], lot: [11, 10] },
-  { id: "hmi", position: [25, 5], lot: [11, 9] },
-  { id: "electrical", position: [-73, 47], lot: [14, 10] },
-  { id: "qa", position: [-24, 51], lot: [13, 10] },
-  { id: "documentation", position: [40, -50], lot: [11, 9] },
-  { id: "approval", position: [-61, 9], lot: [12, 9] },
-  { id: "release", position: [77, 48], lot: [15, 11] }
+  { id: "intake", position: [-95, -9], lot: [12, 9] },
+  { id: "automation", position: [-53, -44], lot: [11, 10] },
+  { id: "hmi", position: [39, -57], lot: [11, 9] },
+  { id: "electrical", position: [85, -36], lot: [14, 10] },
+  { id: "qa", position: [46, 21], lot: [13, 10] },
+  { id: "documentation", position: [-24, 56], lot: [11, 9] },
+  { id: "approval", position: [-80, 36], lot: [12, 9] },
+  { id: "release", position: [78, 40], lot: [15, 11] }
+];
+
+const CITY_LABEL_ANCHORS: ReadonlyArray<{
+  key: string;
+  position: readonly [number, number, number];
+}> = [
+  ...ANCHOR_SPECS.map(({ id, position }) => ({
+    key: id,
+    position: [position[0], 5.5, position[1]] as const
+  })),
+  { key: "North Gateway", position: [-191, 7, -98] },
+  { key: "Research Park", position: [-124, 3, -98] },
+  { key: "Innovation District", position: [-67, 5, -145] },
+  { key: "Energy Plant", position: [29, 4, -165] },
+  { key: "Water Treatment", position: [124, 3, -168] },
+  { key: "Industrial Zone", position: [134, 5, -73] },
+  { key: "South Gateway", position: [149, 5, -8] },
+  { key: "Central Park", position: [PARK[0], 2, PARK[1]] },
+  { key: "Maintenance Depot", position: [131, 3, 52] },
+  { key: "Design District", position: [-62, 4, 104] },
+  { key: "Training Academy", position: [-24, 3, 94] },
+  { key: "Supply Chain Hub", position: [62, 4, 86] },
+  { key: "Wind Farm", position: [-106, 4, 121] },
+  { key: "Testing Grounds", position: [-32, 3, 124] },
+  { key: "Data Center", position: [30, 3, 119] }
 ];
 
 const DISTRICTS: DistrictSpec[] = [
   {
     label: "CENTRAL OPERATIONS",
-    center: [0, -5],
-    size: [68, 49],
-    density: 0.92,
+    center: [-17, -37],
+    size: [76, 54],
+    accent: "cyan",
+    density: 0.95,
     minHeight: 5,
-    maxHeight: 23,
-    skyline: 1.22,
-    seed: 1103,
-    labelHeight: 37
+    maxHeight: 30,
+    skyline: 1.42,
+    seed: 1103
   },
   {
     label: "NORTH DISTRICT",
-    center: [-65, -50],
-    size: [48, 28],
+    center: [-95, -9],
+    size: [50, 30],
+    accent: "cyan",
     density: 0.86,
     minHeight: 3,
-    maxHeight: 14,
-    skyline: 0.78,
-    seed: 2207,
-    labelHeight: 21
+    maxHeight: 15,
+    skyline: 0.82,
+    seed: 2207
   },
   {
     label: "FINANCIAL / DOCS",
-    center: [43, -51],
-    size: [45, 28],
+    center: [38, -52],
+    size: [48, 32],
+    accent: "orange",
     density: 0.9,
     minHeight: 4,
-    maxHeight: 17,
-    skyline: 0.96,
-    seed: 3301,
-    labelHeight: 24
+    maxHeight: 18,
+    skyline: 1,
+    seed: 3301
   },
   {
     label: "EAST DISTRICT",
-    center: [72, -16],
-    size: [45, 31],
+    center: [85, -36],
+    size: [48, 34],
+    accent: "orange",
     density: 0.88,
     minHeight: 3,
-    maxHeight: 15,
-    skyline: 0.88,
-    seed: 4409,
-    labelHeight: 23
+    maxHeight: 16,
+    skyline: 0.92,
+    seed: 4409
   },
   {
     label: "WEST DISTRICT",
-    center: [-65, 9],
-    size: [42, 31],
+    center: [-80, 32],
+    size: [48, 34],
+    accent: "purple",
     density: 0.84,
-    minHeight: 3,
-    maxHeight: 13,
-    skyline: 0.76,
-    seed: 5501,
-    labelHeight: 20
-  },
-  {
-    label: "INDUSTRIAL ZONE",
-    center: [-77, 49],
-    size: [48, 32],
-    density: 0.74,
-    minHeight: 2.5,
-    maxHeight: 8,
-    skyline: 0.5,
-    seed: 6607,
-    labelHeight: 17
-  },
-  {
-    label: "SOUTH DISTRICT",
-    center: [-25, 53],
-    size: [50, 35],
-    density: 0.87,
     minHeight: 3,
     maxHeight: 14,
     skyline: 0.8,
-    seed: 7703,
-    labelHeight: 21
+    seed: 5501
+  },
+  {
+    label: "INDUSTRIAL ZONE",
+    center: [-62, 79],
+    size: [48, 32],
+    accent: "purple",
+    density: 0.74,
+    minHeight: 2.5,
+    maxHeight: 9,
+    skyline: 0.54,
+    seed: 6607
+  },
+  {
+    label: "SOUTH DISTRICT",
+    center: [-24, 58],
+    size: [52, 36],
+    accent: "purple",
+    density: 0.87,
+    minHeight: 3,
+    maxHeight: 15,
+    skyline: 0.84,
+    seed: 7703
   },
   {
     label: "INNOVATION DISTRICT",
-    center: [35, 43],
-    size: [48, 35],
+    center: [44, 20],
+    size: [50, 36],
+    accent: "purple",
     density: 0.78,
     minHeight: 3,
-    maxHeight: 14,
-    skyline: 0.9,
-    seed: 8803,
-    labelHeight: 23
+    maxHeight: 15,
+    skyline: 0.94,
+    seed: 8803
   },
   {
     label: "LOGISTICS HUB",
-    center: [82, 48],
-    size: [39, 30],
+    center: [78, 42],
+    size: [44, 34],
+    accent: "orange",
     density: 0.68,
+    minHeight: 2,
+    maxHeight: 8,
+    skyline: 0.46,
+    seed: 9901
+  },
+  {
+    label: "NORTH GATEWAY",
+    center: [-191, -98],
+    size: [46, 28],
+    accent: "cyan",
+    density: 0.84,
+    minHeight: 3,
+    maxHeight: 17,
+    skyline: 1.04,
+    seed: 10103
+  },
+  {
+    label: "RESEARCH PARK",
+    center: [-124, -98],
+    size: [35, 25],
+    accent: "purple",
+    density: 0.7,
+    minHeight: 2.4,
+    maxHeight: 9,
+    skyline: 0.62,
+    seed: 11113
+  },
+  {
+    label: "INNOVATION BELT",
+    center: [-67, -145],
+    size: [39, 27],
+    accent: "purple",
+    density: 0.86,
+    minHeight: 3,
+    maxHeight: 14,
+    skyline: 0.9,
+    seed: 12109
+  },
+  {
+    label: "ENERGY CAMPUS",
+    center: [29, -165],
+    size: [43, 27],
+    accent: "cyan",
+    density: 0.57,
     minHeight: 2,
     maxHeight: 7,
     skyline: 0.42,
-    seed: 9901,
-    labelHeight: 16
+    seed: 13103
+  },
+  {
+    label: "WATER WORKS",
+    center: [124, -168],
+    size: [44, 30],
+    accent: "cyan",
+    density: 0.64,
+    minHeight: 2,
+    maxHeight: 8,
+    skyline: 0.48,
+    seed: 14107
+  },
+  {
+    label: "EAST INDUSTRIAL",
+    center: [134, -73],
+    size: [46, 39],
+    accent: "orange",
+    density: 0.72,
+    minHeight: 2,
+    maxHeight: 10,
+    skyline: 0.58,
+    seed: 15101
+  },
+  {
+    label: "SOUTH GATEWAY",
+    center: [149, -8],
+    size: [39, 31],
+    accent: "orange",
+    density: 0.76,
+    minHeight: 2.5,
+    maxHeight: 11,
+    skyline: 0.66,
+    seed: 16111
+  },
+  {
+    label: "MAINTENANCE DEPOT",
+    center: [131, 52],
+    size: [44, 32],
+    accent: "orange",
+    density: 0.63,
+    minHeight: 2,
+    maxHeight: 7,
+    skyline: 0.4,
+    seed: 17107
+  },
+  {
+    label: "SUPPLY CHAIN",
+    center: [62, 86],
+    size: [47, 33],
+    accent: "orange",
+    density: 0.7,
+    minHeight: 2,
+    maxHeight: 8,
+    skyline: 0.48,
+    seed: 18113
+  },
+  {
+    label: "DATA CENTER",
+    center: [30, 119],
+    size: [43, 28],
+    accent: "cyan",
+    density: 0.62,
+    minHeight: 2,
+    maxHeight: 8,
+    skyline: 0.44,
+    seed: 19121
+  },
+  {
+    label: "TESTING GROUNDS",
+    center: [-32, 124],
+    size: [43, 29],
+    accent: "cyan",
+    density: 0.67,
+    minHeight: 2,
+    maxHeight: 9,
+    skyline: 0.52,
+    seed: 20107
+  },
+  {
+    label: "TRAINING ACADEMY",
+    center: [-24, 94],
+    size: [37, 27],
+    accent: "purple",
+    density: 0.74,
+    minHeight: 2.4,
+    maxHeight: 10,
+    skyline: 0.62,
+    seed: 21101
+  },
+  {
+    label: "DESIGN DISTRICT",
+    center: [-62, 104],
+    size: [43, 31],
+    accent: "purple",
+    density: 0.76,
+    minHeight: 2.5,
+    maxHeight: 11,
+    skyline: 0.68,
+    seed: 22109
+  },
+  {
+    label: "WEST GATEWAY",
+    center: [-174, -143],
+    size: [54, 27],
+    accent: "cyan",
+    density: 0.84,
+    minHeight: 3,
+    maxHeight: 15,
+    skyline: 0.92,
+    seed: 23117
+  },
+  {
+    label: "NORTH INNOVATION",
+    center: [-92, -158],
+    size: [50, 28],
+    accent: "purple",
+    density: 0.86,
+    minHeight: 3,
+    maxHeight: 14,
+    skyline: 0.88,
+    seed: 24107
+  },
+  {
+    label: "UTILITY RIDGE",
+    center: [10, -166],
+    size: [52, 27],
+    accent: "cyan",
+    density: 0.66,
+    minHeight: 2,
+    maxHeight: 8,
+    skyline: 0.46,
+    seed: 25111
+  },
+  {
+    label: "NORTH WATERFRONT",
+    center: [103, -160],
+    size: [54, 29],
+    accent: "orange",
+    density: 0.73,
+    minHeight: 2.5,
+    maxHeight: 10,
+    skyline: 0.58,
+    seed: 26113
   }
 ];
 
 const ROAD_SEGMENTS: RoadSegment[] = [
-  { from: [-88, 10], to: [-53, 10], width: 4.2 },
-  { from: [-53, 10], to: HUB, width: 4.6 },
-  { from: HUB, to: [39, 15], width: 4.8 },
-  { from: [39, 15], to: [75, -14], width: 4.4 },
-  { from: [-3, -18], to: HUB, width: 4.6 },
-  { from: [-3, -18], to: [-58, -40], width: 4.2 },
-  { from: [-3, -18], to: [42, -40], width: 4.2 },
-  { from: HUB, to: [-26, 40], width: 4.5 },
-  { from: [-26, 40], to: [-70, 45], width: 4.1 },
-  { from: HUB, to: [35, 37], width: 4.5 },
-  { from: [35, 37], to: [77, 44], width: 4.4 },
-  { from: [-25, 40], to: [-23, 67], width: 3.7 },
-  { from: [35, 37], to: [37, 60], width: 3.7 },
-  { from: [38, 78], to: HUB, width: 4.2 }
+  { from: [-80, 36], to: [-95, -9], width: 4.2 },
+  { from: [-95, -9], to: [-53, -44], width: 4.4 },
+  { from: [-53, -44], to: HUB, width: 4.7 },
+  { from: HUB, to: [39, -57], width: 4.8 },
+  { from: [39, -57], to: [85, -36], width: 4.5 },
+  { from: HUB, to: [46, 21], width: 4.8 },
+  { from: [46, 21], to: [78, 40], width: 4.5 },
+  { from: HUB, to: [-24, 56], width: 4.6 },
+  { from: [-24, 56], to: [-80, 36], width: 4.3 },
+  { from: HUB, to: [-80, 36], width: 4.5 },
+  { from: [39, -57], to: [29, -165], width: 4.3 },
+  { from: [85, -36], to: [134, -73], width: 4.4 },
+  { from: [134, -73], to: [124, -168], width: 4.2 },
+  { from: [78, 40], to: [149, -8], width: 4.4 },
+  { from: [78, 40], to: [131, 52], width: 4.3 },
+  { from: [78, 40], to: [62, 86], width: 4.3 },
+  { from: [-24, 56], to: [-24, 94], width: 4 },
+  { from: [-24, 94], to: [-32, 124], width: 4 },
+  { from: [-24, 56], to: [-62, 104], width: 4.1 },
+  { from: [-95, -9], to: [-124, -98], width: 4.2 },
+  { from: [-124, -98], to: [-191, -98], width: 4.2 },
+  { from: [-53, -44], to: [-67, -145], width: 4.2 },
+  { from: [29, -165], to: [124, -168], width: 4.1 },
+  { from: [62, 86], to: [30, 119], width: 4.1 },
+  { from: [30, 119], to: [96, 126], width: 4.1 },
+  { from: [131, 52], to: [96, 126], width: 4.1 },
+  { from: [46, 21], to: PARK, width: 4 },
+  { from: PARK, to: [62, 86], width: 4.2 },
+  { from: [-191, -98], to: [-174, -143], width: 3.9 },
+  { from: [-124, -98], to: [-92, -158], width: 3.9 },
+  { from: [-67, -145], to: [10, -166], width: 4 },
+  { from: [29, -165], to: [103, -160], width: 4 }
 ];
 
 const ROOT_STYLE: CSSProperties = {
@@ -433,8 +713,8 @@ const makeGlow = (color: number, opacity: number) =>
 
 function createPalette(): MaterialPalette {
   return {
-    white: makeStandard(0xf4f6f2, 0.44, 0.13),
-    light: makeStandard(0xcbd7d7, 0.5, 0.18),
+    white: makeStandard(0xdde7e5, 0.46, 0.13),
+    light: makeStandard(0xbacacc, 0.52, 0.18),
     concrete: makeStandard(0x789098, 0.74, 0.08),
     roof: makeStandard(0x879ba0, 0.56, 0.28),
     glassCyan: makeGlass(0x06344a, 0x00c8f2, 0.66),
@@ -443,11 +723,11 @@ function createPalette(): MaterialPalette {
     blackSteel: makeStandard(0x1a303c, 0.34, 0.68),
     asphalt: makeStandard(0x263d49, 0.84, 0.07),
     water: new THREE.MeshPhysicalMaterial({
-      color: 0x0b526b,
-      emissive: 0x00637b,
-      emissiveIntensity: 0.5,
-      roughness: 0.2,
-      metalness: 0.42,
+      color: 0x1b6282,
+      emissive: 0x005a73,
+      emissiveIntensity: 0.36,
+      roughness: 0.17,
+      metalness: 0.36,
       clearcoat: 1,
       clearcoatRoughness: 0.08
     }),
@@ -480,26 +760,6 @@ function createPalette(): MaterialPalette {
       emissiveIntensity: 0.85
     })
   };
-}
-
-type DistrictAccent = "cyan" | "orange" | "purple";
-
-function districtAccentFor(label: string): DistrictAccent {
-  if (
-    label === "FINANCIAL / DOCS" ||
-    label === "EAST DISTRICT" ||
-    label === "LOGISTICS HUB"
-  ) {
-    return "orange";
-  }
-  if (
-    label === "NORTH DISTRICT" ||
-    label === "INNOVATION DISTRICT" ||
-    label === "SOUTH DISTRICT"
-  ) {
-    return "purple";
-  }
-  return "cyan";
 }
 
 function anchorAccentFor(id: BuildingId): DistrictAccent {
@@ -595,7 +855,7 @@ function createWorldGround(scene: THREE.Scene, palette: MaterialPalette) {
   scene.add(ground);
 
   const urbanGround = new THREE.Mesh(
-    new THREE.PlaneGeometry(252, 184),
+    new THREE.PlaneGeometry(440, 340),
     new THREE.MeshStandardMaterial({
       color: 0x183846,
       roughness: 0.96,
@@ -614,7 +874,7 @@ function createWorldGround(scene: THREE.Scene, palette: MaterialPalette) {
     for (let chunkZ = -42; chunkZ <= 42; chunkZ += 1) {
       const x = chunkX * chunkSize;
       const z = chunkZ * chunkSize;
-      if (Math.abs(x) < 142 && Math.abs(z) < 108) continue;
+      if (Math.abs(x) < 236 && Math.abs(z) < 190) continue;
       const variant = Math.abs((chunkX * 17 + chunkZ * 31 + chunkX * chunkZ * 3) % 4);
       chunkMatrices[variant].push(
         boxMatrix(x, -0.045, z, chunkSize + 0.035, 0.08, chunkSize + 0.035)
@@ -633,9 +893,7 @@ function createWorldGround(scene: THREE.Scene, palette: MaterialPalette) {
     addInstancedBoxes(scene, chunkGeometry, matrices, chunkMaterials[index], false);
   });
 
-  createWaterBand(scene, palette, [0, -33], [219, 7.2]);
-  createWaterBand(scene, palette, [0, 27.5], [219, 6.4]);
-  createWaterBand(scene, palette, [49, -2.5], [7, 54]);
+  WATER_BANDS.forEach((band) => createWaterBand(scene, palette, band.center, band.size));
 }
 
 function createWaterBand(
@@ -644,18 +902,18 @@ function createWaterBand(
   center: Point2,
   size: Point2
 ) {
-  addBox(scene, [size[0], 0.06, size[1]], [center[0], 0.035, center[1]], palette.water, false);
+  addBox(scene, [size[0], 0.08, size[1]], [center[0], 0.2, center[1]], palette.water, false);
   const flowSize: Vec3 =
     size[0] > size[1]
-      ? [size[0] * 0.985, 0.018, Math.min(1.2, size[1] * 0.22)]
-      : [Math.min(1.2, size[0] * 0.22), 0.018, size[1] * 0.985];
-  addBox(scene, flowSize, [center[0], 0.075, center[1]], palette.cyanGlow, false);
+      ? [size[0] * 0.985, 0.018, Math.min(0.42, size[1] * 0.08)]
+      : [Math.min(0.42, size[0] * 0.08), 0.018, size[1] * 0.985];
+  addBox(scene, flowSize, [center[0], 0.246, center[1]], palette.cyanGlow, false);
   if (size[0] > size[1]) {
     for (const offset of [-size[1] / 2, size[1] / 2]) {
       addBox(
         scene,
         [size[0], 0.18, 0.34],
-        [center[0], 0.1, center[1] + offset],
+        [center[0], 0.252, center[1] + offset],
         palette.concrete,
         false
       );
@@ -665,7 +923,7 @@ function createWaterBand(
       addBox(
         scene,
         [0.34, 0.18, size[1]],
-        [center[0] + offset, 0.1, center[1]],
+        [center[0] + offset, 0.252, center[1]],
         palette.concrete,
         false
       );
@@ -693,7 +951,7 @@ function createDistrictPads(scene: THREE.Scene, palette: MaterialPalette) {
     const [width, depth] = district.size;
     const [x, z] = district.center;
     const shape = makeClippedDistrictShape(width, depth);
-    const accent = districtAccentFor(district.label);
+    const accent = district.accent;
     const surfaceMaterial = new THREE.MeshStandardMaterial({
       color:
         accent === "orange"
@@ -750,81 +1008,100 @@ function pointToSegmentDistance(point: Point2, segment: RoadSegment) {
   return Math.hypot(px - (ax + t * dx), pz - (az + t * dz));
 }
 
-function orientAlongRoad(object: THREE.Object3D, from: Point2, to: Point2) {
-  object.rotation.y = -Math.atan2(to[1] - from[1], to[0] - from[0]);
-}
+function createRoadNetwork(scene: THREE.Scene, palette: MaterialPalette) {
+  const roadMatrices: THREE.Matrix4[] = [];
+  const curbMatrices: THREE.Matrix4[] = [];
+  const glowMatrices: THREE.Matrix4[] = [];
+  const dashMatrices: THREE.Matrix4[] = [];
 
-function createRoad(scene: THREE.Scene, segment: RoadSegment, palette: MaterialPalette) {
-  const [ax, az] = segment.from;
-  const [bx, bz] = segment.to;
-  const dx = bx - ax;
-  const dz = bz - az;
-  const length = Math.hypot(dx, dz);
-  const midpoint: Point2 = [(ax + bx) / 2, (az + bz) / 2];
-  const road = addBox(
-    scene,
-    [length, 0.14, segment.width],
-    [midpoint[0], 0.235, midpoint[1]],
-    palette.asphalt,
-    false
-  );
-  orientAlongRoad(road, segment.from, segment.to);
+  for (const segment of ROAD_SEGMENTS) {
+    const [ax, az] = segment.from;
+    const [bx, bz] = segment.to;
+    const dx = bx - ax;
+    const dz = bz - az;
+    const length = Math.hypot(dx, dz);
+    const midpoint: Point2 = [(ax + bx) / 2, (az + bz) / 2];
+    const rotation = -Math.atan2(dz, dx);
+    const normalX = -dz / length;
+    const normalZ = dx / length;
+    const unitX = dx / length;
+    const unitZ = dz / length;
 
-  const normalX = -dz / length;
-  const normalZ = dx / length;
+    roadMatrices.push(
+      boxMatrix(midpoint[0], 0.235, midpoint[1], length, 0.14, segment.width, rotation)
+    );
+    glowMatrices.push(
+      boxMatrix(midpoint[0], 0.334, midpoint[1], length, 0.026, 0.18, rotation)
+    );
+    for (const side of [-1, 1]) {
+      curbMatrices.push(
+        boxMatrix(
+          midpoint[0] + normalX * side * segment.width * 0.49,
+          0.32,
+          midpoint[1] + normalZ * side * segment.width * 0.49,
+          length,
+          0.1,
+          0.22,
+          rotation
+        )
+      );
+    }
+    for (let distance = 1.1; distance < length - 1; distance += 2.35) {
+      dashMatrices.push(
+        boxMatrix(
+          ax + unitX * distance,
+          0.336,
+          az + unitZ * distance,
+          Math.min(1.25, length - distance),
+          0.035,
+          0.16,
+          rotation
+        )
+      );
+    }
+  }
+
+  WATER_BANDS.forEach(({ center, size }, bandIndex) => {
+    if (size[0] > size[1]) {
+      METRO_VERTICAL_STREETS.forEach((x, streetIndex) => {
+        if ((streetIndex + bandIndex) % 2 !== 0) return;
+        roadMatrices.push(boxMatrix(x, 0.25, center[1], 1.85, 0.16, size[1] + 2.4));
+        glowMatrices.push(boxMatrix(x, 0.345, center[1], 0.08, 0.025, size[1] + 1.8));
+      });
+    } else {
+      METRO_HORIZONTAL_STREETS.forEach((z, streetIndex) => {
+        if ((streetIndex + bandIndex) % 2 !== 0) return;
+        roadMatrices.push(boxMatrix(center[0], 0.25, z, size[0] + 2.4, 0.16, 1.85));
+        glowMatrices.push(boxMatrix(center[0], 0.345, z, size[0] + 1.8, 0.025, 0.08));
+      });
+    }
+  });
+
+  const unitBox = new THREE.BoxGeometry(1, 1, 1);
   const curbMaterial = new THREE.MeshBasicMaterial({
     color: 0x8ba7b5,
     transparent: true,
     opacity: 0.68
   });
-  for (const side of [-1, 1]) {
-    const curb = addBox(
-      scene,
-      [length, 0.1, 0.22],
-      [
-        midpoint[0] + normalX * side * segment.width * 0.49,
-        0.32,
-        midpoint[1] + normalZ * side * segment.width * 0.49
-      ],
-      curbMaterial,
-      false
-    );
-    orientAlongRoad(curb, segment.from, segment.to);
-  }
-
-  const unitX = dx / length;
-  const unitZ = dz / length;
-  const glowTrack = addBox(
-    scene,
-    [length, 0.026, 0.18],
-    [midpoint[0], 0.334, midpoint[1]],
-    palette.mobilityGlow,
-    false
-  );
-  orientAlongRoad(glowTrack, segment.from, segment.to);
-  const dashLength = 1.25;
-  for (let distance = 1.1; distance < length - 1; distance += 2.35) {
-    const dash = addBox(
-      scene,
-      [Math.min(dashLength, length - distance), 0.035, 0.16],
-      [ax + unitX * distance, 0.336, az + unitZ * distance],
-      palette.mobilityGlow,
-      false
-    );
-    orientAlongRoad(dash, segment.from, segment.to);
-  }
-}
-
-function createRoadNetwork(scene: THREE.Scene, palette: MaterialPalette) {
-  for (const segment of ROAD_SEGMENTS) createRoad(scene, segment, palette);
+  addInstancedBoxes(scene, unitBox, roadMatrices, palette.asphalt, false);
+  addInstancedBoxes(scene, unitBox, curbMatrices, curbMaterial, false);
+  addInstancedBoxes(scene, unitBox, glowMatrices, palette.mobilityGlow, false);
+  addInstancedBoxes(scene, unitBox, dashMatrices, palette.mobilityGlow, false);
 
   for (const [x, z] of [
-    [-31, -33],
-    [23, -33],
-    [-7, 27.5],
-    [29, 27.5],
-    [49, -19],
-    [49, 13]
+    [-84, -58],
+    [-31, -58],
+    [24, -58],
+    [72, -58],
+    [-58, 27],
+    [-7, 27],
+    [31, 27],
+    [76, 27],
+    [93, -42],
+    [93, -5],
+    [93, 35],
+    [-116, 15],
+    [-116, 70]
   ] as Point2[]) {
     addCylinder(scene, 0.32, 1.1, [x, -0.36, z], palette.concrete, 12);
   }
@@ -1056,12 +1333,12 @@ function seededRandom(seed: number) {
 
 function isNearMetroStreet(x: number, z: number, clearance = 1.65) {
   const onVertical =
-    z >= -75 &&
-    z <= 75 &&
+    z >= CITY_BOUNDS.minZ &&
+    z <= CITY_BOUNDS.maxZ &&
     METRO_VERTICAL_STREETS.some((streetX) => Math.abs(x - streetX) < clearance);
   const onHorizontal =
-    x >= -110 &&
-    x <= 110 &&
+    x >= CITY_BOUNDS.minX &&
+    x <= CITY_BOUNDS.maxX &&
     METRO_HORIZONTAL_STREETS.some((streetZ) => Math.abs(z - streetZ) < clearance);
   return onVertical || onHorizontal;
 }
@@ -1075,28 +1352,33 @@ function isInsideDistrict(x: number, z: number, margin = 0) {
 }
 
 function isInsideWater(x: number, z: number) {
-  const northChannel = Math.abs(z + 33) < 4.25 && Math.abs(x) < 111;
-  const southChannel = Math.abs(z - 27.5) < 3.85 && Math.abs(x) < 111;
-  const eastChannel = Math.abs(x - 49) < 3.85 && z > -30 && z < 25;
-  return northChannel || southChannel || eastChannel;
+  return WATER_BANDS.some(
+    ({ center, size }) =>
+      Math.abs(x - center[0]) < size[0] / 2 + 0.35 &&
+      Math.abs(z - center[1]) < size[1] / 2 + 0.35
+  );
 }
 
 function metroAccentAt(x: number, z: number): DistrictAccent {
-  if (x > 34 && z < 22) return "orange";
-  if (z < -27 || (x > 12 && z > 28)) return "purple";
+  if (x > 58 || (x > 18 && z > 62)) return "orange";
+  if (x < -18 || z < -62) return "purple";
   return "cyan";
 }
 
 function createMetroFabric(scene: THREE.Scene, palette: MaterialPalette) {
   const streetMatrices: THREE.Matrix4[] = [];
   const laneMatrices: THREE.Matrix4[] = [];
+  const cityWidth = CITY_BOUNDS.maxX - CITY_BOUNDS.minX;
+  const cityDepth = CITY_BOUNDS.maxZ - CITY_BOUNDS.minZ;
+  const cityCenterX = (CITY_BOUNDS.minX + CITY_BOUNDS.maxX) / 2;
+  const cityCenterZ = (CITY_BOUNDS.minZ + CITY_BOUNDS.maxZ) / 2;
   for (const x of METRO_VERTICAL_STREETS) {
-    streetMatrices.push(boxMatrix(x, 0.105, 0, 1.4, 0.07, 150));
-    laneMatrices.push(boxMatrix(x, 0.148, 0, 0.045, 0.018, 147));
+    streetMatrices.push(boxMatrix(x, 0.105, cityCenterZ, 1.4, 0.07, cityDepth));
+    laneMatrices.push(boxMatrix(x, 0.148, cityCenterZ, 0.045, 0.018, cityDepth - 3));
   }
   for (const z of METRO_HORIZONTAL_STREETS) {
-    streetMatrices.push(boxMatrix(0, 0.106, z, 220, 0.07, 1.4));
-    laneMatrices.push(boxMatrix(0, 0.149, z, 216, 0.018, 0.045));
+    streetMatrices.push(boxMatrix(cityCenterX, 0.106, z, cityWidth, 0.07, 1.4));
+    laneMatrices.push(boxMatrix(cityCenterX, 0.149, z, cityWidth - 4, 0.018, 0.045));
   }
 
   const random = seededRandom(140219);
@@ -1114,10 +1396,10 @@ function createMetroFabric(scene: THREE.Scene, palette: MaterialPalette) {
     orange: [],
     purple: []
   };
-  const pitch = 5.35;
-  for (let x = -107; x <= 107; x += pitch) {
-    for (let z = -72; z <= 72; z += pitch) {
-      if (random() > 0.62) continue;
+  const pitch = 4.8;
+  for (let x = CITY_BOUNDS.minX + 3; x <= CITY_BOUNDS.maxX - 3; x += pitch) {
+    for (let z = CITY_BOUNDS.minZ + 3; z <= CITY_BOUNDS.maxZ - 3; z += pitch) {
+      if (random() > 0.7) continue;
       const buildingX = x + (random() - 0.5) * 0.55;
       const buildingZ = z + (random() - 0.5) * 0.55;
       if (
@@ -1232,14 +1514,14 @@ function createVehicleLife(scene: THREE.Scene, palette: MaterialPalette): Vehicl
   const pathDefinitions: Array<RoadSegment & { surfaceY: number }> = [
     ...ROAD_SEGMENTS.map((segment) => ({ ...segment, surfaceY: 0.52 })),
     ...METRO_VERTICAL_STREETS.map((x) => ({
-      from: [x, -74] as Point2,
-      to: [x, 74] as Point2,
+      from: [x, CITY_BOUNDS.minZ] as Point2,
+      to: [x, CITY_BOUNDS.maxZ] as Point2,
       width: 1.4,
       surfaceY: 0.36
     })),
     ...METRO_HORIZONTAL_STREETS.map((z) => ({
-      from: [-109, z] as Point2,
-      to: [109, z] as Point2,
+      from: [CITY_BOUNDS.minX, z] as Point2,
+      to: [CITY_BOUNDS.maxX, z] as Point2,
       width: 1.4,
       surfaceY: 0.36
     }))
@@ -1488,11 +1770,18 @@ function updatePulseRuntime(runtime: PulseRuntime, delta: number) {
 }
 
 function createWaterPulses(scene: THREE.Scene, palette: MaterialPalette): PulseRuntime {
-  const paths: Array<{ from: Point2; to: Point2 }> = [
-    { from: [-108, -33], to: [108, -33] },
-    { from: [-108, 27.5], to: [108, 27.5] },
-    { from: [49, -28], to: [49, 24] }
-  ];
+  const paths: Array<{ from: Point2; to: Point2 }> = WATER_BANDS.map(
+    ({ center, size }): { from: Point2; to: Point2 } =>
+      size[0] > size[1]
+        ? {
+            from: [center[0] - size[0] / 2 + 3, center[1]],
+            to: [center[0] + size[0] / 2 - 3, center[1]]
+          }
+        : {
+            from: [center[0], center[1] - size[1] / 2 + 3],
+            to: [center[0], center[1] + size[1] / 2 - 3]
+          }
+  );
   const random = seededRandom(90817);
   const motions: PulseMotion[] = [];
   paths.forEach((path, pathIndex) => {
@@ -1606,10 +1895,20 @@ function updateRooftopSignals(runtime: SignalRuntime, elapsed: number) {
 
 function isReserved(x: number, z: number) {
   if (Math.hypot(x - HUB[0], z - HUB[1]) < 14.2) return true;
-  if (Math.hypot(x - LANDMARK[0], z - LANDMARK[1]) < 6.8) return true;
+  if (Math.hypot(x - LANDMARK[0], z - LANDMARK[1]) < 12.5) return true;
   if (Math.hypot(x - PARK[0], z - PARK[1]) < 15.6) return true;
   if (Math.hypot(x + 88, z - 50) < 7.8) return true;
   if (Math.hypot(x - 91, z - 53) < 7.2) return true;
+  if (isInsideWater(x, z)) return true;
+  if (
+    FEATURE_SITES.some(
+      ({ center, size }) =>
+        Math.abs(x - center[0]) < size[0] / 2 &&
+        Math.abs(z - center[1]) < size[1] / 2
+    )
+  ) {
+    return true;
+  }
   if (
     ANCHOR_SPECS.some(
       (anchor) =>
@@ -1650,8 +1949,8 @@ function createProceduralBuildings(scene: THREE.Scene, palette: MaterialPalette)
 
   for (const district of DISTRICTS) {
     const random = seededRandom(district.seed);
-    const districtAccent = districtAccentFor(district.label);
-    const pitch = 4.05;
+    const districtAccent = district.accent;
+    const pitch = 3.55;
     const columns = Math.floor((district.size[0] - 6) / pitch);
     const rows = Math.floor((district.size[1] - 6) / pitch);
     for (let column = 0; column < columns; column += 1) {
@@ -1833,6 +2132,19 @@ function createCentralLandmark(scene: THREE.Scene, palette: MaterialPalette) {
     addBox(group, [0.22, 17.7, 6.15], [side * 3.32, 14.4, 0], palette.light);
     addBox(group, [6.85, 17.7, 0.19], [0, 14.4, side * 2.99], palette.light);
   }
+  for (const [x, z, width, depth, height, rows] of [
+    [-8.4, -3.5, 3.7, 3.4, 25, 12],
+    [8.1, -3.2, 4.1, 3.7, 22, 10],
+    [-8.7, 4.5, 3.2, 3.2, 18, 8],
+    [8.5, 4.3, 3.4, 3.1, 17, 8],
+    [-3.7, 7.3, 3.1, 3.1, 21, 10],
+    [4.1, 7.2, 2.9, 3.1, 16, 7]
+  ] as Array<readonly [number, number, number, number, number, number]>) {
+    addBox(group, [width + 0.7, 0.9, depth + 0.7], [x, 0.45, z], palette.concrete);
+    addBox(group, [width, height, depth], [x, 0.9 + height / 2, z], palette.white);
+    addFacadeBands(group, width + 0.04, depth + 0.04, height, rows, palette.glassCyan, x, z);
+    addBox(group, [width + 0.2, 0.24, depth + 0.2], [x, height + 1.02, z], palette.roof);
+  }
   scene.add(group);
 }
 
@@ -1927,6 +2239,288 @@ function createLogisticsDetails(scene: THREE.Scene, palette: MaterialPalette) {
     addBox(group, [2.48, 0.11, 1.18], [x, 1.24, z], palette.blackSteel);
   }
   scene.add(group);
+}
+
+function createExpandedInfrastructure(scene: THREE.Scene, palette: MaterialPalette) {
+  const transform = new THREE.Object3D();
+  const compose = (
+    x: number,
+    y: number,
+    z: number,
+    width: number,
+    height: number,
+    depth: number,
+    rotationX = 0,
+    rotationY = 0,
+    rotationZ = 0
+  ) => {
+    transform.position.set(x, y, z);
+    transform.rotation.set(rotationX, rotationY, rotationZ);
+    transform.scale.set(width, height, depth);
+    transform.updateMatrix();
+    return transform.matrix.clone();
+  };
+
+  const turbineSites: Point2[] = [
+    [-121, 112],
+    [-112, 118],
+    [-101, 114],
+    [-118, 126],
+    [-107, 129],
+    [-95, 123],
+    [2, -172],
+    [16, -176],
+    [30, -172],
+    [44, -168],
+    [57, -161],
+    [70, -166],
+    [82, -158]
+  ];
+  const turbineTowers: THREE.Matrix4[] = [];
+  const turbineNacelles: THREE.Matrix4[] = [];
+  const turbineHubs: THREE.Matrix4[] = [];
+  const turbineBlades: THREE.Matrix4[] = [];
+  turbineSites.forEach(([x, z], index) => {
+    const height = 8.6 + (index % 3) * 1.25;
+    const yaw = -0.48 + (index % 4) * 0.12;
+    const rotorX = x + Math.cos(yaw) * 0.66;
+    const rotorZ = z - Math.sin(yaw) * 0.66;
+    turbineTowers.push(compose(x, height / 2, z, 0.34, height, 0.34));
+    turbineNacelles.push(compose(x, height, z, 1.35, 0.44, 0.5, 0, yaw));
+    turbineHubs.push(compose(rotorX, height, rotorZ, 0.34, 0.34, 0.34));
+    for (let blade = 0; blade < 3; blade += 1) {
+      const angle = blade * ((Math.PI * 2) / 3) + (index % 2) * 0.24;
+      const localX = -Math.sin(angle) * 2.05;
+      const localY = Math.cos(angle) * 2.05;
+      turbineBlades.push(
+        compose(
+          rotorX + Math.cos(yaw) * localX,
+          height + localY,
+          rotorZ - Math.sin(yaw) * localX,
+          0.16,
+          4.2,
+          0.08,
+          0,
+          yaw,
+          angle
+        )
+      );
+    }
+  });
+  addStaticInstances(
+    scene,
+    new THREE.CylinderGeometry(1, 0.72, 1, 12),
+    turbineTowers,
+    palette.light,
+    false
+  );
+  addInstancedBoxes(scene, new THREE.BoxGeometry(1, 1, 1), turbineNacelles, palette.white, false);
+  addStaticInstances(
+    scene,
+    new THREE.SphereGeometry(1, 10, 8),
+    turbineHubs,
+    palette.cyanEmissive,
+    false
+  );
+  addInstancedBoxes(scene, new THREE.BoxGeometry(1, 1, 1), turbineBlades, palette.light, false);
+
+  const solarPanels: THREE.Matrix4[] = [];
+  const solarSupports: THREE.Matrix4[] = [];
+  for (const [centerX, centerZ, columns, rows] of [
+    [-76, 123, 8, 5],
+    [-32, 124, 7, 4]
+  ] as Array<readonly [number, number, number, number]>) {
+    for (let column = 0; column < columns; column += 1) {
+      for (let row = 0; row < rows; row += 1) {
+        const x = centerX + (column - (columns - 1) / 2) * 2.7;
+        const z = centerZ + (row - (rows - 1) / 2) * 2.25;
+        solarSupports.push(compose(x, 0.38, z, 0.12, 0.65, 0.12));
+        solarPanels.push(compose(x, 0.82, z, 2.3, 0.12, 1.45, -0.24, 0.08));
+      }
+    }
+  }
+  const solarMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x0b4260,
+    emissive: 0x007699,
+    emissiveIntensity: 0.34,
+    roughness: 0.24,
+    metalness: 0.56,
+    clearcoat: 0.7
+  });
+  addInstancedBoxes(scene, new THREE.BoxGeometry(1, 1, 1), solarSupports, palette.blackSteel, false);
+  addInstancedBoxes(scene, new THREE.BoxGeometry(1, 1, 1), solarPanels, solarMaterial, false);
+
+  const gateway = new THREE.Group();
+  gateway.position.set(-191, 0.18, -98);
+  addBox(gateway, [25, 0.2, 17], [0, 0.1, 0], palette.concrete, false);
+  for (const [x, z, width, height] of [
+    [-7.4, -1.2, 3.2, 22],
+    [0, 1.4, 3.7, 18],
+    [7.2, -0.8, 3, 20]
+  ] as Array<readonly [number, number, number, number]>) {
+    addBox(gateway, [width, height, width], [x, 0.25 + height / 2, z], palette.white);
+    addFacadeBands(gateway, width + 0.05, width + 0.05, height, 9, palette.glassCyan, x, z);
+    addCylinder(gateway, 0.1, 3.2, [x, height + 1.8, z], palette.cyanEmissive, 10);
+  }
+  scene.add(gateway);
+
+  const research = new THREE.Group();
+  research.position.set(-124, 0.18, -98);
+  addBox(research, [24, 0.18, 17], [0, 0.1, 0], palette.park, false);
+  for (const [x, z] of [
+    [-7, -4],
+    [0, -4],
+    [7, -4],
+    [-4, 4],
+    [4, 4]
+  ] as Point2[]) {
+    addBox(research, [5.2, 2.2, 4.2], [x, 1.25, z], palette.white);
+    addBox(research, [5.4, 0.18, 4.4], [x, 2.45, z], palette.purpleGlow, false);
+  }
+  scene.add(research);
+
+  const energy = new THREE.Group();
+  energy.position.set(29, 0.18, -165);
+  addBox(energy, [30, 0.2, 17], [0, 0.1, 0], palette.concrete, false);
+  addBox(energy, [12, 4.2, 7.5], [-3, 2.2, 0], palette.white);
+  addFacadeBands(energy, 12.05, 7.55, 4.2, 3, palette.glassCyan, -3, 0);
+  for (const x of [5, 9]) {
+    addCylinder(energy, 1.7, 3.4, [x, 1.8, -2], palette.light, 24);
+    addCylinder(energy, 0.3, 7.8, [x, 4, 4], palette.concrete, 14);
+    addCylinder(energy, 0.43, 0.28, [x, 8, 4], palette.cyanEmissive, 14);
+  }
+  scene.add(energy);
+
+  const treatment = new THREE.Group();
+  treatment.position.set(124, 0.18, -168);
+  addBox(treatment, [30, 0.2, 21], [0, 0.1, 0], palette.concrete, false);
+  for (const [x, z, radius] of [
+    [-9, -5, 2.8],
+    [-2, -5, 2.8],
+    [5, -5, 2.8],
+    [-7, 3, 2.3],
+    [0, 3, 2.3],
+    [7, 3, 2.3]
+  ] as Array<readonly [number, number, number]>) {
+    addCylinder(treatment, radius, 0.52, [x, 0.38, z], palette.concrete, 32);
+    addCylinder(treatment, radius * 0.8, 0.1, [x, 0.7, z], palette.water, 32);
+  }
+  addBox(treatment, [7.6, 3.2, 6], [10, 1.75, 2.5], palette.white);
+  addFacadeBands(treatment, 7.65, 6.05, 3.2, 2, palette.glassCyan, 10, 2.5);
+  scene.add(treatment);
+
+  const testing = new THREE.Group();
+  testing.position.set(-32, 0.2, 124);
+  addBox(testing, [27, 0.22, 18], [0, 0.1, 0], palette.concrete, false);
+  addBox(testing, [8, 3, 5], [-7, 1.65, -4], palette.white);
+  addBox(testing, [7, 2.4, 5], [6, 1.35, 3.5], palette.light);
+  addCylinder(testing, 0.16, 8.5, [3, 4.4, -4], palette.light, 12);
+  addCylinder(testing, 0.55, 0.22, [3, 8.72, -4], palette.cyanEmissive, 16);
+  scene.add(testing);
+
+  const dataCenter = new THREE.Group();
+  dataCenter.position.set(30, 0.2, 119);
+  addBox(dataCenter, [30, 0.2, 18], [0, 0.1, 0], palette.concrete, false);
+  for (const [x, z] of [
+    [-8, -4.8],
+    [0, -4.8],
+    [8, -4.8],
+    [-8, 4.8],
+    [0, 4.8],
+    [8, 4.8]
+  ] as Point2[]) {
+    addBox(dataCenter, [6.5, 3.1, 6.2], [x, 1.75, z], palette.light);
+    addBox(dataCenter, [6.8, 0.2, 6.5], [x, 3.42, z], palette.cyanEmissive, false);
+    for (const unitX of [-1.6, 0, 1.6]) {
+      addBox(dataCenter, [1, 0.55, 1.2], [x + unitX, 3.8, z], palette.roof, false);
+    }
+  }
+  scene.add(dataCenter);
+
+  const supply = new THREE.Group();
+  supply.position.set(62, 0.2, 86);
+  addBox(supply, [31, 0.22, 20], [0, 0.1, 0], palette.concrete, false);
+  addBox(supply, [20, 4.5, 11], [0, 2.35, 0], palette.white);
+  addBox(supply, [20.5, 0.34, 11.5], [0, 4.77, 0], palette.orangeEmissive);
+  for (let bay = 0; bay < 7; bay += 1) {
+    addBox(supply, [1.8, 2.1, 0.12], [-7.8 + bay * 2.6, 1.45, 5.56], palette.glassOrange, false);
+  }
+  scene.add(supply);
+
+  const maintenance = new THREE.Group();
+  maintenance.position.set(131, 0.2, 52);
+  addBox(maintenance, [29, 0.2, 20], [0, 0.1, 0], palette.concrete, false);
+  for (let row = 0; row < 3; row += 1) {
+    addBox(maintenance, [22, 2.4, 4.2], [0, 1.3, -6 + row * 6], palette.light);
+    for (let bay = 0; bay < 6; bay += 1) {
+      addBox(
+        maintenance,
+        [2.4, 1.45, 0.1],
+        [-8.3 + bay * 3.3, 0.95, -3.86 + row * 6],
+        palette.glassOrange,
+        false
+      );
+    }
+  }
+  scene.add(maintenance);
+
+  const containerOrange: THREE.Matrix4[] = [];
+  const containerCyan: THREE.Matrix4[] = [];
+  const containerLight: THREE.Matrix4[] = [];
+  for (let row = 0; row < 5; row += 1) {
+    for (let column = 0; column < 11; column += 1) {
+      const stack = 1 + ((row * 3 + column * 5) % 3);
+      for (let level = 0; level < stack; level += 1) {
+        const matrix = boxMatrix(70 + column * 5, 0.72 + level * 1.35, 121 + row * 2.7, 4.2, 1.2, 2.1);
+        [containerOrange, containerCyan, containerLight][(row + column) % 3].push(matrix);
+      }
+    }
+  }
+  addInstancedBoxes(scene, new THREE.BoxGeometry(1, 1, 1), containerOrange, palette.orangeEmissive, false);
+  addInstancedBoxes(scene, new THREE.BoxGeometry(1, 1, 1), containerCyan, palette.cyanEmissive, false);
+  addInstancedBoxes(scene, new THREE.BoxGeometry(1, 1, 1), containerLight, palette.light, false);
+  for (const x of [80, 101, 122]) {
+    const crane = new THREE.Group();
+    crane.position.set(x, 0.25, 116);
+    addBox(crane, [0.7, 10, 0.7], [0, 5, 0], palette.light);
+    addBox(crane, [10, 0.65, 0.65], [4.6, 9.8, 0], palette.orangeEmissive);
+    addBox(crane, [0.28, 6.2, 0.28], [8.2, 6.8, 0], palette.blackSteel);
+    scene.add(crane);
+  }
+
+  const greenStrips: Array<{ center: Point2; size: Point2; vertical?: boolean }> = [
+    { center: [-18, -125.4], size: [388, 2.2] },
+    { center: [-18, -138.6], size: [388, 2.2] },
+    { center: [-18, -82.9], size: [388, 2.2] },
+    { center: [-18, -95.1], size: [388, 2.2] },
+    { center: [-12, -23], size: [376, 2.1] },
+    { center: [-12, -33], size: [376, 2.1] },
+    { center: [110.2, -73], size: [2.1, 170], vertical: true },
+    { center: [121.8, -73], size: [2.1, 170], vertical: true },
+    { center: [-148.7, 18], size: [2.1, 182], vertical: true },
+    { center: [-159.3, 18], size: [2.1, 182], vertical: true }
+  ];
+  const shoreMaterial = new THREE.MeshStandardMaterial({
+    color: 0x285c3f,
+    emissive: 0x0a2f1d,
+    emissiveIntensity: 0.2,
+    roughness: 0.9
+  });
+  const shoreTrees: THREE.Matrix4[] = [];
+  const shoreCanopies: THREE.Matrix4[] = [];
+  greenStrips.forEach(({ center, size, vertical }, stripIndex) => {
+    addBox(scene, [size[0], 0.08, size[1]], [center[0], 0.18, center[1]], shoreMaterial, false);
+    const length = vertical ? size[1] : size[0];
+    for (let offset = -length / 2 + 5; offset < length / 2 - 4; offset += 7.5) {
+      if ((Math.round(offset) + stripIndex) % 3 === 0) continue;
+      const x = vertical ? center[0] : center[0] + offset;
+      const z = vertical ? center[1] + offset : center[1];
+      shoreTrees.push(boxMatrix(x, 0.72, z, 0.14, 1.25, 0.14));
+      shoreCanopies.push(boxMatrix(x, 1.78, z, 1.2, 1.45, 1.2, stripIndex * 0.4));
+    }
+  });
+  addInstancedBoxes(scene, new THREE.BoxGeometry(1, 1, 1), shoreTrees, palette.blackSteel, false);
+  addInstancedBoxes(scene, new THREE.BoxGeometry(1, 1, 1), shoreCanopies, palette.foliage, false);
 }
 
 function createDigitalPark(scene: THREE.Scene, palette: MaterialPalette) {
@@ -2197,15 +2791,15 @@ function createLights(scene: THREE.Scene) {
   scene.add(new THREE.AmbientLight(0xb8d7df, 0.5));
 
   const key = new THREE.DirectionalLight(0xfffbed, 4.4);
-  key.position.set(-75, 125, 70);
+  key.position.set(-95, 165, 95);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.left = -125;
-  key.shadow.camera.right = 125;
-  key.shadow.camera.top = 105;
-  key.shadow.camera.bottom = -105;
+  key.shadow.camera.left = -240;
+  key.shadow.camera.right = 240;
+  key.shadow.camera.top = 205;
+  key.shadow.camera.bottom = -205;
   key.shadow.camera.near = 15;
-  key.shadow.camera.far = 310;
+  key.shadow.camera.far = 520;
   key.shadow.bias = -0.0002;
   key.shadow.normalBias = 0.028;
   scene.add(key);
@@ -2319,18 +2913,21 @@ export function ThreeCity({
   speed,
   zoom,
   resetKey,
-  viewMode
+  viewMode,
+  onLabelPositionsChange
 }: ThreeCityProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const firstPersonCameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  const publishLabelsRef = useRef<() => void>(() => undefined);
   const runtimesRef = useRef<Map<BuildingId, BuildingRuntime>>(new Map());
   const selectedRef = useRef<BuildingId | null>(selectedBuilding);
   const selectRef = useRef(selectBuilding);
   const animationRef = useRef({ paused, reducedMotion, speed });
   const viewModeRef = useRef(viewMode);
+  const labelPositionsChangeRef = useRef(onLabelPositionsChange);
   const pressedKeysRef = useRef(new Set<string>());
   const firstPersonLookRef = useRef<FirstPersonLook>({ yaw: 0, pitch: 0 });
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -2340,6 +2937,7 @@ export function ThreeCity({
   selectRef.current = selectBuilding;
   animationRef.current = { paused, reducedMotion, speed };
   viewModeRef.current = viewMode;
+  labelPositionsChangeRef.current = onLabelPositionsChange;
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -2353,6 +2951,7 @@ export function ThreeCity({
     let controls: OrbitControls | null = null;
     let scene: THREE.Scene | null = null;
     let detachInputListeners: (() => void) | null = null;
+    let detachLabelListener: (() => void) | null = null;
     let pointerStart: Point2 | null = null;
     const pickable: THREE.Mesh[] = [];
     const raycaster = new THREE.Raycaster();
@@ -2362,19 +2961,24 @@ export function ThreeCity({
       setRenderError(null);
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x4d8398);
-      scene.fog = new THREE.Fog(0x4d8398, 285, 660);
+      scene.fog = new THREE.Fog(0x4d8398, 350, 760);
+      const automatedRuntime = navigator.webdriver;
 
       renderer = new THREE.WebGLRenderer({
-        antialias: true,
+        antialias: !automatedRuntime,
         alpha: false,
         powerPreference: "high-performance"
       });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
-      renderer.shadowMap.enabled = true;
+      renderer.setPixelRatio(
+        automatedRuntime ? 0.65 : Math.min(window.devicePixelRatio || 1, 1.75)
+      );
+      renderer.shadowMap.enabled = !automatedRuntime;
       renderer.shadowMap.type = THREE.PCFShadowMap;
+      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.needsUpdate = true;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.08;
+      renderer.toneMappingExposure = 1.03;
       renderer.domElement.className = "three-city-canvas pixi-city-canvas";
       renderer.domElement.setAttribute("aria-hidden", "true");
       renderer.domElement.tabIndex = -1;
@@ -2411,11 +3015,49 @@ export function ThreeCity({
       controls.maxPolarAngle = THREE.MathUtils.degToRad(69);
       controls.minAzimuthAngle = -Infinity;
       controls.maxAzimuthAngle = Infinity;
-      controls.minDistance = 105;
-      controls.maxDistance = 390;
+      controls.minDistance = 132;
+      controls.maxDistance = 520;
       controls.enabled = viewModeRef.current === "overview";
       controls.update();
       controlsRef.current = controls;
+
+      let lastLabelPublish = -Infinity;
+      const publishLabelPositions = (force = false) => {
+        const publish = labelPositionsChangeRef.current;
+        if (!publish || viewModeRef.current !== "overview") return;
+        const now = performance.now();
+        if (!force && now - lastLabelPublish < 48) return;
+        lastLabelPublish = now;
+        camera.updateMatrixWorld(true);
+        const baselineCamera = camera.clone();
+        baselineCamera.position.set(...OVERVIEW_POSITION);
+        baselineCamera.zoom = 1;
+        baselineCamera.lookAt(...OVERVIEW_TARGET);
+        baselineCamera.updateProjectionMatrix();
+        baselineCamera.updateMatrixWorld(true);
+        const positions: CityLabelPositions = {};
+        CITY_LABEL_ANCHORS.forEach(({ key, position }) => {
+          const current = new THREE.Vector3(...position).project(camera);
+          const baseline = new THREE.Vector3(...position).project(baselineCamera);
+          positions[key] = {
+            deltaX: (current.x - baseline.x) * 50,
+            deltaY: (baseline.y - current.y) * 50,
+            visible:
+              current.z >= -1 &&
+              current.z <= 1 &&
+              current.x >= -1.12 &&
+              current.x <= 1.12 &&
+              current.y >= -1.08 &&
+              current.y <= 1.08
+          };
+        });
+        publish(positions);
+      };
+      publishLabelsRef.current = () => publishLabelPositions(true);
+      const publishLabelsOnControlsChange = () => publishLabelPositions();
+      controls.addEventListener("change", publishLabelsOnControlsChange);
+      detachLabelListener = () =>
+        controls?.removeEventListener("change", publishLabelsOnControlsChange);
       renderer.domElement.style.cursor =
         viewModeRef.current === "first-person" ? "crosshair" : "grab";
 
@@ -2429,6 +3071,7 @@ export function ThreeCity({
       createRoundabout(scene, palette);
       createIndustrialUtilities(scene, palette);
       createLogisticsDetails(scene, palette);
+      createExpandedInfrastructure(scene, palette);
       createDigitalPark(scene, palette);
       createUrbanDetails(scene, palette);
 
@@ -2603,10 +3246,12 @@ export function ThreeCity({
         const height = Math.max(1, Math.round(bounds.height));
         const aspect = width / height;
         camera.aspect = aspect;
+        camera.fov = OVERVIEW_FOV + THREE.MathUtils.clamp((aspect - 1.34) * 10.5, 0, 6);
         camera.updateProjectionMatrix();
         firstPersonCamera.aspect = aspect;
         firstPersonCamera.updateProjectionMatrix();
         renderer.setSize(width, height, false);
+        publishLabelPositions();
       };
       resize();
       resizeObserver = new ResizeObserver(resize);
@@ -2615,12 +3260,17 @@ export function ThreeCity({
       const timer = new THREE.Timer();
       timer.connect(document);
       let animationElapsed = 0;
+      let lastFrameTimestamp = -Infinity;
+      const targetFrameRate = automatedRuntime ? 8 : 30;
       const firstPersonForward = new THREE.Vector3();
       const firstPersonRight = new THREE.Vector3();
       const firstPersonMovement = new THREE.Vector3();
       const render = (timestamp?: number) => {
         if (disposed || !renderer || !scene || !controls) return;
         frame = window.requestAnimationFrame(render);
+        const frameTimestamp = timestamp ?? performance.now();
+        if (frameTimestamp - lastFrameTimestamp < 1000 / targetFrameRate) return;
+        lastFrameTimestamp = frameTimestamp;
         timer.update(timestamp);
         const delta = Math.min(timer.getDelta(), 0.05);
         const state = animationRef.current;
@@ -2704,6 +3354,7 @@ export function ThreeCity({
         window.cancelAnimationFrame(frame);
         timer.dispose();
         resizeObserver?.disconnect();
+        detachLabelListener?.();
         detachInputListeners?.();
         pressedKeys.clear();
         if (document.pointerLockElement === renderer?.domElement) {
@@ -2711,6 +3362,7 @@ export function ThreeCity({
         }
         controls?.dispose();
         controlsRef.current = null;
+        publishLabelsRef.current = () => undefined;
         cameraRef.current = null;
         firstPersonCameraRef.current = null;
         rendererRef.current = null;
@@ -2724,12 +3376,14 @@ export function ThreeCity({
     } catch (error: unknown) {
       disposed = true;
       detachInputListeners?.();
+      detachLabelListener?.();
       pressedKeys.clear();
       if (document.pointerLockElement === renderer?.domElement) {
         document.exitPointerLock();
       }
       controls?.dispose();
       controlsRef.current = null;
+      publishLabelsRef.current = () => undefined;
       cameraRef.current = null;
       firstPersonCameraRef.current = null;
       rendererRef.current = null;
@@ -2778,6 +3432,7 @@ export function ThreeCity({
     camera.zoom = THREE.MathUtils.clamp(zoom, 0.72, 1.55);
     camera.updateProjectionMatrix();
     controlsRef.current?.update();
+    publishLabelsRef.current();
   }, [zoom]);
 
   useEffect(() => {
@@ -2791,6 +3446,7 @@ export function ThreeCity({
       camera.lookAt(controls.target);
       camera.updateProjectionMatrix();
       controls.update();
+      publishLabelsRef.current();
     }
     if (firstPersonCamera) {
       firstPersonLookRef.current = resetFirstPersonCamera(firstPersonCamera);

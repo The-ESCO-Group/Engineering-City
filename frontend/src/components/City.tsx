@@ -1,14 +1,18 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Footprints, Map, Pause, Play, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { useUI } from "../store";
 import { CityHomeChrome, type CityHomeLayer, type CityViewMode } from "./CityHomeChrome";
 import { CityMapHud } from "./CityMapHud";
-import { ThreeCity } from "./ThreeCity";
+import { ThreeCity, type CityLabelPositions } from "./ThreeCity";
 
 export function City() {
   const [viewResetKey, setViewResetKey] = useState(0);
   const [activeLayer, setActiveLayer] = useState<CityHomeLayer>("overview");
   const [viewMode, setViewMode] = useState<CityViewMode>("overview");
+  const [labelPositions, setLabelPositions] = useState<CityLabelPositions>({});
+  const updateLabelPositions = useCallback((positions: CityLabelPositions) => {
+    setLabelPositions(positions);
+  }, []);
   const { selectedBuilding, selectBuilding, paused, togglePause, reducedMotion, setReducedMotion, speed, setSpeed, zoom, setZoom } = useUI();
   const isWalking = viewMode === "first-person";
   const resetCityView = () => {
@@ -98,12 +102,14 @@ export function City() {
           zoom={zoom}
           resetKey={viewResetKey}
           viewMode={viewMode}
+          onLabelPositionsChange={updateLabelPositions}
         />
         {!isWalking && (
           <CityMapHud
             selectedBuilding={selectedBuilding}
             selectBuilding={selectBuilding}
             projectLabel="PRJ-0241 · Line 4 Cartoner Upgrade"
+            labelPositions={labelPositions}
           />
         )}
         <CityHomeChrome

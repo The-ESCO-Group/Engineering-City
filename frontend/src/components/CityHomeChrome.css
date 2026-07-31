@@ -21,21 +21,21 @@
 
 .city-home-chrome__bottom-console {
   position: absolute;
-  right: 208px;
-  bottom: 16px;
-  left: 78px;
+  right: 224px;
+  bottom: 45px;
+  left: 38px;
   display: grid;
-  grid-template-columns: 188px minmax(300px, 1fr) 276px;
-  gap: 10px;
+  grid-template-columns: 232px minmax(420px, 1fr) 281px;
+  gap: 14px;
   align-items: end;
   pointer-events: none;
 }
 
 .city-home-chrome__minimap {
   display: grid;
-  grid-template-columns: 154px 28px;
-  gap: 6px;
-  height: 92px;
+  grid-template-columns: 172px 34px;
+  gap: 10px;
+  height: 128px;
   pointer-events: none;
 }
 
@@ -170,7 +170,7 @@
 
 .city-home-chrome__map-controls {
   display: grid;
-  grid-template-rows: repeat(3, 28px);
+  grid-template-rows: repeat(3, 34px);
   align-content: end;
   gap: 4px;
   pointer-events: auto;
@@ -178,8 +178,8 @@
 
 .city-home-chrome__map-control {
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   place-items: center;
   border-radius: 3px;
@@ -193,8 +193,8 @@
 }
 
 .city-home-chrome__map-control svg {
-  width: 13px;
-  height: 13px;
+  width: 15px;
+  height: 15px;
 }
 
 .city-home-chrome__map-control:hover {
@@ -206,8 +206,8 @@
 
 .city-home-chrome__activity {
   min-width: 0;
-  height: 62px;
-  padding: 8px 10px;
+  height: 85px;
+  padding: 11px 12px;
   border-radius: 4px;
   pointer-events: none;
 }
@@ -216,7 +216,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  height: 13px;
+  height: 15px;
   color: #8ba7ad;
   font-size: 6.5px;
   font-weight: 750;
@@ -249,7 +249,7 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  margin-top: 6px;
+  margin-top: 12px;
 }
 
 .city-home-chrome__activity-stream article {
@@ -295,8 +295,8 @@
 .city-home-chrome__layer-dock {
   position: relative;
   display: grid;
-  width: 276px;
-  height: 44px;
+  width: 281px;
+  height: 57px;
   grid-template-columns: repeat(6, 1fr);
   overflow: visible;
   border-radius: 4px;
