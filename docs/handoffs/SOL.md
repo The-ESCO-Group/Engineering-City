@@ -372,8 +372,12 @@ Milestone 7 validation:
 
 The repository-local pinned Tauri CLI now produces both MSI and NSIS installers.
 The latest unsigned candidate package is
-`dist/desktop/esco-engineering-city-0.1.0-windows-20260803-101438.zip` with
-SHA-256 `99d1098ed94c94f1e2d2eec89fe44dae6aee00dca46a234dabcacf015da45af8`.
+`dist/desktop/esco-engineering-city-0.1.0-windows-20260803-122041.zip` with
+SHA-256 `027839e4ca76e721c75bc8e1f7fb0b052003754721e0c4558ea3d753d339353e`.
+Its manifest records source commit `42bf41a71826792a13ac62e2159154cfa75ca040`,
+Tauri CLI `2.11.4`, and `tracked_changes_present` because the shared worktree
+still contains concurrent backend-owner changes. The contained MSI and NSIS
+hashes were verified after packaging.
 Signing remains an external release-policy step; the package is not represented
 as signed or as an engineering import verification.
 
@@ -459,10 +463,11 @@ Milestone 9 product validation on 2026-08-03:
   tests passed 5/5
 
 The full shared backend suite is not green on the concurrent backend-owner work.
-A focused 2026-08-03 rerun leaves three failures: PLC template preview rendering,
-domain-contract drift, and overlapping destructive-write range validation. In
-particular, `contracts/domain.schema.json` does not match the backend generator.
-These are outside Sol ownership and no product commit stages or rewrites them.
+A focused 2026-08-03 rerun leaves two failures: PLC template preview rendering
+expects the old rung without the newly generated one-shot, and
+`contracts/domain.schema.json` does not match the backend generator. The earlier
+overlapping destructive-write regression now passes. These remaining failures
+are outside Sol ownership and no product commit stages or rewrites them.
 
 Full engineering release is also still blocked by `CLAUDE-REQUEST-S006`. Contract
 1.0.0 publishes report reads/downloads but no Project Core/revision/validation/
@@ -516,9 +521,11 @@ Milestone 10 focused validation on 2026-08-03:
   still reaches one existing error in `backend/app/reporting/snapshot.py`
 - the current backend release-core suite passed: 27/27
 - the new backend-owner production-workflow suite passed 15/16; its full offline
-  run currently stops at `finalize_project` because one finding never reaches
-  senior review. The failure is after candidate/package work and remains in the
-  untracked backend-owner workflow/test implementation
+  run generates 15 real artifacts, freezes a named-human manifest, passes its
+  release gate, then stops at `finalize_project` because accepted high-severity
+  finding `ILK-003` never reaches senior review. The project remains blocked
+  with no completion timestamp; the workflow/test implementation remains
+  untracked backend-owner work
 
 This boundary deliberately does not write a ZIP to canonical storage or expose
 a download on its own. The backend still must publish and implement the
