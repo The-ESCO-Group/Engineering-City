@@ -12,6 +12,7 @@
 - Milestone 6 commit: `b3cfaf2`
 - Milestone 7 commit: this commit (`test(product): complete local end-to-end city workflow`)
 - Milestone 9 commit: this commit (`fix(product): harden live operations and traceability`)
+- Milestone 10 commit: this commit (`feat(delivery): verify deterministic engineering ZIPs`)
 - Product world commit: `fae0776`
 - Contract version consumed: `1.0.0`
 - Backend application version: `0.1.0`
@@ -457,19 +458,74 @@ Milestone 9 product validation on 2026-08-03:
 - desktop Rust format, check, Clippy with warnings denied, and tests passed; Rust
   tests passed 5/5
 
-The full shared backend suite is not green on the concurrent backend-owner work:
-six tests currently fail in PLC template rendering, rename-impact validation,
-domain-contract drift, and destructive-write range validation. In particular,
-`contracts/domain.schema.json` does not match the backend generator. These are
-outside Sol ownership and no product commit stages or rewrites them.
+The full shared backend suite is not green on the concurrent backend-owner work.
+A focused 2026-08-03 rerun leaves three failures: PLC template preview rendering,
+domain-contract drift, and overlapping destructive-write range validation. In
+particular, `contracts/domain.schema.json` does not match the backend generator.
+These are outside Sol ownership and no product commit stages or rewrites them.
 
 Full engineering release is also still blocked by `CLAUDE-REQUEST-S006`. Contract
 1.0.0 publishes report reads/downloads but no Project Core/revision/validation/
-release-candidate/artifact/engineering-ZIP API. The in-progress backend release
-assembler produces a directory rather than the required deterministic ZIP and
-is not exposed by HTTP. Release controls therefore remain honestly disabled;
-the Windows installer package is an application distribution and must never be
+release-candidate/artifact/engineering-ZIP API. The backend-owned release core
+now passes its 27 focused tests and writes the exact seven-folder engineering
+package, but that implementation and its tests remain untracked and no HTTP
+router exposes them. Release controls therefore remain honestly disabled; the
+Windows installer package is an application distribution and must never be
 represented as the project's traceable engineering release package.
+
+## Milestone 10 deterministic engineering ZIP boundary
+
+The product-owned Documentation and Release boundary can now put an already
+generated, frozen engineering package in a deterministic ZIP without creating
+engineering content or promoting its verification state:
+
+- `build_release_zip` accepts only the backend release core's package directory
+  together with trusted frozen database facts: approved candidate/manifest/
+  approver identity, exact artifact rows, manifest/checksum hashes, revision,
+  byte/file counts, validation level, and import-verification status
+- it rejects missing manifest/checksum files, unsafe or non-canonical paths,
+  symbolic links/junctions/reparse points, Windows-illegal or case/Unicode-
+  colliding names, packages outside canonical project storage, special entries,
+  duplicate checksum paths, undeclared extra files, size/hash mismatches, and
+  packages above bounded entry/path/file-byte limits
+- the manifest artifact index must exactly match every payload file and the
+  checksum file must exactly cover every file except itself before bytes are
+  returned
+- ZIP members use stored bytes, fixed timestamps, stable ordering, explicit
+  permissions, and no inferred metadata, making the outer ZIP SHA-256 repeatable
+  across runs and zlib versions
+- returned metadata includes the exact filename/media type, byte length, ZIP
+  SHA-256, file count, source revision, package validation level, exact Rockwell
+  import-verification status/detail, frozen identities/timestamp, manifest
+  SHA-256, and checksum-file SHA-256
+
+Milestone 10 focused validation on 2026-08-03:
+
+- deterministic ZIP tests passed: 18, with one privilege-dependent symbolic-link
+  case skipped on this Windows host. Coverage includes a real Rockwell core
+  package, byte equality, complete member coverage, fixed timestamps,
+  coordinated re-index tamper refusal, inflated-verification refusal,
+  pre-approval refusal, canonical-storage enforcement, trusted-digest mismatch,
+  exact folder layout, unsafe/Windows-illegal/case-colliding paths, entry caps,
+  checksum mismatch, manifest-version rejection, and release-directory relabel
+  refusal. Separate real Windows junction probes rejected both nested and root
+  junctions before package reads
+- full delivery/report suite passed: 39, with the same one symbolic-link test
+  skipped because the host does not grant link-creation privilege
+- scoped Ruff and isolated strict mypy passed; the repository-wide import graph
+  still reaches one existing error in `backend/app/reporting/snapshot.py`
+- the current backend release-core suite passed: 27/27
+- the new backend-owner production-workflow suite passed 15/16; its full offline
+  run currently stops at `finalize_project` because one finding never reaches
+  senior review. The failure is after candidate/package work and remains in the
+  untracked backend-owner workflow/test implementation
+
+This boundary deliberately does not write a ZIP to canonical storage or expose
+a download on its own. The backend still must publish and implement the
+canonical-path resolution, construction of the trusted frozen input,
+authorization, persistence, events, operations, and byte-stream API in
+`CLAUDE-REQUEST-S006`; inventing an uncontracted product endpoint would create a
+parallel release system.
 
 ## Current screen matrix
 
@@ -835,15 +891,51 @@ Need: Validation, release, artifact, and generation contracts.
 
 Reason: Release readiness, real generation commands, import verification,
 artifact trees, final approval, and a ZIP cannot be truthfully implemented from
-the current report list.
+the current report list. The backend release core now assembles and verifies the
+seven-folder directory, and the Sol-owned `build_release_zip` service verifies
+that directory and produces deterministic ZIP bytes, but neither surface is
+contracted, persisted as a downloadable artifact, or reachable over HTTP.
 
-Proposed schema/API: Revision-bound validation runs and gates; release
-candidates; generation jobs; artifact metadata containing hash, generator,
-target, validation level, diagnostics, and download; import-verification request;
-final approval; release ZIP; corresponding events.
+Proposed schema/API, with names adjusted by the contract owner if necessary:
 
-Acceptance criteria: Every Release Center control derives its availability and
-disabled reason from backend data and every downloaded artifact is traceable.
+- `GET /api/projects/{project_id}/release-readiness`
+- `POST /api/projects/{project_id}/release-candidates`
+- `GET /api/projects/{project_id}/release-candidates`
+- `GET /api/release-candidates/{candidate_id}`
+- `POST /api/release-candidates/{candidate_id}/artifacts`
+- `GET /api/release-candidates/{candidate_id}/artifacts`
+- `POST /api/release-candidates/{candidate_id}/finalize`
+- `GET /api/release-candidates/{candidate_id}/download`
+
+The readiness/candidate responses should carry revision-bound gate results,
+allowed actions, and exact disabled reasons. Artifact/download metadata should
+carry filename, media type `application/zip`, exact size and SHA-256, source
+revision, target, generator/version, package validation level, Rockwell import
+verification, diagnostics, manifest SHA-256, checksum-file SHA-256, and an
+authorized download operation. Finalization must require a named human approver.
+The API implementation should invoke the backend release core; resolve its
+package path inside canonical project storage; build `ReleaseTrustAnchor` only
+from an approved candidate, frozen manifest, named approver, and exact artifact
+rows; then call the product-owned `build_release_zip`. It should persist those
+exact ZIP bytes against project/candidate/manifest identity, emit the already-
+declared validation/export/artifact/release events, and stream the stored bytes
+with content disposition and digest metadata.
+
+Acceptance criteria:
+
+- every Release Center control derives availability and its disabled reason
+  from backend data rather than duplicated client policy
+- generation is tied to one immutable source revision and no release can be
+  finalized without a named human approval
+- a reload and process restart preserve the candidate, manifest, ZIP metadata,
+  authorization, and exact downloadable bytes
+- two ZIP builds from the same frozen package are byte-identical, every archive
+  member is covered by the manifest/checksum policy, and tampering fails closed
+- an authenticated browser test creates a candidate, generates artifacts,
+  finalizes it, downloads `application/zip`, verifies its outer SHA-256, opens
+  all seven required folders, and verifies the inner checksum index
+- import verification remains explicitly false/unavailable until an approved
+  workstation adapter records a real result
 
 ### CLAUDE-REQUEST-S007
 
