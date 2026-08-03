@@ -143,7 +143,17 @@ export const engineeringApi = {
 };
 
 export function reportDownloadUrl(path: string): string {
-  return path.startsWith("http") ? path : new URL(path, serverBaseUrl()).toString();
+  const backend = serverBaseUrl();
+  const candidate = new URL(path, backend);
+  if (
+    candidate.origin !== backend.origin ||
+    !["http:", "https:"].includes(candidate.protocol) ||
+    candidate.username ||
+    candidate.password
+  ) {
+    throw new Error("Report downloads must remain on the configured API host.");
+  }
+  return candidate.toString();
 }
 
 export function projectSocketUrl(projectId: string, sinceSeq: number): string {

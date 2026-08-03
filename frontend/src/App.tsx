@@ -1,9 +1,11 @@
-import { lazy, Suspense, useMemo } from "react";
-import { NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { lazy, Suspense, useEffect, useMemo } from "react";
+import { NavLink, Route, Routes, useLocation, useNavigate, useParams } from "./routing";
 import { Activity, AlertTriangle, Archive, Bell, Bot, Building2, ChevronDown, ClipboardCheck, Clock3, FileText, Filter, FolderKanban, ListChecks, LogOut, Menu, Plus, Search, Settings, ShieldAlert, Wifi } from "lucide-react";
 import { useEngineeringData } from "./api/live";
 import { City } from "./components/City";
 import { ConnectionCenter } from "./components/ConnectionCenter";
+import { DesktopCenter } from "./components/DesktopCenter";
+import { notifyOperatorEvent } from "./desktop/bridge";
 import { agents as demoAgents, findings as demoFindings, projects } from "./domain";
 import { releaseOperationsFromEngineering, releaseSourceFromEngineering } from "./features/release/integration";
 import type { ReleaseCenterView } from "./features/release/ReleaseCenter";
@@ -67,9 +69,55 @@ function Shell() {
     .slice(0, 2)
     .toUpperCase() || (engineering.dataMode === "demo" ? "DM" : "--");
   const connectionLabel = titleCase(engineering.connection);
+  useEffect(() => {
+    if (engineering.dataMode !== "live" || !engineering.projectId) return;
+
+    const notifyOnce = (
+      key: string,
+      kind: "approval_required" | "workflow_failure",
+      title: string,
+      body: string
+    ) => {
+      try {
+        if (window.sessionStorage.getItem(key)) return;
+        window.sessionStorage.setItem(key, "pending");
+      } catch {
+        return;
+      }
+      void notifyOperatorEvent(kind, title, body)
+        .then((sent) => {
+          if (!sent) window.sessionStorage.removeItem(key);
+          else window.sessionStorage.setItem(key, "sent");
+        })
+        .catch(() => window.sessionStorage.removeItem(key));
+    };
+
+    const pending = engineering.approvals.filter((approval) => approval.status === "pending");
+    if (pending.length > 0) {
+      const approvalIdentity = pending.map((approval) => approval.id).sort().join(":");
+      notifyOnce(
+        `esco:desktop-notification:${engineering.projectId}:approvals:${approvalIdentity}`,
+        "approval_required",
+        projectReference.slice(0, 100),
+        `${pending.length} human approval${pending.length === 1 ? " is" : "s are"} waiting in the Approval Inbox.`
+      );
+    }
+
+    const latestFailure = engineering.events
+      .filter((event) => event.event_type === "task.failed")
+      .sort((left, right) => right.seq - left.seq)[0];
+    if (latestFailure) {
+      notifyOnce(
+        `esco:desktop-notification:${engineering.projectId}:failure:${latestFailure.seq}`,
+        "workflow_failure",
+        projectReference.slice(0, 100),
+        "An engineering task failed. Review the Audit Trail and Findings before continuing."
+      );
+    }
+  }, [engineering.approvals, engineering.dataMode, engineering.events, engineering.projectId, projectReference]);
   return <div className={`app${isCityHome ? " city-home" : ""}${isWorkspaceShell ? " engineering-workspace-shell" : ""}${isReleaseShell ? " release-center-shell" : ""}`}>
     <header className="topbar">
-      <button className="menu"><Menu /></button>
+      <button className="menu" type="button" aria-label="Open navigation menu"><Menu aria-hidden="true" /></button>
       <div className="brand-mark">E</div><div className="brand"><strong>ESCO</strong><span>ENGINEERING CITY</span></div>
       <div className="project-switch"><span>Current project</span><b>{projectReference} · {projectName}</b><ChevronDown aria-hidden="true" /></div>
       <div className="top-spacer" />
@@ -82,7 +130,7 @@ function Shell() {
       <nav aria-label="Primary navigation">{nav.map(([label, to, Icon]) => <NavLink key={label} to={to} end={to === "/"} aria-label={isCityHome ? label : undefined} title={isCityHome ? label : undefined}><Icon /><span>{label}</span>{label === "Findings" && <em>{findingCount}</em>}{label === "Approvals" && <em>{approvalCount}</em>}</NavLink>)}</nav>
       <div className="sidebar-foot"><div className="avatar">{initials}</div><div><b>{user?.display_name || (engineering.dataMode === "demo" ? "Demo reviewer" : "Not signed in")}</b><span>{user ? user.roles.map(titleCase).join(" · ") : engineering.dataMode === "demo" ? "Synthetic session" : "Local account required"}</span></div>{user && <button type="button" className="sidebar-logout" onClick={() => void engineering.logout()} aria-label="Sign out of local backend"><LogOut aria-hidden="true" /></button>}</div>
     </aside>
-    <main>
+    <main tabIndex={0} aria-label="Application content">
       <Routes>
         <Route path="/" element={<City />} />
         <Route path="/projects" element={<Projects />} />
@@ -184,7 +232,7 @@ function ReleaseCenterPage({ initialView }: { initialView: ReleaseCenterView }) 
 }
 
 function SettingsPage() {
-  return <section className="page settings-page"><PageHeader eyebrow="LOCAL OPERATIONS" title="Settings" /><ConnectionCenter /></section>;
+  return <section className="page settings-page"><PageHeader eyebrow="LOCAL OPERATIONS" title="Settings" /><div className="settings-page__grid"><ConnectionCenter /><DesktopCenter /></div></section>;
 }
 
 function PageHeader({ eyebrow, title, action, onAction }: { eyebrow: string; title: string; action?: string; onAction?: () => void }) {

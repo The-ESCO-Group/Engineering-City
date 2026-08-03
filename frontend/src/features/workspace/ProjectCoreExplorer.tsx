@@ -287,7 +287,7 @@ function PlcView({ programs, capability }: { programs: WorkspaceProgram[]; capab
           <nav className="eng-logic-tree" aria-label="PLC logic tree">
             {programs.map((program) => <section key={program.id}><h3><Boxes aria-hidden="true" /><span>{program.controller}<small>{program.task}</small></span></h3><div className="eng-tree-program"><b><GitBranch aria-hidden="true" />{program.name}</b>{program.routines.map((routine) => <div key={routine.id}><strong><ListTree aria-hidden="true" />{routine.name}<small>{routine.type}</small></strong>{routine.rungs.map((rung) => <button type="button" key={rung.id} className={selected?.rung.id === rung.id ? "selected" : ""} onClick={() => setSelectedId(rung.id)}>Rung {rung.number}<span>{rung.warnings.length ? <AlertTriangle aria-label={`${rung.warnings.length} warning`} /> : <ShieldCheck aria-label="No published warnings" />}</span></button>)}</div>)}</div></section>)}
           </nav>
-          <main className="eng-rung-viewer">
+          <section className="eng-rung-viewer" aria-label="PLC rung viewer">
             {selected && <>
               <header><div><span className="eng-eyebrow">{selected.program.name} / {selected.routine.name}</span><h3>Rung {selected.rung.number}</h3><p>{selected.rung.comment || "No rung comment was published."}</p></div><button type="button" disabled={!selected.program.generatedPreviewAvailable} title={!selected.program.generatedPreviewAvailable ? "No generated L5X artifact is available. This structured view is not an import file." : undefined}><ExternalLink aria-hidden="true" /> L5X preview</button></header>
               <p className="eng-validation-banner"><ShieldCheck aria-hidden="true" />{selected.program.validation}</p>
@@ -298,7 +298,7 @@ function PlcView({ programs, capability }: { programs: WorkspaceProgram[]; capab
               <div className="eng-link-columns"><RecordList title="Requirement links" items={selected.rung.requirementLinks} empty="No requirement link published." /><RecordList title="Evidence links" items={selected.rung.evidenceLinks} empty="No evidence link published." /></div>
               <p className="eng-muted-note"><Braces aria-hidden="true" />Template origin: {selected.routine.templateOrigin}</p>
             </>}
-          </main>
+          </section>
         </div>
       )}
     </>

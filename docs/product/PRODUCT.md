@@ -26,8 +26,22 @@ ESCO Engineering City is a local engineering-operations workspace. Its multi-dis
 2. Use **Map** to inspect the connected city. Drag anywhere on the world to orbit 360°, use the wheel or a pinch gesture to zoom, and choose **Reset city view** to restore the opening composition.
 3. Watch the synthetic traffic, pedestrians, water packets, workflow routes, and activity strip. Pause the timeline to freeze all ambient city motion.
 4. Choose **Walk**, click the world to enable mouse look, move with WASD or the arrow keys, and hold Shift to move faster. Press Escape to release the cursor and **Exit walk** to return to the map.
-5. Open Findings, select `F-107`, and compare evidence.
-6. Open Approvals; submit remains disabled until a decision is selected.
-7. Open Reports and generate a synthetic, clearly marked export.
+5. Open Findings, select `DEMO-F-107`, and compare the requirement and implementation evidence at their exact cited locations.
+6. Open Approvals. Submission requires a supported decision and, where policy requires it, a recorded engineering comment; the named reviewer remains accountable.
+7. Open Reports and Release Center to inspect the 19-entry catalog, conservative readiness, and exact package tree. Demo generation and download stay disabled with an explicit reason.
 
 The visualization uses named native controls alongside map zoom, raycast selection, and first-person navigation. System reduced-motion preferences and the explicit reduced-motion option stop animation.
+
+Windows setup, local-service supervision, filesystem authorization, support logs, and desktop packaging are documented in [Local desktop and Windows operations](DESKTOP.md).
+
+## Engineering Workspace
+
+The workspace is one traceable review surface rather than disconnected PLC, HMI, and alarm applications. It includes guided intake; authorized files and backend tasks; requirements, devices and I/O, tags, and PLC records; plans, structured change proposals, and revisions; findings with fact/inference/limitations separated; exact evidence citations; and explanation-gated human approvals. HMI and alarm concerns appear through cross-discipline findings, evidence, change impact, reports, and release gates. Unsupported backend operations remain visible but unavailable.
+
+## Reports and Release Center
+
+The Release Center conservatively derives 13 readiness checks from API and event facts. It renders the exact seven-folder package structure from `00 Manifest` through `06 Audit`, keeps all 19 required report types visible, and shows HTML, PDF, DOCX, XLSX, CSV, and JSON availability. A download exists only when the authorized API supplied a generated file URL on its own host. Candidate generation does not imply import verification, approval, or release; those states remain separate.
+
+## Desktop integration
+
+Settings shows the browser/native runtime boundary. In the installed Tauri shell, operators may open only a canonical project directory directly beneath an authorized local root, open an allowlisted artifact inside that project, locate native support logs, and receive bounded OS notifications for pending human approvals or workflow failures. The browser shows these controls disabled with the reason. The shell has no unrestricted path opener, command shell, or live-equipment capability.

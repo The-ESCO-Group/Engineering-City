@@ -10,9 +10,31 @@
     "frontendDist": "../../frontend/dist"
   },
   "app": {
-    "windows": [{"title":"ESCO Engineering City","width":1440,"height":900,"minWidth":1180,"minHeight":720}],
-    "security": {"csp":"default-src 'self'; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; img-src 'self' data:"}
+    "windows": [
+      {
+        "label": "main",
+        "title": "ESCO Engineering City",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1180,
+        "minHeight": 720,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* http://[::1]:* ws://127.0.0.1:* ws://localhost:* ws://[::1]:*; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'"
+    }
   },
-  "bundle": {"active":true,"targets":["nsis","msi"],"windows":{"webviewInstallMode":{"type":"embedBootstrapper"}}}
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "category": "DeveloperTool",
+    "shortDescription": "Local engineering workflow and evidence review",
+    "longDescription": "Local-only ESCO engineering workflow, evidence review, and release-candidate workspace.",
+    "windows": {
+      "webviewInstallMode": {"type": "embedBootstrapper"}
+    }
+  }
 }
-

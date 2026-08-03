@@ -151,7 +151,7 @@ export function EngineeringWorkspace({ source, initialView = "requirements", ope
           ))}
           <p><ShieldAlert aria-hidden="true" />No direct PLC control, online editing, controller mode, forces, or live equipment actions exist in this workspace.</p>
         </aside>
-        <main className="eng-workspace-main" id={`workspace-${view}`} tabIndex={-1}>
+        <div className="eng-workspace-main" id={`workspace-${view}`} tabIndex={-1} role="region" aria-label="Engineering workspace content">
           {view === "intake" && <ProjectIntake mode={model.mode} capability={model.capabilities.intakeSubmission} providerNotice={model.mode === "demo" ? "Synthetic offline provider. No internet or customer system is contacted." : model.mode === "live" ? "Authorized local backend only. The workspace does not silently fall back to cloud services." : model.unavailableReason} onSubmit={effectiveOperations.submitIntake} />}
           {view === "files" && <FilesWorkspace files={model.files} onOpenIntake={() => setView("intake")} />}
           {view === "tasks" && <TaskWorkspace tasks={model.tasks} onOpenCityLocation={effectiveOperations.openCityLocation} />}
@@ -159,7 +159,7 @@ export function EngineeringWorkspace({ source, initialView = "requirements", ope
           {(view === "planning" || view === "changesets" || view === "revisions") && <ChangeReviewWorkspace view={view} plans={model.plans} changesets={model.changesets} revisions={model.revisions} changesetCapability={model.capabilities.changesetOperations} revisionCapability={model.capabilities.revisionComparison} operations={effectiveOperations} />}
           {view === "findings" && <FindingsWorkspace findings={model.findings} capability={model.capabilities.findingEvidence} loadFindingDetail={effectiveOperations.loadFindingDetail} onOpenChangeset={() => setView("changesets")} onOpenApprovals={() => setView("approvals")} />}
           {view === "approvals" && <ApprovalInbox approvals={model.approvals} capability={model.capabilities.approvalDecisions} onDecision={effectiveOperations.decideApproval} onOpenChangeset={() => setView("changesets")} />}
-        </main>
+        </div>
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { HashRouter } from "react-router-dom";
+import { HashRouter } from "./routing";
 import { App } from "./App";
 import { EngineeringDataProvider } from "./api/live";
 import "./design-system/tokens.css";

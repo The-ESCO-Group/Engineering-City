@@ -16,14 +16,15 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.83.0",
+    "@tauri-apps/api": "^2.11.1",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.1.1",
     "three": "^0.185.1",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@eslint/js": "^9.17.0",
     "@playwright/test": "^1.49.1",
     "@testing-library/jest-dom": "^6.6.3",

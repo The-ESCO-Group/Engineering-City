@@ -39,7 +39,7 @@ export function ReleaseRoute({ candidate, released, onOpenCityLocation }: Releas
         <article className={candidate ? "complete" : "current"}><ShieldCheck aria-hidden="true" /><span><b>QA & approvals</b><small>Event-backed gates</small></span></article>
         <i aria-hidden="true" />
         <article className={released ? "complete current" : candidate ? "current" : ""}><Warehouse aria-hidden="true" /><span><b>Release Logistics</b><small>{released ? "Ready for handoff" : candidate ? `Candidate ${candidate.number}` : "Awaiting candidate"}</small></span></article>
-        {candidate && <span className="release-route-package" aria-label={`Release candidate ${candidate.number} package`}><PackageCheck aria-hidden="true" /></span>}
+        {candidate && <span className="release-route-package" role="img" aria-label={`Release candidate ${candidate.number} package`}><PackageCheck aria-hidden="true" /></span>}
       </div>
     </section>
   );

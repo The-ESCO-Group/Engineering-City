@@ -139,7 +139,7 @@
 .release-candidate-card > p { min-height: 28px; margin: 0; color: var(--release-muted); font-size: 9px; text-transform: uppercase; }
 .release-candidate-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 13px 0 0; background: var(--release-line); }
 .release-candidate-card dl div { min-width: 0; padding: 8px; background: #081c26; }
-.release-candidate-card dt { color: #66868e; font-size: 7px; text-transform: uppercase; }
+.release-candidate-card dt { color: #90b0b7; font-size: 7px; text-transform: uppercase; }
 .release-candidate-card dd { overflow: hidden; margin: 4px 0 0; color: #d6e9ec; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 
 .release-sidebar > nav { display: grid; gap: 4px; margin: 17px 0; }

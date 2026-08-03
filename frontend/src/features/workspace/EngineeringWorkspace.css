@@ -593,7 +593,7 @@
 .eng-change-list b,
 .eng-approval-list b { color: var(--eng-text); font-size: 10px; line-height: 1.4; }
 .eng-change-list small,
-.eng-approval-list small { color: #688890; font-size: 8px; }
+.eng-approval-list small { color: #9bbbc1; font-size: 8px; }
 .eng-change-list em,
 .eng-approval-list em { color: var(--eng-cyan); font-size: 8px; font-style: normal; text-transform: uppercase; }
 .eng-change-detail,

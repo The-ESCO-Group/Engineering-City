@@ -71,6 +71,9 @@ describe("engineering API client", () => {
     expect(reportDownloadUrl("/api/reports/report-1/content")).toBe(
       "https://backend.example.test/api/reports/report-1/content"
     );
+    expect(() => reportDownloadUrl("https://files.example.test/report.pdf")).toThrow(
+      "Report downloads must remain on the configured API host."
+    );
     expect(projectSocketUrl("project-1", 42)).toBe(
       "wss://backend.example.test/ws/projects/project-1?since_seq=42"
     );

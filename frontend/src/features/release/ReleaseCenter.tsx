@@ -76,7 +76,7 @@ export function ReleaseCenter({ source, operations, initialView = "overview", on
           <p className="release-boundary"><ShieldAlert aria-hidden="true" />This workspace has no direct PLC upload, online editing, controller mode, force, or live equipment control.</p>
         </aside>
 
-        <main className="release-main" id={`release-${view}`} tabIndex={-1}>
+        <div className="release-main" id={`release-${view}`} tabIndex={-1} role="region" aria-label="Release Center content">
           <header className="release-page-heading">
             <div><span>{view === "overview" ? "RELEASE COMMAND" : view === "artifacts" ? "PACKAGE INSPECTION" : "REPORT DELIVERY"}</span><h1>{view === "overview" ? "Release readiness" : view === "artifacts" ? "Artifact package" : "Engineering reports"}</h1><p>{view === "overview" ? "Confirm every gate, validation result, human decision, and verification boundary before handoff." : view === "artifacts" ? "Inspect event-backed package contents, hashes, provenance, and diagnostics." : "Download only files generated and exposed by the authorized local API."}</p></div>
             <div className={`release-status-card ${released ? "ready" : "pending"}`}>{released ? <CheckCircle2 aria-hidden="true" /> : <ShieldAlert aria-hidden="true" />}<span><small>HANDOFF STATE</small><b>{released ? "READY EVENT RECORDED" : model.candidate ? humanize(model.candidate.status) : "NOT ASSEMBLED"}</b></span></div>
@@ -100,7 +100,7 @@ export function ReleaseCenter({ source, operations, initialView = "overview", on
           </>}
           {view === "artifacts" && <ArtifactTree folders={model.folders} candidateNumber={model.candidate?.number ?? null} />}
           {view === "reports" && <ReportLibrary reports={model.reports} availableFormats={model.reportFormats} />}
-        </main>
+        </div>
       </div>
     </div>
   );

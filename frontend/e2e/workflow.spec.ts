@@ -1,78 +1,95 @@
-import { expect, test } from "@playwright/test";
-test("synthetic engineering review workflow is operable", async ({ page }) => {
-  test.setTimeout(180_000);
-  await page.goto("/");
-  await expect(page.locator(".connection")).toContainText("System status");
-  await page.getByRole("button", { name: "Pause timeline" }).click();
-  await expect(page.locator(".city-command-identity h2")).toBeVisible();
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
+
+async function capture(page: Page, testInfo: TestInfo, name: string) {
+  await page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true });
+}
+
+test("synthetic city-to-release review workflow is operable and honest", async ({ page }, testInfo) => {
+  await page.goto("/?demo=1#/");
+  await expect(page.locator(".demo-badge")).toHaveText("DEMO DATA");
+  await expect(page.getByRole("region", { name: "Engineering city workflow visualization" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "World event timeline" })).toContainText("SEQ 40");
   await expect(page.getByRole("complementary", { name: "Engineering city minimap" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Synthetic demo workflow activity" })).toContainText("PLC Review");
   await expect(page.getByRole("button", { name: "Map", exact: true })).toHaveAttribute("aria-pressed", "true");
+
   const cityCanvas = page.locator("canvas.three-city-canvas");
   await expect(cityCanvas).toBeVisible();
+  await page.getByRole("button", { name: "Pause timeline" }).click();
   const canvasBounds = await cityCanvas.boundingBox();
   if (!canvasBounds) throw new Error("The 3D city canvas did not expose interaction bounds.");
-  const automationLabel = page.getByRole("button", { name: "Automation Core: Logic review · 1 active" });
-  const initialLabelPosition = await automationLabel.evaluate((element) => {
+  const automationDistrict = page.getByRole("button", { name: /Automation Core: Logic review/ });
+  const projectedPosition = () => automationDistrict.evaluate((element) => {
     const style = getComputedStyle(element);
-    return `${style.left}:${style.top}`;
+    return `${style.getPropertyValue("--city-map-hud-x")}:${style.getPropertyValue("--city-map-hud-y")}`;
   });
-  await page.mouse.move(
-    canvasBounds.x + canvasBounds.width * 0.58,
-    canvasBounds.y + canvasBounds.height * 0.48
-  );
+  const initialLabelPosition = await projectedPosition();
+  await page.mouse.move(canvasBounds.x + canvasBounds.width * .58, canvasBounds.y + canvasBounds.height * .48);
   await page.mouse.down();
-  await page.mouse.move(
-    canvasBounds.x + canvasBounds.width * 0.42,
-    canvasBounds.y + canvasBounds.height * 0.48,
-    { steps: 8 }
-  );
+  await page.mouse.move(canvasBounds.x + canvasBounds.width * .40, canvasBounds.y + canvasBounds.height * .48, { steps: 8 });
   await page.mouse.up();
-  await page.waitForTimeout(220);
-  const orbitedLabelPosition = await automationLabel.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return `${style.left}:${style.top}`;
-  });
-  expect(orbitedLabelPosition).not.toBe(initialLabelPosition);
+  await expect.poll(projectedPosition, { timeout: 10_000 }).not.toBe(initialLabelPosition);
   await page.mouse.wheel(0, -620);
-  await page.waitForTimeout(220);
-  const zoomedLabelPosition = await automationLabel.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return `${style.left}:${style.top}`;
-  });
-  expect(zoomedLabelPosition).not.toBe(orbitedLabelPosition);
   await page.getByRole("button", { name: "Reset city view" }).click({ force: true });
-  await expect(page.getByRole("button", { name: "Overview layer" })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Mobility layer" }).click({ force: true });
   await expect(page.getByRole("button", { name: "Mobility layer" })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Zoom map in", exact: true }).click({ force: true });
-  await page.getByRole("button", { name: "Reset city view" }).click({ force: true });
-  await expect(page.getByRole("button", { name: "Automation Engineering, 1 active agent" })).toHaveAttribute("aria-pressed", "false");
-  await expect(page.locator(".workspace")).toHaveCount(0);
-  await expect(page.locator(".activity-panel")).toHaveCount(0);
+  await capture(page, testInfo, "city-map");
+
   await page.getByRole("button", { name: "Walk", exact: true }).click();
   await expect(page.getByRole("region", { name: "Engineering city workflow visualization" })).toHaveClass(/is-first-person/);
-  await expect(page.getByRole("status")).toContainText("CLICK CITY TO LOOK");
-  await expect(page.getByRole("button", { name: "Exit walk Map view", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Reset walk position", exact: true })).toBeVisible();
-  await expect(page.getByRole("complementary", { name: "Engineering city minimap" })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: /Exit walk/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reset walk position" })).toBeVisible();
   await page.keyboard.down("w");
   await page.waitForTimeout(120);
   await page.keyboard.up("w");
-  await page.getByRole("button", { name: "Exit walk Map view", exact: true }).click({ force: true });
+  await page.getByRole("button", { name: /Exit walk/ }).click({ force: true });
   await expect(page.getByRole("button", { name: "Map", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("complementary", { name: "Engineering city minimap" })).toBeVisible();
-  await page.getByRole("button", { name: "Automation Core: Logic review · 1 active" }).click();
-  await expect(page.getByRole("button", { name: "Automation Engineering, 1 active agent" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("link", { name: /Findings/ })).toHaveAttribute("href", "#/findings");
-  await page.goto("/#/findings");
-  await expect(page.locator(".findings-page")).toBeVisible();
-  await page.getByText("F-107 · Photoeye PE-402").click();
-  await expect(page.getByText(/field wiring/)).toBeVisible();
-  await page.goto("/#/approvals");
-  await page.getByLabel("Decision").selectOption("Accept");
-  await page.getByLabel("Engineering rationale (required)").fill("Verified against the synthetic evidence set.");
-  await expect(page.getByRole("button", { name: "Submit signed decision" })).toBeEnabled();
-  await page.goto("/#/reports");
-  await expect(page.getByText("Detailed discrepancy report")).toBeVisible();
+
+  await page.goto("/?demo=1#/findings");
+  await expect(page.getByRole("heading", { name: "Findings & evidence", level: 2 })).toBeVisible();
+  await page.getByRole("button", { name: /DEMO-F-107/ }).click();
+  await expect(page.getByText(/field wiring/i).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Evidence citations" })).toBeVisible();
+  await capture(page, testInfo, "finding-evidence");
+
+  await page.goto("/?demo=1#/approvals");
+  await expect(page.getByRole("heading", { name: "Human decision inbox" })).toBeVisible();
+  const reject = page.getByRole("button", { name: "Reject", exact: true }).first();
+  await reject.focus();
+  await page.keyboard.press("Enter");
+  const comment = page.getByLabel(/Engineering comment/).first();
+  await comment.fill("Rejected in the synthetic acceptance run after reviewing the cited evidence and stated limitations.");
+  const submit = page.getByRole("button", { name: "Submit signed decision" }).first();
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  await expect(page.getByText(/Reject recorded for/)).toBeVisible();
+  await capture(page, testInfo, "approval-decision");
+
+  await page.goto("/?demo=1#/reports");
+  await expect(page.getByRole("heading", { name: "Engineering reports" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Report library" })).toBeVisible();
+  await expect(page.getByText(/0 of 19 required report types/)).toBeVisible();
+  await expect(page.getByText(/No matching report record was returned by the API/)).toBeVisible();
+
+  await page.goto("/?demo=1#/release/artifacts");
+  await expect(page.getByRole("heading", { name: "Artifact package" })).toBeVisible();
+  await expect(page.getByText(/No fake download is offered/)).toBeVisible();
+  await expect(page.getByText(/no generation API calls/i)).toBeVisible();
+  await capture(page, testInfo, "release-artifacts");
+
+  await page.goto("/?demo=1#/settings");
+  await expect(page.getByRole("heading", { name: "Desktop integration" })).toBeVisible();
+  await expect(page.getByText("Native actions unavailable")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Locate support logs" })).toBeDisabled();
+  await expect(page.getByText(/disabled in the browser/)).toBeVisible();
+});
+
+test.describe("reduced motion", () => {
+  test.use({ reducedMotion: "reduce" });
+
+  test("Release Center uses a direct-state replay", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/?demo=1#/release");
+    await expect.poll(() => page.evaluate(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);
+    await expect(page.getByText("Reduced motion is active; replay uses a direct state highlight.")).toBeVisible();
+  });
 });

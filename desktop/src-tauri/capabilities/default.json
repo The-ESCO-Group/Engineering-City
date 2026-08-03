@@ -1,8 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Minimal local desktop permissions",
+  "description": "Minimal local desktop permissions; paths and notifications are constrained by Rust commands",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open", "opener:allow-open-path"]
+  "permissions": ["core:default"]
 }
-
