@@ -36,6 +36,8 @@ Python 3.12+ is also required.
 
 The development script starts and supervises the loopback backend first, validates `/api/health`, configures explicit local CORS origins, then starts the frontend. It refuses to reuse an unknown process already occupying either port.
 
+To preserve an existing database while starting a separate local workspace, pass an explicit repository-relative or absolute data directory, for example `./scripts/product/dev.ps1 -DataDirectory data/local-live`. The selected directory contains both the SQLite database and project artifacts; it is never reset by the launcher.
+
 ## Validate the product
 
 ```powershell

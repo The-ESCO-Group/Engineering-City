@@ -17,7 +17,7 @@ PowerShell 7, Node.js 20+, npm, and Python 3.12+ are required for the complete l
 .\scripts\product\run-demo.ps1
 ```
 
-`dev.ps1` binds both services to `127.0.0.1`, waits for `/api/health`, and then opens the frontend. Use `-BackendPort` or `-FrontendPort` to choose non-default local ports. It prints every endpoint and stores process output under `logs/product/`. Ctrl+C stops only the child processes that the script created.
+`dev.ps1` binds both services to `127.0.0.1`, waits for `/api/health`, and then opens the frontend. Use `-BackendPort` or `-FrontendPort` to choose non-default local ports. Use `-DataDirectory data/local-live` to preserve the default database and launch a separate persistent local workspace; the launcher keeps that workspace's SQLite file and project artifacts together and never resets them. It prints every endpoint and stores process output under `logs/product/`. Ctrl+C stops only the child processes that the script created.
 
 The packaged Tauri application does not bundle, install, or supervise the Python backend. `dev.ps1` provides backend/frontend supervision for local development; a packaged workstation needs its separately administered compatible local backend.
 

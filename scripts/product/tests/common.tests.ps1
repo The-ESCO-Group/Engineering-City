@@ -113,6 +113,7 @@ Assert-True ($desktopBuildScript -match 'Get-ProductLocalTauriCli') "Desktop bui
 
 $developmentScript = Get-Content -LiteralPath (Join-Path $repoRoot "scripts\product\dev.ps1") -Raw
 Assert-True ($developmentScript -match '"--app-dir",\s*"backend"') "Development startup must expose backend/app to Uvicorn from the repository root."
+Assert-True ($developmentScript -match '\$env:ESCO_DATABASE_URL') "Development startup must keep the SQLite database under its selected data directory."
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ }

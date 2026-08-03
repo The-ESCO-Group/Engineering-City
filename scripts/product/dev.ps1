@@ -2,6 +2,7 @@
 param(
     [ValidateRange(1024, 65535)][int] $FrontendPort = 4173,
     [ValidateRange(1024, 65535)][int] $BackendPort = 8000,
+    [string] $DataDirectory = "",
     [switch] $SkipBackend,
     [switch] $Demo,
     [switch] $NoBrowser
@@ -18,6 +19,16 @@ $launchUrl = if ($Demo) { "$frontendUrl/?demo=1" } else { $frontendUrl }
 $backendBase = ConvertTo-ProductLoopbackUrl -Url "http://127.0.0.1:$BackendPort"
 $backendHealth = "$backendBase/api/health"
 $venvPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
+$resolvedDataDirectory = if ([string]::IsNullOrWhiteSpace($DataDirectory)) {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot "data"))
+}
+elseif ([System.IO.Path]::IsPathRooted($DataDirectory)) {
+    [System.IO.Path]::GetFullPath($DataDirectory)
+}
+else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $DataDirectory))
+}
+$databasePath = (Join-Path $resolvedDataDirectory "esco_city.sqlite3").Replace("\", "/")
 
 Assert-NoFrontendSecrets
 $null = Assert-ProductNodeVersion
@@ -34,6 +45,7 @@ $priorDemo = [Environment]::GetEnvironmentVariable("VITE_DEMO_MODE", "Process")
 $priorApiBase = [Environment]::GetEnvironmentVariable("VITE_ESCO_API_BASE", "Process")
 $priorEnvironment = [Environment]::GetEnvironmentVariable("ESCO_ENVIRONMENT", "Process")
 $priorCors = [Environment]::GetEnvironmentVariable("ESCO_CORS_ORIGINS", "Process")
+$priorDatabaseUrl = [Environment]::GetEnvironmentVariable("ESCO_DATABASE_URL", "Process")
 $priorDataDir = [Environment]::GetEnvironmentVariable("ESCO_DATA_DIR", "Process")
 $priorProjectsDir = [Environment]::GetEnvironmentVariable("ESCO_PROJECTS_DIR", "Process")
 $backendHandle = $null
@@ -52,8 +64,9 @@ try {
         "https://tauri.localhost",
         "tauri://localhost"
     ) | ConvertTo-Json -Compress
-    $env:ESCO_DATA_DIR = Join-Path $repoRoot "data"
-    $env:ESCO_PROJECTS_DIR = Join-Path $repoRoot "data\projects"
+    $env:ESCO_DATABASE_URL = "sqlite+pysqlite:///$databasePath"
+    $env:ESCO_DATA_DIR = $resolvedDataDirectory
+    $env:ESCO_PROJECTS_DIR = Join-Path $resolvedDataDirectory "projects"
 
     if (-not $SkipBackend) {
         $null = Assert-ProductPythonVersion -PythonPath $venvPython
@@ -115,6 +128,7 @@ finally {
     [Environment]::SetEnvironmentVariable("VITE_ESCO_API_BASE", $priorApiBase, "Process")
     [Environment]::SetEnvironmentVariable("ESCO_ENVIRONMENT", $priorEnvironment, "Process")
     [Environment]::SetEnvironmentVariable("ESCO_CORS_ORIGINS", $priorCors, "Process")
+    [Environment]::SetEnvironmentVariable("ESCO_DATABASE_URL", $priorDatabaseUrl, "Process")
     [Environment]::SetEnvironmentVariable("ESCO_DATA_DIR", $priorDataDir, "Process")
     [Environment]::SetEnvironmentVariable("ESCO_PROJECTS_DIR", $priorProjectsDir, "Process")
 }
