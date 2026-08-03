@@ -16,7 +16,7 @@ import {
   ShieldCheck,
   Tags
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   WorkspaceCapability,
   WorkspaceDevice,
@@ -29,6 +29,7 @@ export type ProjectCoreView = "requirements" | "devices" | "tags" | "plc";
 
 export interface ProjectCoreExplorerProps {
   view: ProjectCoreView;
+  initialRecordId?: string;
   capability: WorkspaceCapability;
   requirements: WorkspaceRequirement[];
   devices: WorkspaceDevice[];
@@ -80,9 +81,9 @@ export function ProjectCoreExplorer(props: ProjectCoreExplorerProps) {
         ><Download aria-hidden="true" /> Export generated view</button>
       </header>
       {props.capability.level !== "available" && <div className="eng-capability-notice"><CircleHelp aria-hidden="true" /><p><b>{humanize(props.capability.level)}</b> · {props.capability.reason}</p></div>}
-      {props.view === "requirements" && <RequirementsView requirements={props.requirements} capability={props.capability} />}
-      {props.view === "devices" && <DevicesView devices={props.devices} capability={props.capability} />}
-      {props.view === "tags" && <TagsView tags={props.tags} capability={props.capability} />}
+      {props.view === "requirements" && <RequirementsView requirements={props.requirements} capability={props.capability} initialRecordId={props.initialRecordId} />}
+      {props.view === "devices" && <DevicesView devices={props.devices} capability={props.capability} initialRecordId={props.initialRecordId} />}
+      {props.view === "tags" && <TagsView tags={props.tags} capability={props.capability} initialRecordId={props.initialRecordId} />}
       {props.view === "plc" && <PlcView programs={props.plcPrograms} capability={props.capability} />}
     </section>
   );
@@ -116,15 +117,33 @@ function CoreEmpty({ capability, label }: { capability: WorkspaceCapability; lab
   return <div className="eng-large-empty"><SearchX aria-hidden="true" /><h3>No {label} published</h3><p>{capability.reason}</p></div>;
 }
 
+function CoreLinkNotFound({ kind, recordId }: { kind: string; recordId: string }) {
+  return <div className="eng-large-empty" role="alert"><SearchX aria-hidden="true" /><h3>{humanize(kind)} link not found</h3><p>No {kind} with ID <code>{recordId}</code> exists in the loaded project. No substitute record is shown.</p></div>;
+}
+
 function Coverage({ value, label }: { value: number | null; label: string }) {
   if (value === null) return <span className="eng-coverage unknown" title={`${label} was not published`}>Not published</span>;
   return <span className={`eng-coverage ${value === 100 ? "complete" : value > 0 ? "partial" : "none"}`}>{value}%</span>;
 }
 
-function RequirementsView({ requirements, capability }: { requirements: WorkspaceRequirement[]; capability: WorkspaceCapability }) {
+function RequirementsView({ requirements, capability, initialRecordId }: { requirements: WorkspaceRequirement[]; capability: WorkspaceCapability; initialRecordId?: string }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
-  const [selectedId, setSelectedId] = useState<string | null>(requirements[0]?.id ?? null);
+  const initialMatch = Boolean(initialRecordId && requirements.some((item) => item.id === initialRecordId));
+  const [selectedId, setSelectedId] = useState<string | null>(() => initialMatch ? initialRecordId! : initialRecordId ? null : requirements[0]?.id ?? null);
+  const appliedRouteId = useRef<string | null>(initialMatch ? initialRecordId! : null);
+  const lastRouteId = useRef<string | undefined>(initialRecordId);
+  useEffect(() => {
+    if (lastRouteId.current !== initialRecordId) {
+      lastRouteId.current = initialRecordId;
+      appliedRouteId.current = null;
+    }
+    if (initialRecordId && appliedRouteId.current !== initialRecordId && requirements.some((item) => item.id === initialRecordId)) {
+      setSelectedId(initialRecordId);
+      appliedRouteId.current = initialRecordId;
+    }
+  }, [initialRecordId, requirements]);
+  const requestedMissing = Boolean(initialRecordId && !requirements.some((item) => item.id === initialRecordId));
   const statuses = useMemo(() => [...new Set(requirements.map((item) => item.status))].sort(), [requirements]);
   const visible = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -133,13 +152,13 @@ function RequirementsView({ requirements, capability }: { requirements: Workspac
       return (!normalized || haystack.includes(normalized)) && (status === "all" || requirement.status === status);
     });
   }, [query, requirements, status]);
-  const selected = visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
+  const selected = requestedMissing ? null : visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
   return (
     <>
       <SearchToolbar value={query} onChange={setQuery} placeholder="Search reference, title, text, or source…" count={visible.length} total={requirements.length} filter={
         <label className="eng-select"><Filter aria-hidden="true" /><span className="sr-only">Filter requirement status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All statuses</option>{statuses.map((item) => <option key={item} value={item}>{humanize(item)}</option>)}</select></label>
       } />
-      {requirements.length === 0 ? <CoreEmpty capability={capability} label="requirements" /> : (
+      {requestedMissing ? <CoreLinkNotFound kind="requirement" recordId={initialRecordId!} /> : requirements.length === 0 ? <CoreEmpty capability={capability} label="requirements" /> : (
         <div className="eng-split-records">
           <div className="eng-table-scroll"><table className="eng-data-table"><thead><tr><th>Requirement</th><th>Source</th><th>Status</th><th>Implementation</th><th>Tests</th><th>Questions</th></tr></thead><tbody>{visible.map((requirement) => (
             <tr key={requirement.id} className={selected?.id === requirement.id ? "selected" : ""} id={`requirement-${requirement.id}`}>
@@ -174,23 +193,37 @@ function RequirementInspector({ requirement }: { requirement: WorkspaceRequireme
       </dl>
       <RecordList title={`Acceptance criteria (${requirement.acceptanceCriteriaCount})`} items={requirement.acceptanceCriteria} empty="Criteria content is not published in the current event summary." />
       <RecordList title="Open questions" items={requirement.openQuestions} empty="No open question is linked." />
-      <a className="eng-deep-link" href={`#requirement-${requirement.id}`}><Link2 aria-hidden="true" /> Copyable deep link target</a>
+      <a className="eng-deep-link" href={`#/workspace/requirements?record=${encodeURIComponent(requirement.id)}`}><Link2 aria-hidden="true" /> Copyable deep link</a>
     </aside>
   );
 }
 
-function DevicesView({ devices, capability }: { devices: WorkspaceDevice[]; capability: WorkspaceCapability }) {
+function DevicesView({ devices, capability, initialRecordId }: { devices: WorkspaceDevice[]; capability: WorkspaceCapability; initialRecordId?: string }) {
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(devices[0]?.id ?? null);
+  const initialMatch = Boolean(initialRecordId && devices.some((item) => item.id === initialRecordId));
+  const [selectedId, setSelectedId] = useState<string | null>(() => initialMatch ? initialRecordId! : initialRecordId ? null : devices[0]?.id ?? null);
+  const appliedRouteId = useRef<string | null>(initialMatch ? initialRecordId! : null);
+  const lastRouteId = useRef<string | undefined>(initialRecordId);
+  useEffect(() => {
+    if (lastRouteId.current !== initialRecordId) {
+      lastRouteId.current = initialRecordId;
+      appliedRouteId.current = null;
+    }
+    if (initialRecordId && appliedRouteId.current !== initialRecordId && devices.some((item) => item.id === initialRecordId)) {
+      setSelectedId(initialRecordId);
+      appliedRouteId.current = initialRecordId;
+    }
+  }, [devices, initialRecordId]);
+  const requestedMissing = Boolean(initialRecordId && !devices.some((item) => item.id === initialRecordId));
   const visible = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return devices.filter((device) => `${device.deviceId} ${device.area} ${device.unit} ${device.type} ${device.vendorModel}`.toLowerCase().includes(normalized));
   }, [devices, query]);
-  const selected = visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
+  const selected = requestedMissing ? null : visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
   return (
     <>
       <SearchToolbar value={query} onChange={setQuery} placeholder="Search device, area, unit, type, or model…" count={visible.length} total={devices.length} />
-      {devices.length === 0 ? <CoreEmpty capability={capability} label="devices or I/O assignments" /> : (
+      {requestedMissing ? <CoreLinkNotFound kind="device" recordId={initialRecordId!} /> : devices.length === 0 ? <CoreEmpty capability={capability} label="devices or I/O assignments" /> : (
         <div className="eng-split-records">
           <div className="eng-table-scroll"><table className="eng-data-table"><thead><tr><th>Device</th><th>Area / unit</th><th>I/O assignment</th><th>Fail state</th><th>Coverage</th><th>Validation</th></tr></thead><tbody>{visible.map((device) => (
             <tr key={device.id} className={selected?.id === device.id ? "selected" : ""} id={`device-${device.id}`}>
@@ -219,15 +252,30 @@ function DeviceInspector({ device }: { device: WorkspaceDevice }) {
       <dl className="eng-definition-list compact"><div><dt>Network node</dt><dd>{device.networkNode || "Not published"}</dd></div><div><dt>Fail state</dt><dd>{device.failState || "Not published"}</dd></div><div><dt>Validation</dt><dd>{device.validation}</dd></div></dl>
       <RecordList title="Linked tags" items={device.linkedTags} empty="No linked tags published." />
       <RecordList title="Linked logic" items={device.linkedLogic} empty="No linked logic published." />
-      <a className="eng-deep-link" href={`#device-${device.id}`}><Link2 aria-hidden="true" /> Device deep link</a>
+      <a className="eng-deep-link" href={`#/workspace/devices?record=${encodeURIComponent(device.id)}`}><Link2 aria-hidden="true" /> Device deep link</a>
     </aside>
   );
 }
 
-function TagsView({ tags, capability }: { tags: WorkspaceTag[]; capability: WorkspaceCapability }) {
+function TagsView({ tags, capability, initialRecordId }: { tags: WorkspaceTag[]; capability: WorkspaceCapability; initialRecordId?: string }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
-  const [selectedId, setSelectedId] = useState<string | null>(tags[0]?.id ?? null);
+  const initialMatch = Boolean(initialRecordId && tags.some((item) => item.id === initialRecordId));
+  const [selectedId, setSelectedId] = useState<string | null>(() => initialMatch ? initialRecordId! : initialRecordId ? null : tags[0]?.id ?? null);
+  const [renderLimit, setRenderLimit] = useState(250);
+  const appliedRouteId = useRef<string | null>(initialMatch ? initialRecordId! : null);
+  const lastRouteId = useRef<string | undefined>(initialRecordId);
+  useEffect(() => {
+    if (lastRouteId.current !== initialRecordId) {
+      lastRouteId.current = initialRecordId;
+      appliedRouteId.current = null;
+    }
+    if (initialRecordId && appliedRouteId.current !== initialRecordId && tags.some((item) => item.id === initialRecordId)) {
+      setSelectedId(initialRecordId);
+      appliedRouteId.current = initialRecordId;
+    }
+  }, [initialRecordId, tags]);
+  const requestedMissing = Boolean(initialRecordId && !tags.some((item) => item.id === initialRecordId));
   const statuses = useMemo(() => [...new Set(tags.map((tag) => tag.status))].sort(), [tags]);
   const visible = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -236,22 +284,24 @@ function TagsView({ tags, capability }: { tags: WorkspaceTag[]; capability: Work
       return haystack.includes(normalized) && (status === "all" || tag.status === status);
     });
   }, [query, status, tags]);
-  const selected = visible.find((tag) => tag.id === selectedId) ?? visible[0] ?? null;
+  useEffect(() => setRenderLimit(250), [query, status]);
+  const selected = requestedMissing ? null : visible.find((tag) => tag.id === selectedId) ?? visible[0] ?? null;
+  const rendered = visible.slice(0, renderLimit);
   return (
     <>
       <SearchToolbar value={query} onChange={setQuery} placeholder="Search tag, alias, device, type, or description…" count={visible.length} total={tags.length} filter={
         <label className="eng-select"><Filter aria-hidden="true" /><span className="sr-only">Filter tag status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All statuses</option>{statuses.map((item) => <option key={item}>{item}</option>)}</select></label>
       } />
-      {tags.length === 0 ? <CoreEmpty capability={capability} label="tags" /> : (
+      {requestedMissing ? <CoreLinkNotFound kind="tag" recordId={initialRecordId!} /> : tags.length === 0 ? <CoreEmpty capability={capability} label="tags" /> : (
         <div className="eng-split-records">
-          <div className="eng-table-scroll"><table className="eng-data-table"><thead><tr><th>Tag</th><th>Scope / type</th><th>Role</th><th>Alias / device</th><th>Status</th><th>Revision</th></tr></thead><tbody>{visible.map((tag) => (
+          <div className="eng-table-scroll"><table className="eng-data-table"><thead><tr><th>Tag</th><th>Scope / type</th><th>Role</th><th>Alias / device</th><th>Status</th><th>Revision</th></tr></thead><tbody>{rendered.map((tag) => (
             <tr key={tag.id} className={selected?.id === tag.id ? "selected" : ""} id={`tag-${tag.id}`}>
               <td><button type="button" className="eng-cell-button" onClick={() => setSelectedId(tag.id)}><b className="eng-mono-name">{tag.name}</b><small>{tag.description || "No description"}</small></button></td>
               <td>{tag.scope}<small className="eng-cell-note">{tag.dataType}{tag.units ? ` · ${tag.units}` : ""}</small></td>
               <td>{tag.role}</td><td>{tag.alias || "Not an alias"}<small className="eng-cell-note">{tag.device || "No device link"}</small></td>
               <td><span className={`eng-status ${tag.status.toLowerCase().replaceAll(" ", "_")}`}>{tag.status}</span></td><td>{tag.approvedRevision === null ? "Unapproved" : `r${tag.approvedRevision}`}</td>
             </tr>
-          ))}</tbody></table></div>
+          ))}</tbody></table>{rendered.length < visible.length && <button type="button" className="eng-load-more" onClick={() => setRenderLimit((current) => Math.min(current + 250, visible.length))}>Load 250 more tags <span>{rendered.length} of {visible.length} shown</span></button>}</div>
           {selected && <TagInspector tag={selected} />}
         </div>
       )}
@@ -265,7 +315,7 @@ function TagInspector({ tag }: { tag: WorkspaceTag }) {
       <div className="eng-record-icon purple"><Tags aria-hidden="true" /></div><span className="eng-eyebrow">{tag.scope} · {tag.dataType}</span><h3 className="eng-mono-name">{tag.name}</h3><p>{tag.description || "No description was published."}</p>
       <dl className="eng-definition-list compact"><div><dt>Role</dt><dd>{tag.role}</dd></div><div><dt>Alias</dt><dd><code>{tag.alias || "Not an alias"}</code></dd></div><div><dt>Device</dt><dd>{tag.device || "No device link"}</dd></div><div><dt>Validation</dt><dd>{tag.validation}</dd></div><div><dt>Approved revision</dt><dd>{tag.approvedRevision === null ? "Not approved" : `Revision ${tag.approvedRevision}`}</dd></div></dl>
       <RecordList title={`Cross-references (${tag.references.length})`} items={tag.references} empty="No references published." />
-      <a className="eng-deep-link" href={`#tag-${tag.id}`}><Link2 aria-hidden="true" /> Tag deep link</a>
+      <a className="eng-deep-link" href={`#/workspace/tags?record=${encodeURIComponent(tag.id)}`}><Link2 aria-hidden="true" /> Tag deep link</a>
     </aside>
   );
 }

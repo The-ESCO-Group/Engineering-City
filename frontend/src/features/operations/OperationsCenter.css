@@ -203,6 +203,10 @@
 .ops-contract-note strong { font-size: 12px; }
 .ops-contract-note p { margin: 3px 0 0; color: #a992b8; font-size: 11px; line-height: 1.5; }
 .ops-audit-list button { min-height: 86px; display: grid; grid-template-columns: 8px 54px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 11px; }
+.ops-audit-load-more { position: sticky; bottom: 0; padding: 8px; border-top: 1px solid var(--ops-line); background: rgb(5 21 28 / 94%); }
+.ops-audit-load-more button { min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 7px 12px; border: 1px solid var(--ops-line-strong); border-radius: 3px; color: var(--ops-cyan); background: #0b2a35; font-size: 12px; font-weight: 750; text-align: center; }
+.ops-audit-load-more button:hover { background: #103743; }
+.ops-audit-load-more button span { color: var(--ops-muted); font-size: 10px; font-weight: 500; }
 .ops-event-signal { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--ops-cyan); }
 .ops-event-signal.is-success { background: var(--ops-green); }
 .ops-event-signal.is-attention { background: var(--ops-orange); }

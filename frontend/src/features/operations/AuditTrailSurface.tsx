@@ -9,7 +9,7 @@ import {
   ShieldAlert,
   UserRound
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { humanizeOperationsCode } from "./adapters";
 import type { OperationsAuditRecord } from "./types";
 
@@ -19,6 +19,8 @@ export interface AuditTrailSurfaceProps {
   latestSequence: number | null;
   sequenceGapCount: number;
 }
+
+const AUDIT_PAGE_SIZE = 200;
 
 function formatTime(value: string): string {
   const date = new Date(value);
@@ -41,16 +43,25 @@ export function AuditTrailSurface({ events, firstSequence, latestSequence, seque
   const [category, setCategory] = useState("all");
   const [newestFirst, setNewestFirst] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(events.at(-1)?.id ?? null);
+  const [visibleLimit, setVisibleLimit] = useState(AUDIT_PAGE_SIZE);
   const categories = useMemo(() => [...new Set(events.map((event) => event.category))].sort(), [events]);
-  const visible = useMemo(() => {
+  const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    const filtered = events.filter((event) => (
+    const matches = events.filter((event) => (
       (category === "all" || event.category === category) &&
       (!normalized || event.searchableText.includes(normalized))
     ));
-    return newestFirst ? [...filtered].reverse() : filtered;
+    return newestFirst ? [...matches].reverse() : matches;
   }, [category, events, newestFirst, query]);
-  const selected = visible.find((event) => event.id === selectedId) ?? visible[0] ?? null;
+  const visible = useMemo(() => filtered.slice(0, visibleLimit), [filtered, visibleLimit]);
+  const remaining = filtered.length - visible.length;
+
+  useEffect(() => {
+    setVisibleLimit(AUDIT_PAGE_SIZE);
+  }, [category, newestFirst, query]);
+
+  const selectedIndex = filtered.findIndex((event) => event.id === selectedId);
+  const selected = (selectedIndex >= 0 ? filtered[selectedIndex] : visible[0]) ?? null;
   const payloadEntries = selected ? Object.entries(selected.payload).sort(([left], [right]) => left.localeCompare(right)) : [];
 
   return (
@@ -84,7 +95,7 @@ export function AuditTrailSurface({ events, firstSequence, latestSequence, seque
         </label>
         <label className="ops-select"><span>Category</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="all">All categories</option>{categories.map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
         <button type="button" className="ops-order" aria-pressed={newestFirst} onClick={() => setNewestFirst((current) => !current)}><ArrowDownUp aria-hidden="true" />{newestFirst ? "Newest first" : "Oldest first"}</button>
-        <output>{visible.length} of {events.length}</output>
+        <output>{filtered.length} of {events.length}</output>
       </div>
 
       {visible.length === 0 ? (
@@ -102,6 +113,17 @@ export function AuditTrailSurface({ events, firstSequence, latestSequence, seque
                 </button>
               </li>
             ))}
+            {remaining > 0 && (
+              <li className="ops-audit-load-more">
+                <button
+                  type="button"
+                  onClick={() => setVisibleLimit((current) => current + AUDIT_PAGE_SIZE)}
+                >
+                  Load {Math.min(AUDIT_PAGE_SIZE, remaining)} more
+                  <span>Showing {visible.length} of {filtered.length} matching events</span>
+                </button>
+              </li>
+            )}
           </ol>
 
           {selected && (

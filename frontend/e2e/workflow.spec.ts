@@ -86,6 +86,32 @@ test("synthetic city-to-release review workflow is operable and honest", async (
 test("delivery engineering and operations surfaces remain usable on a compact laptop viewport", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
 
+  await page.goto("/?demo=1#/projects");
+  await expect(page.locator(".filters output")).toHaveText("1 matching · 1 loaded");
+  const projectSearch = page.getByRole("textbox", { name: "Search projects" });
+  await projectSearch.fill("Palletizer");
+  await expect(page.getByRole("heading", { name: "Line 4 Packaging Conveyor Upgrade" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "No matching projects" })).toBeVisible();
+  await projectSearch.fill("Line 4");
+  await expect(page.getByRole("heading", { name: "Line 4 Packaging Conveyor Upgrade" })).toBeVisible();
+  await projectSearch.fill("");
+  await page.getByRole("combobox", { name: "Filter project status" }).selectOption("In Progress");
+  await expect(page.locator(".filters output")).toHaveText("1 matching · 1 loaded");
+  const navigationDisclosure = page.getByRole("button", { name: "Primary navigation" });
+  await expect(navigationDisclosure).toHaveAttribute("aria-expanded", "false");
+  await expect(navigationDisclosure).toHaveAttribute("aria-controls", "primary-navigation");
+  await navigationDisclosure.click();
+  await expect(navigationDisclosure).toHaveAttribute("aria-expanded", "true");
+
+  await page.goto("/?demo=1#/workspace/requirements?record=demo-req-002");
+  await expect(page.getByRole("heading", { name: "URS-2.8", level: 3 })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Copyable deep link" })).toHaveAttribute("href", "#/workspace/requirements?record=demo-req-002");
+
+  await page.goto("/?demo=1#/findings?record=DEMO-F-104&evidence=demo-ev-l5x-014");
+  await expect(page.locator("#finding-DEMO-F-104")).toHaveClass(/selected/);
+  await expect(page.getByRole("button", { name: /Synthetic MainProgram\.L5X/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("link", { name: "Evidence deep link" })).toHaveAttribute("href", "#/findings?record=DEMO-F-104&evidence=demo-ev-l5x-014");
+
   await page.goto("/?demo=1#/workspace/hmi");
   await expect(page.getByRole("heading", { name: "HMI engineering" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Line4_Overview" })).toBeVisible();

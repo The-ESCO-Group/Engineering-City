@@ -1,4 +1,4 @@
-import type { EventEnvelope as GeneratedEventEnvelope } from "../generated";
+import type { components, EventEnvelope as GeneratedEventEnvelope } from "../generated";
 
 export interface Page<T> {
   items: T[];
@@ -33,17 +33,7 @@ export interface ProjectDetail extends ProjectRead {
   };
 }
 
-export interface AgentInstanceRead {
-  id: string;
-  project_id: string;
-  kind: string;
-  display_name: string;
-  status: "idle" | "walking" | "working" | "waiting" | "blocked" | "offline";
-  location: string;
-  current_activity: string;
-  current_task_id: string | null;
-  updated_at: string;
-}
+export type AgentInstanceRead = components["schemas"]["AgentInstanceRead"];
 
 export interface CapabilityStatus {
   name: string;
@@ -84,14 +74,10 @@ export interface LoginResponse {
   user: UserSummary;
 }
 
-export interface AgentMessageRead {
-  id: string;
-  role: string;
-  agent_kind: string;
-  body: string;
-  context: Record<string, unknown>;
-  created_at: string;
-}
+export type AgentDefinitionRead = components["schemas"]["AgentDefinitionRead"];
+export type AgentMessageRead = components["schemas"]["AgentMessageRead"];
+export type AgentRunRead = components["schemas"]["AgentRunRead"];
+export type AgentRunDetail = components["schemas"]["AgentRunDetail"];
 
 export interface FindingRead {
   id: string;

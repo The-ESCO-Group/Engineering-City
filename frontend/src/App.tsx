@@ -1,12 +1,12 @@
-import { lazy, Suspense, useEffect, useMemo } from "react";
-import { NavLink, Route, Routes, useLocation, useNavigate, useParams } from "./routing";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "./routing";
 import { Activity, AlertTriangle, Archive, Bell, BellRing, Bot, Building2, ChevronDown, ClipboardCheck, Clock3, Database, FileText, Filter, FlaskConical, FolderKanban, ListChecks, LogOut, Menu, Monitor, Plus, Search, Settings, ShieldAlert, Wifi } from "lucide-react";
 import { useEngineeringData } from "./api/live";
 import { City } from "./components/City";
 import { ConnectionCenter } from "./components/ConnectionCenter";
 import { DesktopCenter } from "./components/DesktopCenter";
 import { notifyOperatorEvent } from "./desktop/bridge";
-import { agents as demoAgents, findings as demoFindings, projects } from "./domain";
+import { agents as demoAgents, findings as demoFindings } from "./domain";
 import { operationsSourceFromEngineering } from "./features/operations/integration";
 import type { OperationsView } from "./features/operations/types";
 import { releaseOperationsFromEngineering, releaseSourceFromEngineering } from "./features/release/integration";
@@ -46,6 +46,7 @@ const nav = [
 ] as const;
 function Shell() {
   const location = useLocation();
+  const navigate = useNavigate();
   const isCityHome = location.pathname === "/";
   const isWorkspaceShell = location.pathname.startsWith("/workspace/") ||
     location.pathname === "/workspace" ||
@@ -56,6 +57,9 @@ function Shell() {
     location.pathname === "/release" ||
     location.pathname.startsWith("/release/");
   const isOperationsShell = location.pathname === "/agents" || location.pathname === "/audit";
+  const [navigationCompact, setNavigationCompact] = useState(() =>
+    typeof window.matchMedia === "function" && window.matchMedia("(max-width: 1179px)").matches
+  );
   const engineering = useEngineeringData();
   const projectReference = engineering.project?.client_reference || "NO PROJECT";
   const projectName = engineering.project?.name || "Select an authorized workspace";
@@ -125,18 +129,18 @@ function Shell() {
       );
     }
   }, [engineering.approvals, engineering.dataMode, engineering.events, engineering.projectId, projectReference]);
-  return <div className={`app${isCityHome ? " city-home" : ""}${isWorkspaceShell ? " engineering-workspace-shell" : ""}${isReleaseShell ? " release-center-shell" : ""}${isOperationsShell ? " operations-shell" : ""}`}>
+  return <div className={`app${isCityHome ? " city-home" : ""}${isWorkspaceShell ? " engineering-workspace-shell" : ""}${isReleaseShell ? " release-center-shell" : ""}${isOperationsShell ? " operations-shell" : ""}${navigationCompact ? " nav-compact" : ""}`}>
     <header className="topbar">
-      <button className="menu" type="button" aria-label="Open navigation menu"><Menu aria-hidden="true" /></button>
+      <button className="menu" type="button" aria-label="Primary navigation" aria-expanded={!navigationCompact} aria-controls="primary-navigation" onClick={() => setNavigationCompact((current) => !current)}><Menu aria-hidden="true" /></button>
       <div className="brand-mark">E</div><div className="brand"><strong>ESCO</strong><span>ENGINEERING CITY</span></div>
-      <div className="project-switch"><span>Current project</span><b>{projectReference} · {projectName}</b><ChevronDown aria-hidden="true" /></div>
+      <NavLink className="project-switch" to="/projects" aria-label="Open project portfolio"><span>Current project</span><b>{projectReference} · {projectName}</b><ChevronDown aria-hidden="true" /></NavLink>
       <div className="top-spacer" />
       <span className="demo-badge">{modeLabel}</span>
       <span className="connection"><Wifi aria-hidden="true" /> {isCityHome ? "System status" : "Local backend"} <b>{engineering.dataMode === "live" ? `${connectionLabel} · ${enabledProvider || "provider private"}` : connectionLabel}</b></span>
-      <button className="icon-button" type="button" aria-label="Notifications"><Bell aria-hidden="true" /><i className="notification" /></button>
+      <button className="icon-button" type="button" aria-label={approvalCount ? `Open ${approvalCount} pending approval notification${approvalCount === 1 ? "" : "s"}` : "Open Audit Trail"} onClick={() => navigate(approvalCount ? "/approvals" : "/audit")}><Bell aria-hidden="true" />{approvalCount > 0 && <i className="notification" />}</button>
       <NavLink className="user" to="/settings" aria-label="Open connection and account settings">{initials}</NavLink>
     </header>
-    <aside className="sidebar">
+    <aside className="sidebar" id="primary-navigation">
       <nav aria-label="Primary navigation">{nav.map(([label, to, Icon]) => <NavLink key={label} to={to} end={to === "/"} aria-label={label} title={label}><Icon aria-hidden="true" /><span>{label}</span>{label === "Findings" && <em>{findingCount}</em>}{label === "Approvals" && <em>{approvalCount}</em>}</NavLink>)}</nav>
       <div className="sidebar-foot"><div className="avatar">{initials}</div><div><b>{user?.display_name || (engineering.dataMode === "demo" ? "Demo reviewer" : "Not signed in")}</b><span>{user ? user.roles.map(titleCase).join(" · ") : engineering.dataMode === "demo" ? "Synthetic session" : "Local account required"}</span></div>{user && <button type="button" className="sidebar-logout" onClick={() => void engineering.logout()} aria-label="Sign out of local backend"><LogOut aria-hidden="true" /></button>}</div>
     </aside>
@@ -192,6 +196,9 @@ function WorkspaceRoute() {
 function EngineeringWorkspacePage({ initialView }: { initialView: WorkspaceView }) {
   const engineering = useEngineeringData();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialRecordId = searchParams.get("record");
+  const initialEvidenceId = searchParams.get("evidence");
   const source = useMemo(() => workspaceSourceFromEngineering(engineering), [engineering]);
   const operations = useMemo(
     () => workspaceOperationsFromEngineering(engineering, {
@@ -207,6 +214,8 @@ function EngineeringWorkspacePage({ initialView }: { initialView: WorkspaceView 
       <EngineeringWorkspace
         source={source}
         initialView={initialView}
+        initialRecordId={initialRecordId}
+        initialEvidenceId={initialEvidenceId}
         operations={operations}
         onReturnToCity={() => navigate("/")}
       />
@@ -270,32 +279,61 @@ function SettingsPage() {
 function PageHeader({ eyebrow, title, action, onAction }: { eyebrow: string; title: string; action?: string; onAction?: () => void }) {
   return <div className="page-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1></div>{action && <button className="primary" type="button" onClick={onAction} disabled={!onAction}><Plus />{action}</button>}</div>;
 }
+interface ProjectCardView {
+  id: string;
+  projectId: string;
+  name: string;
+  customer: string;
+  status: string;
+  progress: number | null;
+  openFindings: number | null;
+  pendingApprovals: number | null;
+  lastActivity: string;
+}
+
 function Projects() {
   const engineering = useEngineeringData();
   const navigate = useNavigate();
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
   const liveProject = engineering.project;
-  const liveProgress = liveProject?.counts.tasks
-    ? Math.round((liveProject.counts.tasks_completed / liveProject.counts.tasks) * 100)
-    : 0;
-  const displayedProjects = engineering.dataMode === "demo"
-    ? projects
-    : liveProject ? [{
-        id: liveProject.client_reference || liveProject.id.slice(0, 8),
-        name: liveProject.name,
-        customer: liveProject.description || "Local engineering project",
-        status: titleCase(liveProject.status),
-        progress: liveProgress,
-        openFindings: liveProject.counts.findings_open,
-        pendingApprovals: liveProject.counts.approvals_pending,
-        lastActivity: new Date(liveProject.updated_at).toLocaleString()
-      }]
-    : [];
+  const allProjects = useMemo<ProjectCardView[]>(() => engineering.projects.map((project) => {
+        const detail = liveProject?.id === project.id ? liveProject : null;
+        const progress = detail?.counts.tasks
+          ? Math.round((detail.counts.tasks_completed / detail.counts.tasks) * 100)
+          : null;
+        return {
+          id: project.client_reference || project.id.slice(0, 8),
+          projectId: project.id,
+          name: project.name,
+          customer: project.description || "Local engineering project",
+          status: titleCase(project.status),
+          progress,
+          openFindings: detail?.counts.findings_open ?? null,
+          pendingApprovals: detail?.counts.approvals_pending ?? null,
+          lastActivity: new Date(project.updated_at).toLocaleString()
+        };
+      }), [engineering.projects, liveProject]);
+  const statuses = useMemo(() => [...new Set(allProjects.map((project) => project.status))].sort(), [allProjects]);
+  const projectTotal = Math.max(engineering.projectTotal, allProjects.length);
+  const displayedProjects = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return allProjects.filter((project) => {
+      const matchesQuery = !normalized || `${project.id} ${project.name} ${project.customer} ${project.status}`.toLowerCase().includes(normalized);
+      return matchesQuery && (status === "all" || project.status === status);
+    });
+  }, [allProjects, query, status]);
   const unsupported = engineering.parsers.filter((parser) => !parser.available);
-  return <section className="page"><PageHeader eyebrow="PORTFOLIO" title="Engineering projects" action="New project" onAction={() => navigate("/workspace/intake")} /><div className="filters"><div className="search"><Search /><input aria-label="Search projects" placeholder="Search projects" /></div><button type="button"><Filter /> Filters</button></div>{engineering.dataMode === "live" && <p className="advisory wide"><ShieldAlert />{engineering.parsers.length - unsupported.length} parser kinds available. {unsupported.length ? `${unsupported.length} unsupported kind(s): ${unsupported.map((item) => item.file_kind).join(", ")}.` : "Uploaded formats can be checked locally before review."}</p>}<div className="project-grid">{displayedProjects.map(p => <article className="project-card" key={p.id}><div className="project-card-head"><span>{p.id}</span><em className={p.progress === 100 ? "done" : ""}>{p.status}</em></div><h3>{p.name}</h3><p>{p.customer}</p><div className="progress"><i style={{ width: `${p.progress}%` }} /></div><div className="card-stats"><span><b>{p.progress}%</b> complete</span><span><b>{p.openFindings}</b> findings</span><span><b>{p.pendingApprovals}</b> approvals</span></div><footer><Clock3 /> Updated {p.lastActivity}<button type="button" onClick={() => navigate("/workspace/requirements")}>Open workspace →</button></footer></article>)}</div>{displayedProjects.length === 0 && <div className="empty-state"><FolderKanban /><h2>No project data available</h2><p>{engineering.fallbackReason}</p></div>}</section>;
+  const openProject = (projectId: string) => {
+    if (engineering.dataMode !== "demo") engineering.selectProject(projectId);
+    navigate("/workspace/requirements");
+  };
+  return <section className="page"><PageHeader eyebrow="PORTFOLIO" title="Engineering projects" action="New project" onAction={() => navigate("/workspace/intake")} /><div className="filters"><div className="search"><Search aria-hidden="true" /><input aria-label="Search projects" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search projects" /></div><label className="project-status-filter"><Filter aria-hidden="true" /><span className="sr-only">Filter project status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All statuses</option>{statuses.map((value) => <option value={value} key={value}>{value}</option>)}</select></label><output>{displayedProjects.length} matching · {allProjects.length} loaded{projectTotal > allProjects.length ? ` of ${projectTotal}` : ""}</output></div>{engineering.dataMode === "live" && <p className="advisory wide"><ShieldAlert />{engineering.parsers.length - unsupported.length} parser kinds available. {unsupported.length ? `${unsupported.length} unsupported kind(s): ${unsupported.map((item) => item.file_kind).join(", ")}.` : "Uploaded formats can be checked locally before review."}{projectTotal > allProjects.length ? ` Portfolio loading is capped at ${allProjects.length.toLocaleString()} of ${projectTotal.toLocaleString()} authorized projects.` : ""}</p>}<div className="project-grid">{displayedProjects.map((project) => <article className="project-card" key={project.projectId}><div className="project-card-head"><span>{project.id}</span><em className={project.progress === 100 ? "done" : ""}>{project.status}</em></div><h3>{project.name}</h3><p>{project.customer}</p><div className="progress" aria-label={project.progress === null ? "Progress not loaded" : `${project.progress}% complete`}><i style={{ width: `${project.progress ?? 0}%` }} /></div><div className="card-stats"><span><b>{project.progress === null ? "—" : `${project.progress}%`}</b> complete</span><span><b>{project.openFindings ?? "—"}</b> findings</span><span><b>{project.pendingApprovals ?? "—"}</b> approvals</span></div><footer><Clock3 aria-hidden="true" /> Updated {project.lastActivity}<button type="button" onClick={() => openProject(project.projectId)}>Open workspace →</button></footer></article>)}</div>{displayedProjects.length === 0 && <div className="empty-state"><FolderKanban /><h2>{allProjects.length ? "No matching projects" : "No project data available"}</h2><p>{allProjects.length ? "Change the search or status filter. Authorized projects remain unchanged." : engineering.fallbackReason}</p></div>}</section>;
 }
 function SimplePage() { return <section className="page"><PageHeader eyebrow="WORKSPACE" title="Module overview" /><div className="empty-state"><Activity /><h2>Operational module</h2><p>This module is available from the project workspace once the backend contract is connected.</p></div></section>; }
 function ActivityPanel() {
   const engineering = useEngineeringData();
+  const navigate = useNavigate();
   const visibleAgents = engineering.dataMode === "demo"
     ? demoAgents
     : engineering.agents.map((agent) => ({
@@ -313,7 +351,7 @@ function ActivityPanel() {
     ? 1
     : engineering.approvals.filter((approval) => approval.status === "pending").length;
   const activityTitle = engineering.dataMode === "demo" ? "Demo activity" : engineering.dataMode === "live" ? "Live activity" : "Activity unavailable";
-  return <aside className="activity-panel"><div className="activity-head"><div><span className="eyebrow">OPERATIONS</span><h2>{activityTitle}</h2></div><button type="button" aria-label="Filter activity"><Filter /></button></div><div className="agent-summary"><span><b>{active}</b> active</span><span><b>{waiting}</b> waiting</span><span><b>{engineering.agents.filter((agent) => agent.status === "blocked").length}</b> blocked</span></div><div className="panel-section"><h3>Active agents <span>{visibleAgents.length}</span></h3>{visibleAgents.slice(0,4).map(agent=><div className="agent-row" key={agent.id}><div className={`agent-icon ${agent.state}`}>{agent.name.slice(0,2).toUpperCase()}</div><div><b>{agent.name}</b><span>{agent.task}</span></div><i /></div>)}</div><div className="panel-section"><h3>Recent events</h3>{recentEvents.map(([eventText,time,type])=><div className="event" key={`${eventText}-${time}`}><i className={type}/><div><b>{eventText}</b><span>{time}</span></div></div>)}</div>{pendingApprovals > 0 && <div className="warning-box"><AlertTriangle /><div><b>{pendingApprovals} approval{pendingApprovals === 1 ? "" : "s"} need attention</b><span>Human decisions are required before release.</span></div></div>}</aside>;
+  return <aside className="activity-panel"><div className="activity-head"><div><span className="eyebrow">OPERATIONS</span><h2>{activityTitle}</h2></div><button type="button" aria-label="Open Audit Trail filters" onClick={() => navigate("/audit")}><Filter aria-hidden="true" /></button></div><div className="agent-summary"><span><b>{active}</b> active</span><span><b>{waiting}</b> waiting</span><span><b>{engineering.agents.filter((agent) => agent.status === "blocked").length}</b> blocked</span></div><div className="panel-section"><h3>Active agents <span>{visibleAgents.length}</span></h3>{visibleAgents.slice(0,4).map(agent=><div className="agent-row" key={agent.id}><div className={`agent-icon ${agent.state}`}>{agent.name.slice(0,2).toUpperCase()}</div><div><b>{agent.name}</b><span>{agent.task}</span></div><i /></div>)}</div><div className="panel-section"><h3>Recent events</h3>{recentEvents.map(([eventText,time,type])=><div className="event" key={`${eventText}-${time}`}><i className={type}/><div><b>{eventText}</b><span>{time}</span></div></div>)}</div>{pendingApprovals > 0 && <div className="warning-box"><AlertTriangle /><div><b>{pendingApprovals} approval{pendingApprovals === 1 ? "" : "s"} need attention</b><span>Human decisions are required before release.</span></div></div>}</aside>;
 }
 
 export function App() { return <Shell />; }

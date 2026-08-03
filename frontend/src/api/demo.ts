@@ -52,6 +52,7 @@ const agent = (
 ): AgentInstanceRead => ({
   id: `02410000-0000-4000-8100-${idSuffix}`,
   project_id: DEMO_PROJECT_ID,
+  definition_id: `02410000-0000-4000-8050-${idSuffix}`,
   kind,
   display_name: displayName,
   status,
@@ -74,7 +75,8 @@ const task = (
   kind: TaskRead["kind"],
   title: string,
   status: string,
-  agentKind: string | null
+  agentKind: string | null,
+  agentInstanceSuffix: string | null
 ): TaskRead => ({
   id: `02410000-0000-4000-8200-${suffix}`,
   project_id: DEMO_PROJECT_ID,
@@ -85,7 +87,9 @@ const task = (
   status,
   priority: 100,
   agent_kind: agentKind,
-  agent_instance_id: null,
+  agent_instance_id: agentInstanceSuffix
+    ? `02410000-0000-4000-8100-${agentInstanceSuffix}`
+    : null,
   attempts: status === "completed" ? 1 : 0,
   max_attempts: 3,
   started_at: status === "queued" ? null : DEMO_STARTED_AT,
@@ -98,12 +102,12 @@ const task = (
 });
 
 export const demoTasks: TaskRead[] = [
-  task("000000000001", "intake", "Validate project intake", "completed", "requirements_planning"),
-  task("000000000002", "review_interlocks", "Reconcile electrical I/O", "running", "interlock_review"),
-  task("000000000003", "review_plc", "Build PLC logic proposal", "running", "plc_logic"),
-  task("000000000004", "review_interlocks", "Review HMI and alarm bindings", "running", "tag_architecture"),
-  task("000000000005", "senior_review", "Review seeded discrepancies", "blocked", "senior_review"),
-  task("000000000006", "delivery", "Assemble release evidence", "queued", "documentation_release")
+  task("000000000001", "intake", "Validate project intake", "completed", "requirements_planning", "000000000001"),
+  task("000000000002", "review_interlocks", "Reconcile electrical I/O", "running", "interlock_review", "000000000002"),
+  task("000000000003", "review_plc", "Build PLC logic proposal", "running", "plc_logic", "000000000003"),
+  task("000000000004", "review_interlocks", "Review HMI and alarm bindings", "running", "tag_architecture", "000000000004"),
+  task("000000000005", "senior_review", "Review seeded discrepancies", "blocked", "senior_review", "000000000005"),
+  task("000000000006", "delivery", "Assemble release evidence", "queued", "documentation_release", null)
 ];
 
 export const demoWorkflow: WorkflowStateResponse = {

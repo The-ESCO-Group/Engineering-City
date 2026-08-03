@@ -12,13 +12,15 @@ import {
   SearchX,
   ShieldCheck
 } from "lucide-react";
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { EvidenceSourceKind, WorkspaceEvidence } from "./types";
 
 export interface EvidenceViewerProps {
   evidence: WorkspaceEvidence[];
   selectedId?: string | null;
+  initialSelectedId?: string | null;
   onSelect?: (evidenceId: string) => void;
+  deepLinkFor?: (evidenceId: string) => string;
   title?: string;
 }
 
@@ -50,15 +52,32 @@ function EvidenceIcon({ kind }: { kind: EvidenceSourceKind }) {
   return <FileText {...props} />;
 }
 
-export function EvidenceViewer({ evidence, selectedId, onSelect, title = "Evidence citations" }: EvidenceViewerProps) {
+export function EvidenceViewer({ evidence, selectedId, initialSelectedId, onSelect, deepLinkFor, title = "Evidence citations" }: EvidenceViewerProps) {
   const headingId = useId();
-  const [localSelection, setLocalSelection] = useState<string | null>(evidence[0]?.id ?? null);
+  const initialMatch = Boolean(initialSelectedId && evidence.some((item) => item.id === initialSelectedId));
+  const [localSelection, setLocalSelection] = useState<string | null>(() => initialMatch ? initialSelectedId! : initialSelectedId ? null : evidence[0]?.id ?? null);
   const [copyState, setCopyState] = useState("");
+  const appliedRouteId = useRef<string | null>(initialMatch ? initialSelectedId! : null);
+  const lastRouteId = useRef<string | null | undefined>(initialSelectedId);
   const activeId = selectedId === undefined ? localSelection : selectedId;
+  const requestedId = selectedId === undefined ? initialSelectedId : selectedId;
+  const requestedMissing = Boolean(requestedId && !evidence.some((item) => item.id === requestedId));
   const selected = useMemo(
-    () => evidence.find((item) => item.id === activeId) ?? evidence[0] ?? null,
-    [activeId, evidence]
+    () => requestedMissing ? null : evidence.find((item) => item.id === activeId) ?? evidence[0] ?? null,
+    [activeId, evidence, requestedMissing]
   );
+
+  useEffect(() => {
+    if (lastRouteId.current !== initialSelectedId) {
+      lastRouteId.current = initialSelectedId;
+      appliedRouteId.current = null;
+    }
+    if (selectedId !== undefined || !initialSelectedId || appliedRouteId.current === initialSelectedId) return;
+    if (!evidence.some((item) => item.id === initialSelectedId)) return;
+    setLocalSelection(initialSelectedId);
+    appliedRouteId.current = initialSelectedId;
+    onSelect?.(initialSelectedId);
+  }, [evidence, initialSelectedId, onSelect, selectedId]);
 
   const select = (id: string) => {
     if (selectedId === undefined) setLocalSelection(id);
@@ -83,6 +102,17 @@ export function EvidenceViewer({ evidence, selectedId, onSelect, title = "Eviden
         <SearchX aria-hidden="true" />
         <b>No evidence citation is available</b>
         <p>The interface does not infer a source or location when the backend has not published one.</p>
+      </section>
+    );
+  }
+
+  if (requestedMissing) {
+    return (
+      <section className="eng-evidence-viewer empty" aria-labelledby={headingId} role="alert">
+        <h3 id={headingId}>{title}</h3>
+        <SearchX aria-hidden="true" />
+        <b>Evidence link not found</b>
+        <p>No citation with ID <code>{requestedId}</code> exists for this record. No substitute citation is shown.</p>
       </section>
     );
   }
@@ -122,7 +152,7 @@ export function EvidenceViewer({ evidence, selectedId, onSelect, title = "Eviden
             {selected.note && <EvidenceBlock label="Citation note"><p>{selected.note}</p></EvidenceBlock>}
             <div className="eng-evidence-actions">
               <button type="button" onClick={() => void copyCitation()}><Copy aria-hidden="true" /> Copy citation</button>
-              <a href={`#evidence-${selected.id}`}><Link2 aria-hidden="true" /> Deep link</a>
+              {deepLinkFor && <a href={deepLinkFor(selected.id)}><Link2 aria-hidden="true" /> Evidence deep link</a>}
               <span role="status">{copyState}</span>
             </div>
           </article>

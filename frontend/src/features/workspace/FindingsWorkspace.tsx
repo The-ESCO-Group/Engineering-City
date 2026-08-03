@@ -13,7 +13,7 @@ import {
   ShieldAlert,
   UserRoundCheck
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { mergeFindingDetail } from "./adapters";
 import { EvidenceViewer } from "./EvidenceViewer";
 import type { FindingDetail } from "../../api/types";
@@ -21,6 +21,8 @@ import type { WorkspaceCapability, WorkspaceFinding } from "./types";
 
 export interface FindingsWorkspaceProps {
   findings: WorkspaceFinding[];
+  initialFindingId?: string;
+  initialEvidenceId?: string;
   capability: WorkspaceCapability;
   loadFindingDetail?: (findingId: string) => Promise<FindingDetail>;
   onOpenChangeset?: (changesetId: string) => void;
@@ -31,14 +33,19 @@ function humanize(value: string): string {
   return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-export function FindingsWorkspace({ findings, capability, loadFindingDetail, onOpenChangeset, onOpenApprovals }: FindingsWorkspaceProps) {
+export function FindingsWorkspace({ findings, initialFindingId, initialEvidenceId, capability, loadFindingDetail, onOpenChangeset, onOpenApprovals }: FindingsWorkspaceProps) {
   const [query, setQuery] = useState("");
   const [severity, setSeverity] = useState("all");
   const [status, setStatus] = useState("all");
-  const [selectedId, setSelectedId] = useState<string | null>(findings[0]?.id ?? null);
+  const initialMatch = Boolean(initialFindingId && findings.some((item) => item.id === initialFindingId));
+  const [selectedId, setSelectedId] = useState<string | null>(() => initialMatch ? initialFindingId! : initialFindingId ? null : findings[0]?.id ?? null);
+  const [renderLimit, setRenderLimit] = useState(200);
   const [details, setDetails] = useState<Map<string, WorkspaceFinding>>(() => new Map());
   const [loadState, setLoadState] = useState<"idle" | "loading" | "error">("idle");
   const [loadError, setLoadError] = useState("");
+  const [loadVersion, setLoadVersion] = useState(0);
+  const appliedRouteId = useRef<string | null>(initialMatch ? initialFindingId! : null);
+  const lastRouteId = useRef<string | undefined>(initialFindingId);
   const severities = useMemo(() => [...new Set(findings.map((item) => item.severity))].sort(), [findings]);
   const statuses = useMemo(() => [...new Set(findings.map((item) => item.status))].sort(), [findings]);
   const visible = useMemo(() => {
@@ -48,23 +55,47 @@ export function FindingsWorkspace({ findings, capability, loadFindingDetail, onO
       return haystack.includes(normalized) && (severity === "all" || finding.severity === severity) && (status === "all" || finding.status === status);
     });
   }, [findings, query, severity, status]);
-  const baseSelected = visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
+  useEffect(() => {
+    if (lastRouteId.current !== initialFindingId) {
+      lastRouteId.current = initialFindingId;
+      appliedRouteId.current = null;
+    }
+    if (initialFindingId && appliedRouteId.current !== initialFindingId && findings.some((item) => item.id === initialFindingId)) {
+      setSelectedId(initialFindingId);
+      appliedRouteId.current = initialFindingId;
+    }
+  }, [findings, initialFindingId]);
+  useEffect(() => setRenderLimit(200), [query, severity, status]);
+  const requestedMissing = Boolean(initialFindingId && !findings.some((item) => item.id === initialFindingId));
+  const rendered = visible.slice(0, renderLimit);
+  const baseSelected = requestedMissing ? null : visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
   const selected = baseSelected ? details.get(baseSelected.id) ?? baseSelected : null;
 
-  const selectFinding = async (finding: WorkspaceFinding) => {
-    setSelectedId(finding.id);
+  useEffect(() => {
+    const finding = baseSelected;
+    if (!finding || finding.detailLoaded || details.has(finding.id) || !loadFindingDetail) {
+      setLoadState("idle");
+      return;
+    }
+    let active = true;
     setLoadError("");
-    setLoadState("idle");
-    if (finding.detailLoaded || details.has(finding.id) || !loadFindingDetail) return;
     setLoadState("loading");
-    try {
-      const detail = await loadFindingDetail(finding.id);
+    void loadFindingDetail(finding.id).then((detail) => {
+      if (!active) return;
       setDetails((current) => new Map(current).set(finding.id, mergeFindingDetail(finding, detail)));
       setLoadState("idle");
-    } catch (error) {
+    }).catch((error: unknown) => {
+      if (!active) return;
       setLoadState("error");
       setLoadError(error instanceof Error ? error.message : "Finding evidence could not be loaded.");
-    }
+    });
+    return () => { active = false; };
+  }, [baseSelected, details, loadFindingDetail, loadVersion]);
+
+  const selectFinding = (finding: WorkspaceFinding) => {
+    setSelectedId(finding.id);
+    setLoadError("");
+    if (finding.id === selectedId && loadState === "error") setLoadVersion((current) => current + 1);
   };
 
   return (
@@ -77,21 +108,22 @@ export function FindingsWorkspace({ findings, capability, loadFindingDetail, onO
         <label className="eng-select"><Filter aria-hidden="true" /><span className="sr-only">Filter status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All statuses</option>{statuses.map((item) => <option key={item}>{item}</option>)}</select></label>
         <span className="eng-result-count">{visible.length} of {findings.length}</span>
       </div>
-      {findings.length === 0 ? <div className="eng-large-empty"><SearchX aria-hidden="true" /><h3>No findings recorded</h3><p>No finding is invented when the backend has not reported one.</p></div> : (
+      {requestedMissing ? <div className="eng-large-empty" role="alert"><SearchX aria-hidden="true" /><h3>Finding link not found</h3><p>No finding with ID <code>{initialFindingId}</code> exists in the loaded project. No substitute finding is shown.</p></div> : findings.length === 0 ? <div className="eng-large-empty"><SearchX aria-hidden="true" /><h3>No findings recorded</h3><p>No finding is invented when the backend has not reported one.</p></div> : (
         <div className="eng-finding-layout">
-          <div className="eng-table-scroll"><table className="eng-data-table eng-finding-table"><thead><tr><th>Severity</th><th>Finding</th><th>Source / exact location</th><th>Agent</th><th>Confidence</th><th>Evidence</th><th>Reviewer / approval</th></tr></thead><tbody>{visible.map((finding) => {
+          <div className="eng-table-scroll"><table className="eng-data-table eng-finding-table"><thead><tr><th>Severity</th><th>Finding</th><th>Source / exact location</th><th>Agent</th><th>Confidence</th><th>Evidence</th><th>Reviewer / approval</th></tr></thead><tbody>{rendered.map((finding) => {
             const hydrated = details.get(finding.id) ?? finding;
-            return <tr key={finding.id} id={`finding-${finding.id}`} className={selected?.id === finding.id ? "selected" : ""}><td><span className={`eng-severity ${finding.severity}`}>{humanize(finding.severity)}</span></td><td><button type="button" className="eng-cell-button" onClick={() => void selectFinding(finding)}><b>{finding.id} · {finding.title}</b><small>{humanize(finding.category)} · {humanize(finding.status)}</small></button></td><td>{hydrated.source}<small className="eng-cell-note">{hydrated.exactLocation}</small></td><td>{humanize(finding.agent)}</td><td>{finding.confidence === null ? "Not published" : `${Math.round(finding.confidence * 100)}%`}</td><td>{finding.evidenceCount}</td><td>{finding.reviewer}<small className="eng-cell-note">{finding.approvalStatus}</small></td></tr>;
-          })}</tbody></table></div>
-          {selected && <FindingDetailPanel finding={selected} loadState={loadState} loadError={loadError} canLoad={Boolean(loadFindingDetail)} onReload={() => void selectFinding(selected)} onOpenChangeset={onOpenChangeset} onOpenApprovals={onOpenApprovals} />}
+            return <tr key={finding.id} id={`finding-${finding.id}`} className={selected?.id === finding.id ? "selected" : ""}><td><span className={`eng-severity ${finding.severity}`}>{humanize(finding.severity)}</span></td><td><button type="button" className="eng-cell-button" onClick={() => selectFinding(finding)}><b>{finding.id} · {finding.title}</b><small>{humanize(finding.category)} · {humanize(finding.status)}</small></button></td><td>{hydrated.source}<small className="eng-cell-note">{hydrated.exactLocation}</small></td><td>{humanize(finding.agent)}</td><td>{finding.confidence === null ? "Not published" : `${Math.round(finding.confidence * 100)}%`}</td><td>{finding.evidenceCount}</td><td>{finding.reviewer}<small className="eng-cell-note">{finding.approvalStatus}</small></td></tr>;
+          })}</tbody></table>{rendered.length < visible.length && <button type="button" className="eng-load-more" onClick={() => setRenderLimit((current) => Math.min(current + 200, visible.length))}>Load 200 more findings <span>{rendered.length} of {visible.length} shown</span></button>}</div>
+          {selected && <FindingDetailPanel finding={selected} initialEvidenceId={selected.id === initialFindingId ? initialEvidenceId : undefined} loadState={loadState} loadError={loadError} canLoad={Boolean(loadFindingDetail)} onReload={() => setLoadVersion((current) => current + 1)} onOpenChangeset={onOpenChangeset} onOpenApprovals={onOpenApprovals} />}
         </div>
       )}
     </section>
   );
 }
 
-function FindingDetailPanel({ finding, loadState, loadError, canLoad, onReload, onOpenChangeset, onOpenApprovals }: {
+function FindingDetailPanel({ finding, initialEvidenceId, loadState, loadError, canLoad, onReload, onOpenChangeset, onOpenApprovals }: {
   finding: WorkspaceFinding;
+  initialEvidenceId?: string;
   loadState: "idle" | "loading" | "error";
   loadError: string;
   canLoad: boolean;
@@ -113,10 +145,14 @@ function FindingDetailPanel({ finding, loadState, loadError, canLoad, onReload, 
       {loadState === "loading" && <p className="eng-loading-line" role="status">Loading exact citations from the local backend…</p>}
       {loadState === "error" && <div className="eng-alert-block danger"><AlertTriangle aria-hidden="true" /><div><b>Evidence load failed</b><p>{loadError}</p><button type="button" onClick={onReload}>Retry</button></div></div>}
       {!finding.detailLoaded && loadState === "idle" && <div className="eng-capability-notice"><CircleHelp aria-hidden="true" /><p>{canLoad ? "Select this finding to load exact citations." : "No finding-detail loader is connected; exact citations remain unavailable."}</p></div>}
-      <EvidenceViewer evidence={finding.evidence} />
+      <EvidenceViewer
+        evidence={finding.evidence}
+        initialSelectedId={finding.detailLoaded ? initialEvidenceId : undefined}
+        deepLinkFor={(evidenceId) => `#/findings?record=${encodeURIComponent(finding.id)}&evidence=${encodeURIComponent(evidenceId)}`}
+      />
       <div className="eng-link-columns"><TextGroup icon={<MessageSquareText />} title="Comments" values={finding.comments} /><TextGroup icon={<CheckCircle2 />} title="History" values={finding.history} /></div>
       <div className="eng-linked-records"><span>Linked records</span>{finding.linkedChangesetId && <button type="button" disabled={!onOpenChangeset} onClick={() => onOpenChangeset?.(finding.linkedChangesetId!)}><GitPullRequestArrow aria-hidden="true" /> Change set {finding.linkedChangesetId}</button>}{finding.linkedTests.map((test) => <code key={test}>{test}</code>)}{!finding.linkedChangesetId && finding.linkedTests.length === 0 && <p>None published.</p>}</div>
-      <footer><a href={`#finding-${finding.id}`}><Link2 aria-hidden="true" /> Finding deep link</a>{finding.requiresApproval && <button type="button" disabled={!onOpenApprovals} onClick={() => onOpenApprovals?.(finding.id)}><ShieldAlert aria-hidden="true" /> Open approval decision</button>}</footer>
+      <footer><a href={`#/findings?record=${encodeURIComponent(finding.id)}`}><Link2 aria-hidden="true" /> Finding deep link</a>{finding.requiresApproval && <button type="button" disabled={!onOpenApprovals} onClick={() => onOpenApprovals?.(finding.id)}><ShieldAlert aria-hidden="true" /> Open approval decision</button>}</footer>
     </article>
   );
 }

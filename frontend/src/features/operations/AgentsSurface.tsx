@@ -122,6 +122,8 @@ export function AgentsSurface({ agents, onOpenCityLocation }: AgentsSurfaceProps
                 <div><dt><CalendarClock aria-hidden="true" />Snapshot updated</dt><dd>{formatTime(selected.updatedAt)}</dd></div>
                 <div><dt><Activity aria-hidden="true" />Current activity</dt><dd>{selected.currentActivity || "Not published"}</dd></div>
                 <div><dt><Route aria-hidden="true" />Related tasks</dt><dd>{selected.relatedTaskCount}</dd></div>
+                <div><dt>Agent definition</dt><dd>{selected.definition?.description || "No definition metadata published"}</dd></div>
+                <div><dt>Definition status</dt><dd>{selected.definition ? (selected.definition.is_available === false ? selected.definition.unavailable_reason || "Unavailable" : "Available") : "Not loaded"}</dd></div>
               </dl>
 
               <section className="ops-detail-section" aria-labelledby="ops-current-task">
@@ -143,13 +145,18 @@ export function AgentsSurface({ agents, onOpenCityLocation }: AgentsSurfaceProps
                   {selected.recentEvents.length ? <ol className="ops-compact-log">{selected.recentEvents.map((event) => <li key={event.id}><i aria-hidden="true" /><div><strong>{humanizeOperationsCode(event.event_type)}</strong><p>{eventDetail(event)}</p><time dateTime={event.occurred_at}>Seq {event.seq} · {formatTime(event.occurred_at)}</time></div></li>)}</ol> : <p className="ops-muted-note">No instance-linked event is present in the recent stream window.</p>}
                 </section>
                 <section className="ops-detail-section" aria-labelledby="ops-agent-messages">
-                  <h4 id="ops-agent-messages"><MessageSquareText aria-hidden="true" />Published kind messages <span>{selected.messages.length}</span></h4>
-                  {selected.messages.length ? <ol className="ops-message-list">{selected.messages.slice(0, 5).map((message) => <li key={message.id}><strong>{humanizeOperationsCode(message.role)}</strong><p>{message.body}</p><time dateTime={message.created_at}>{formatTime(message.created_at)}</time></li>)}</ol> : <p className="ops-muted-note">No message was published for this agent instance or kind.</p>}
+                  <h4 id="ops-agent-messages"><MessageSquareText aria-hidden="true" />Latest {Math.min(5, selected.messages.length)} of {selected.messages.length} loaded instance messages</h4>
+                  {selected.messages.length ? <ol className="ops-message-list">{selected.messages.slice(0, 5).map((message) => <li key={message.id}><strong>{humanizeOperationsCode(message.role)}</strong><p>{message.body}</p><time dateTime={message.created_at}>{formatTime(message.created_at)}</time></li>)}</ol> : <p className="ops-muted-note">No instance-linked message is present in the loaded project message window.</p>}
                 </section>
               </div>
 
+              <section className="ops-detail-section" aria-labelledby="ops-agent-runs">
+                <h4 id="ops-agent-runs">Latest {selected.recentRuns.length} of {selected.matchedRunCount} instance runs <span>{selected.runWindowSize} project runs loaded</span></h4>
+                {selected.recentRuns.length ? <ol className="ops-message-list">{selected.recentRuns.map((run) => <li key={run.id}><strong>{humanizeOperationsCode(run.status)}</strong><p>{run.rationale || "No human-facing rationale was published."}</p><time dateTime={run.started_at ?? undefined}>{[run.provider, run.model, run.prompt_tokens !== undefined || run.completion_tokens !== undefined ? `${run.prompt_tokens ?? 0} in / ${run.completion_tokens ?? 0} out tokens` : null, run.started_at ? formatTime(run.started_at) : null].filter(Boolean).join(" · ") || "Run metadata not published"}</time></li>)}</ol> : <p className="ops-muted-note">No instance-linked run is present in the loaded {selected.runWindowSize}-run project window.</p>}
+              </section>
+
               <footer>
-                <p>Provider, model, token usage, cost, and private reasoning are not part of the current agent snapshot contract and are not inferred here.</p>
+                <p>Provider, model, and token usage are shown only when published by an instance-linked run. Cost and private reasoning are not part of the contract and are not inferred here.</p>
                 <button type="button" disabled={!selected.location || !onOpenCityLocation} onClick={() => selected.location && onOpenCityLocation?.(selected.location)} title={!onOpenCityLocation ? "City navigation is not connected in this host." : undefined}><MapPin aria-hidden="true" /> Focus location in city</button>
               </footer>
             </article>

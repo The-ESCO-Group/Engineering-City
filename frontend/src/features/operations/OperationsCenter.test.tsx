@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { demoAgentInstances, demoEvents, demoProject, demoTasks } from "../../api/demo";
+import type { AgentMessageRead, AgentRunRead } from "../../api/types";
 import { OperationsCenter } from "./OperationsCenter";
 import type { OperationsSource } from "./types";
 
@@ -9,7 +10,9 @@ function demoSource(): OperationsSource {
     dataMode: "demo",
     fallbackReason: "Synthetic demo mode is active.",
     project: demoProject,
+    agentDefinitions: [],
     agents: demoAgentInstances,
+    agentRuns: [],
     tasks: demoTasks,
     messages: [],
     events: demoEvents
@@ -27,6 +30,7 @@ describe("OperationsCenter", () => {
     expect(screen.getByRole("heading", { name: "Agent operations" })).toBeInTheDocument();
     expect(screen.getByText(/This view has no agent-control actions/)).toBeInTheDocument();
     expect(screen.getByText("5", { selector: ".ops-summary-grid dd" })).toBeInTheDocument();
+    expect(screen.getByText("No instance-linked run is present in the loaded 0-run project window.")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText(/Search agent, role, task, or location/), { target: { value: "electrical" } });
     const list = screen.getByRole("list", { name: "Reported agents" });
@@ -35,6 +39,52 @@ describe("OperationsCenter", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Focus location in city" }));
     expect(openCityLocation).toHaveBeenCalledWith("electrical_works");
+  });
+
+  it("renders only contracted definition, run, and instance-message metadata", () => {
+    const agent = demoAgentInstances[0];
+    const message: AgentMessageRead = {
+      id: "message-instance",
+      project_id: demoProject.id,
+      role: "agent",
+      agent_kind: agent.kind,
+      agent_instance_id: agent.id,
+      body: "Instance-specific update",
+      created_at: "2026-08-03T12:00:00Z"
+    };
+    const run: AgentRunRead = {
+      id: "run-instance",
+      project_id: demoProject.id,
+      agent_kind: agent.kind,
+      agent_instance_id: agent.id,
+      status: "completed",
+      provider: "local-provider",
+      model: "engineering-model",
+      prompt_tokens: 120,
+      completion_tokens: 45,
+      rationale: "Checked the published requirement set.",
+      started_at: "2026-08-03T12:00:00Z"
+    };
+    const source = demoSource();
+    source.agents = [agent];
+    source.agentDefinitions = [{
+      id: agent.definition_id,
+      kind: agent.kind,
+      display_name: agent.display_name,
+      description: "Requirement planning definition",
+      is_available: false,
+      unavailable_reason: "Required local plugin is unavailable."
+    }];
+    source.agentRuns = [run];
+    source.messages = [message];
+
+    render(<OperationsCenter source={source} view="agents" />);
+
+    expect(screen.getByText("Requirement planning definition")).toBeInTheDocument();
+    expect(screen.getByText("Required local plugin is unavailable.")).toBeInTheDocument();
+    expect(screen.getByText("Instance-specific update")).toBeInTheDocument();
+    expect(screen.getByText("Checked the published requirement set.")).toBeInTheDocument();
+    expect(screen.getByText(/local-provider · engineering-model · 120 in \/ 45 out tokens/)).toBeInTheDocument();
   });
 
   it("labels Audit Trail as a recent stream window and exposes exact event payload fields", () => {
@@ -57,7 +107,9 @@ describe("OperationsCenter", () => {
       dataMode: "unavailable",
       fallbackReason: "Sign in to the local backend to view an authorized project.",
       project: null,
+      agentDefinitions: [],
       agents: [],
+      agentRuns: [],
       tasks: [],
       messages: [],
       events: []

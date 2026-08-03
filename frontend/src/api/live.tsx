@@ -20,8 +20,11 @@ import {
   demoWorkflow
 } from "./demo";
 import type {
+  AgentDefinitionRead,
   AgentInstanceRead,
   AgentMessageRead,
+  AgentRunDetail,
+  AgentRunRead,
   ApprovalRead,
   CapabilityStatus,
   CurrentUserResponse,
@@ -55,7 +58,10 @@ export interface EngineeringData {
   projectId: string | null;
   project: ProjectDetail | null;
   projects: ProjectRead[];
+  projectTotal: number;
+  agentDefinitions: AgentDefinitionRead[];
   agents: AgentInstanceRead[];
+  agentRuns: AgentRunRead[];
   messages: AgentMessageRead[];
   findings: FindingRead[];
   approvals: ApprovalRead[];
@@ -87,7 +93,10 @@ const EMPTY_DATA: EngineeringData = {
   projectId: null,
   project: null,
   projects: [],
+  projectTotal: 0,
+  agentDefinitions: [],
   agents: [],
+  agentRuns: [],
   messages: [],
   findings: [],
   approvals: [],
@@ -116,7 +125,56 @@ const EMPTY_DATA: EngineeringData = {
 };
 
 const EngineeringDataContext = createContext<EngineeringData>(EMPTY_DATA);
-const EVENT_HISTORY_LIMIT = 1_000;
+const EVENT_HISTORY_LIMIT = 10_000;
+
+export function retainEventHistory(events: EventEnvelope[]): EventEnvelope[] {
+  return [...events]
+    .sort((left, right) => left.seq - right.seq)
+    .slice(-EVENT_HISTORY_LIMIT);
+}
+
+export interface ContiguousEventMerge {
+  cursor: number;
+  pending: Map<number, EventEnvelope>;
+  committed: EventEnvelope[];
+}
+
+export function mergeContiguousEvents(
+  cursor: number,
+  pendingEvents: ReadonlyMap<number, EventEnvelope>,
+  incomingEvents: readonly EventEnvelope[]
+): ContiguousEventMerge {
+  const pending = new Map(pendingEvents);
+  incomingEvents.forEach((event) => {
+    if (event.seq > cursor) pending.set(event.seq, event);
+  });
+
+  const committed: EventEnvelope[] = [];
+  while (pending.has(cursor + 1)) {
+    const next = pending.get(cursor + 1)!;
+    pending.delete(cursor + 1);
+    committed.push(next);
+    cursor = next.seq;
+  }
+
+  return { cursor, pending, committed };
+}
+
+export function deriveContiguousEventCursor(events: readonly EventEnvelope[]): number {
+  const retained = retainEventHistory([...events]);
+  if (retained.length === 0) return 0;
+
+  // A full retained window has intentionally discarded its older prefix. A
+  // shorter window has not, so it must still begin at sequence one before its
+  // high-water mark is safe to resume from.
+  let cursor = retained.length === EVENT_HISTORY_LIMIT ? retained[0].seq - 1 : 0;
+  for (const event of retained) {
+    if (event.seq <= cursor) continue;
+    if (event.seq !== cursor + 1) break;
+    cursor = event.seq;
+  }
+  return cursor;
+}
 
 function eventSequenceKey(projectId: string): string {
   return `esco:event-seq:${projectId}`;
@@ -126,10 +184,28 @@ function eventHistoryKey(projectId: string): string {
   return `esco:event-history:${projectId}`;
 }
 
+export function persistContiguousEventHistory(
+  storage: Pick<Storage, "setItem">,
+  projectId: string,
+  events: readonly EventEnvelope[],
+  cursor: number
+): boolean {
+  try {
+    // History is the recoverable source of truth. Write it before the cursor so
+    // a quota failure causes harmless duplicate replay after restart rather
+    // than a cursor that skips events the client never retained.
+    storage.setItem(eventHistoryKey(projectId), JSON.stringify(events));
+    storage.setItem(eventSequenceKey(projectId), String(cursor));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function readEventHistory(projectId: string): EventEnvelope[] {
   try {
     const value = JSON.parse(window.localStorage.getItem(eventHistoryKey(projectId)) || "[]");
-    return Array.isArray(value) ? (value as EventEnvelope[]).slice(-EVENT_HISTORY_LIMIT) : [];
+    return Array.isArray(value) ? retainEventHistory(value as EventEnvelope[]) : [];
   } catch {
     return [];
   }
@@ -143,6 +219,7 @@ function invalidateForEvent(
   const prefix = event.event_type.split(".")[0];
   if (prefix === "agent") {
     invalidate(["engineering", projectId, "agents"]);
+    invalidate(["engineering", projectId, "agent-runs"]);
     invalidate(["engineering", projectId, "messages"]);
   } else if (prefix === "finding") {
     invalidate(["engineering", projectId, "findings"]);
@@ -155,6 +232,7 @@ function invalidateForEvent(
     invalidate(["engineering", projectId, "reports"]);
   } else if (prefix === "task" || prefix === "workflow") {
     invalidate(["engineering", projectId, "tasks"]);
+    invalidate(["engineering", projectId, "agent-runs"]);
     invalidate(["engineering", projectId, "workflow"]);
     invalidate(["engineering", projectId, "project"]);
   } else {
@@ -214,9 +292,21 @@ export function EngineeringDataProvider({ children }: { children: ReactNode }) {
     enabled,
     retry: false
   });
+  const agentDefinitionsQuery = useQuery({
+    queryKey: ["engineering", "agent-definitions"],
+    queryFn: engineeringApi.agentDefinitions,
+    enabled: authenticated,
+    retry: false
+  });
   const agentsQuery = useQuery({
     queryKey: ["engineering", projectId, "agents"],
     queryFn: () => engineeringApi.agents(projectId!),
+    enabled,
+    retry: false
+  });
+  const agentRunsQuery = useQuery({
+    queryKey: ["engineering", projectId, "agent-runs"],
+    queryFn: () => engineeringApi.agentRuns(projectId!),
     enabled,
     retry: false
   });
@@ -309,7 +399,8 @@ export function EngineeringDataProvider({ children }: { children: ReactNode }) {
       setEvents([]);
       return;
     }
-    setEvents(readEventHistory(projectId));
+    const restoredHistory = readEventHistory(projectId);
+    setEvents(restoredHistory);
 
     let reconnectTimer = 0;
     let pollTimer = 0;
@@ -317,7 +408,12 @@ export function EngineeringDataProvider({ children }: { children: ReactNode }) {
     let stopped = false;
     let reconnectAttempt = 0;
     let catchUpActive = false;
-    let currentSequence = Number(window.localStorage.getItem(eventSequenceKey(projectId)) || 0);
+    let currentSequence = deriveContiguousEventCursor(restoredHistory);
+    let pendingEvents = new Map(
+      restoredHistory
+        .filter((event) => event.seq > currentSequence)
+        .map((event) => [event.seq, event] as const)
+    );
 
     const invalidate = (key: readonly unknown[]) => {
       void queryClient.invalidateQueries({ queryKey: key });
@@ -325,29 +421,29 @@ export function EngineeringDataProvider({ children }: { children: ReactNode }) {
     const refreshProject = () => {
       void queryClient.invalidateQueries({ queryKey: ["engineering", projectId] });
     };
-    const storeEvent = (event: EventEnvelope) => {
-      if (event.seq <= currentSequence) return;
-      currentSequence = event.seq;
-      window.localStorage.setItem(eventSequenceKey(projectId), String(event.seq));
+    const storeEvents = (incomingEvents: readonly EventEnvelope[]) => {
+      const merged = mergeContiguousEvents(currentSequence, pendingEvents, incomingEvents);
+      pendingEvents = merged.pending;
+      if (merged.committed.length === 0) return;
+      currentSequence = merged.cursor;
+      const committedIds = new Set(merged.committed.map((event) => event.id));
+      const committedSequences = new Set(merged.committed.map((event) => event.seq));
       setEvents((previous) => {
-        const next = [...previous.filter((item) => item.id !== event.id), event]
-          .sort((left, right) => left.seq - right.seq)
-          .slice(-EVENT_HISTORY_LIMIT);
-        try {
-          window.localStorage.setItem(eventHistoryKey(projectId), JSON.stringify(next));
-        } catch {
-          // Storage can be unavailable in a restricted desktop WebView; live state still works.
-        }
+        const next = retainEventHistory([
+          ...previous.filter((item) => !committedIds.has(item.id) && !committedSequences.has(item.seq)),
+          ...merged.committed
+        ]);
+        persistContiguousEventHistory(window.localStorage, projectId, next, merged.cursor);
         return next;
       });
-      invalidateForEvent(event, projectId, invalidate);
+      merged.committed.forEach((event) => invalidateForEvent(event, projectId, invalidate));
     };
     const catchUp = async () => {
       if (catchUpActive || stopped) return;
       catchUpActive = true;
       try {
         const replay = await engineeringApi.events(projectId, currentSequence);
-        replay.sort((left, right) => left.seq - right.seq).forEach(storeEvent);
+        storeEvents(replay.sort((left, right) => left.seq - right.seq));
       } catch {
         setSocketConnection((state) => (state === "live" ? "reconnecting" : state));
       } finally {
@@ -375,8 +471,9 @@ export function EngineeringDataProvider({ children }: { children: ReactNode }) {
             }
             return;
           }
-          if (frame.seq > currentSequence + 1) void catchUp();
-          storeEvent(frame);
+          const gapDetected = frame.seq > currentSequence + 1;
+          storeEvents([frame]);
+          if (gapDetected) void catchUp();
         } catch {
           setSocketConnection("reconnecting");
           void catchUp();
@@ -439,7 +536,10 @@ export function EngineeringDataProvider({ children }: { children: ReactNode }) {
       projectId: dataMode === "demo" ? demoProject.id : projectId,
       project: dataMode === "demo" ? demoProject : projectQuery.data || null,
       projects: dataMode === "demo" ? demoProjects : projectsQuery.data?.items || [],
+      projectTotal: dataMode === "demo" ? demoProjects.length : projectsQuery.data?.total || 0,
+      agentDefinitions: dataMode === "demo" ? [] : agentDefinitionsQuery.data || [],
       agents: dataMode === "demo" ? demoAgentInstances : agentsQuery.data || [],
+      agentRuns: dataMode === "demo" ? [] : agentRunsQuery.data || [],
       messages: messagesQuery.data || [],
       findings: findingsQuery.data?.items || [],
       approvals: approvalsQuery.data || [],
@@ -470,7 +570,9 @@ export function EngineeringDataProvider({ children }: { children: ReactNode }) {
       projectId,
       projectQuery.data,
       projectsQuery.data,
+      agentDefinitionsQuery.data,
       agentsQuery.data,
+      agentRunsQuery.data,
       messagesQuery.data,
       findingsQuery.data,
       approvalsQuery.data,
@@ -512,6 +614,15 @@ export function useFindingDetail(findingId: string | null, enabled: boolean) {
     queryKey: ["engineering", "finding", findingId],
     queryFn: () => engineeringApi.finding(findingId!),
     enabled: enabled && Boolean(findingId),
+    retry: false
+  });
+}
+
+export function useAgentRunDetail(runId: string | null, enabled: boolean) {
+  return useQuery<AgentRunDetail>({
+    queryKey: ["engineering", "agent-run", runId],
+    queryFn: () => engineeringApi.agentRun(runId!),
+    enabled: enabled && Boolean(runId),
     retry: false
   });
 }

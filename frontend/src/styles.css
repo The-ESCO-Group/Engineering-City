@@ -181,3 +181,25 @@ body{min-width:0}
   .app:not(.city-home) .connection{display:none}
   .app:not(.city-home) .demo-badge{font-size:8px}
 }
+
+/* Interactive shell controls and a user-controlled compact navigation mode. */
+.project-switch{text-decoration:none;border-radius:4px}
+.project-switch:hover,.project-switch:focus-visible{background:#1c1e22;outline:1px solid #4a4f58;outline-offset:4px}
+.project-status-filter{height:34px;padding:0 9px;border:1px solid var(--line);background:#202227;color:#d9dde2;font-size:10px;display:flex;align-items:center;gap:6px}
+.project-status-filter svg{width:13px}
+.project-status-filter select{border:0;outline:0;background:#202227;color:inherit;font-size:10px}
+.project-status-filter:focus-within{outline:2px solid var(--cyan);outline-offset:2px}
+.filters output{align-self:center;margin-left:auto;color:var(--muted);font-size:10px}
+.app.nav-compact:not(.city-home){grid-template-columns:64px minmax(0,1fr) 0}
+.app.nav-compact:not(.city-home)>.activity-panel{display:none}
+.app.nav-compact:not(.city-home)>.sidebar a{position:relative;justify-content:center;padding:0}
+.app.nav-compact:not(.city-home)>.sidebar a span{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.app.nav-compact:not(.city-home)>.sidebar a em{position:absolute;top:1px;right:3px;margin:0}
+.app.nav-compact:not(.city-home)>.sidebar-foot{display:none}
+
+@media(max-width:1179px){
+  .app:not(.city-home):not(.nav-compact){grid-template-columns:208px minmax(0,1fr) 0}
+  .app:not(.city-home):not(.nav-compact)>.sidebar a{justify-content:flex-start;padding:0 11px}
+  .app:not(.city-home):not(.nav-compact)>.sidebar a span{position:static;width:auto;height:auto;overflow:visible;clip:auto;white-space:normal}
+  .app:not(.city-home):not(.nav-compact)>.sidebar a em{position:static;margin-left:auto}
+}

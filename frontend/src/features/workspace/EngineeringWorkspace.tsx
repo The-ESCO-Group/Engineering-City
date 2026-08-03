@@ -38,6 +38,8 @@ import "./EngineeringWorkspace.css";
 export interface EngineeringWorkspaceProps {
   source: WorkspaceSource;
   initialView?: WorkspaceView;
+  initialRecordId?: string | null;
+  initialEvidenceId?: string | null;
   operations?: WorkspaceOperations;
   onReturnToCity?: () => void;
 }
@@ -94,8 +96,9 @@ function decisionStatus(decision: WorkspaceApprovalDecision): string {
   return "rejected";
 }
 
-export function EngineeringWorkspace({ source, initialView = "requirements", operations, onReturnToCity }: EngineeringWorkspaceProps) {
+export function EngineeringWorkspace({ source, initialView = "requirements", initialRecordId, initialEvidenceId, operations, onReturnToCity }: EngineeringWorkspaceProps) {
   const [view, setView] = useState<WorkspaceView>(initialView);
+  useEffect(() => setView(initialView), [initialView]);
   const sourceModel = useMemo(() => buildWorkspaceModel(source), [source]);
   const [demoModel, setDemoModel] = useState(() => sourceModel);
   useEffect(() => {
@@ -164,10 +167,10 @@ export function EngineeringWorkspace({ source, initialView = "requirements", ope
           {view === "intake" && <ProjectIntake mode={model.mode} capability={model.capabilities.intakeSubmission} providerNotice={model.mode === "demo" ? "Synthetic offline provider. No internet or customer system is contacted." : model.mode === "live" ? "Authorized local backend only. The workspace does not silently fall back to cloud services." : model.unavailableReason} onSubmit={effectiveOperations.submitIntake} />}
           {view === "files" && <FilesWorkspace files={model.files} onOpenIntake={() => setView("intake")} />}
           {view === "tasks" && <TaskWorkspace tasks={model.tasks} onOpenCityLocation={effectiveOperations.openCityLocation} />}
-          {(view === "requirements" || view === "devices" || view === "tags" || view === "plc") && <ProjectCoreExplorer view={view} capability={model.capabilities.projectCore} requirements={model.requirements} devices={model.devices} tags={model.tags} plcPrograms={model.plcPrograms} onExport={effectiveOperations.exportCoreView} />}
+          {(view === "requirements" || view === "devices" || view === "tags" || view === "plc") && <ProjectCoreExplorer view={view} initialRecordId={initialRecordId ?? undefined} capability={model.capabilities.projectCore} requirements={model.requirements} devices={model.devices} tags={model.tags} plcPrograms={model.plcPrograms} onExport={effectiveOperations.exportCoreView} />}
           {(view === "hmi" || view === "alarms" || view === "tests" || view === "documentation") && <DeliveryCoreWorkspace view={view} capability={model.capabilities.deliveryCore} hmiScreens={model.hmiScreens} alarms={model.alarms} tests={model.testProcedures} documents={model.documents} tasks={model.tasks} findings={model.findings} onOpenReleaseCenter={effectiveOperations.openReleaseCenter} />}
           {(view === "planning" || view === "changesets" || view === "revisions") && <ChangeReviewWorkspace view={view} plans={model.plans} changesets={model.changesets} revisions={model.revisions} changesetCapability={model.capabilities.changesetOperations} revisionCapability={model.capabilities.revisionComparison} operations={effectiveOperations} />}
-          {view === "findings" && <FindingsWorkspace findings={model.findings} capability={model.capabilities.findingEvidence} loadFindingDetail={effectiveOperations.loadFindingDetail} onOpenChangeset={() => setView("changesets")} onOpenApprovals={() => setView("approvals")} />}
+          {view === "findings" && <FindingsWorkspace findings={model.findings} initialFindingId={initialRecordId ?? undefined} initialEvidenceId={initialEvidenceId ?? undefined} capability={model.capabilities.findingEvidence} loadFindingDetail={effectiveOperations.loadFindingDetail} onOpenChangeset={() => setView("changesets")} onOpenApprovals={() => setView("approvals")} />}
           {view === "approvals" && <ApprovalInbox approvals={model.approvals} capability={model.capabilities.approvalDecisions} onDecision={effectiveOperations.decideApproval} onOpenChangeset={() => setView("changesets")} />}
         </div>
       </div>

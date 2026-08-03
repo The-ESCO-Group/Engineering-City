@@ -846,3 +846,20 @@
   .eng-workspace,
   .eng-workspace * { forced-color-adjust: auto; }
 }
+
+.eng-load-more {
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  border-top: 1px solid var(--eng-line);
+  background: rgb(11 37 48 / 88%);
+  color: var(--eng-cyan);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.eng-load-more:hover,
+.eng-load-more:focus-visible { background: rgb(17 55 68 / 96%); }
+.eng-load-more span { margin-left: 8px; color: var(--eng-muted); font-size: 9px; font-weight: 500; }

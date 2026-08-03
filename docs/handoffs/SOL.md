@@ -11,6 +11,7 @@
 - Milestone 5 commit: `a89b45e`
 - Milestone 6 commit: `b3cfaf2`
 - Milestone 7 commit: this commit (`test(product): complete local end-to-end city workflow`)
+- Milestone 9 commit: this commit (`fix(product): harden live operations and traceability`)
 - Product world commit: `fae0776`
 - Contract version consumed: `1.0.0`
 - Backend application version: `0.1.0`
@@ -410,6 +411,65 @@ Milestone 8 validation:
 - isolated real-backend Chromium acceptance passed: 1/1
 - product PowerShell parser/security tests passed: 9 scripts
 - repository-local desktop package build produced verified MSI and NSIS hashes
+
+## Milestone 9 live-scale and traceability hardening
+
+The final product-owned audit removed the remaining places where a compact UI
+could hide or misattribute authorized live data:
+
+- Projects now loads the authorized portfolio in 500-record contract pages up to
+  a 10,000-record safety cap, preserves the backend-reported total, searches and
+  filters the complete loaded window, switches the selected live project before
+  opening it, and says explicitly when more projects exist beyond the cap
+- the shell has a user-controlled compact navigation mode with correct disclosure
+  semantics, a functional project switcher, approval/Audit notification routing,
+  visible keyboard focus, and no false zero-count notification indicator
+- the retained event stream now holds 10,000 envelopes, buffers out-of-order
+  frames, advances and persists its cursor only across a contiguous prefix, and
+  writes recoverable history before the cursor so reconnect races cannot skip an
+  event; message replay is likewise cursor-paged up to 10,000 records
+- Audit, Findings, and Tags render bounded windows with explicit Load More
+  controls and keep expanded windows during live refreshes instead of snapping
+  back to their first page
+- agent definitions, exact instance messages, and instance-linked runs are read
+  from the generated contract; same-kind instances can no longer inherit another
+  instance's task, message, or run, and truncated detail lists report “latest N
+  of total” instead of implying completeness
+- Project Core, finding, and evidence links are canonical hash routes. Each route
+  selection is applied once, stale IDs render an explicit no-substitute state,
+  evidence links retain their parent finding, and a live collection refresh does
+  not overwrite the operator's later selection
+
+Milestone 9 product validation on 2026-08-03:
+
+- frontend lint, strict typecheck, contract-consumer drift check, production
+  build, and production dependency audit passed; the audit reported zero
+  vulnerabilities
+- full frontend unit/component suite passed: 129/129 across 28 files
+- synthetic Chromium acceptance passed: 9/9, including five axe WCAG A/AA scans,
+  1440×900 image regression, 1024×768 compact navigation, deep links, city
+  orbit/zoom, and reduced motion
+- isolated real-backend Chromium acceptance passed: 1/1 with fresh SQLite data,
+  login, project creation, ZIP intake, workflow execution, reload persistence,
+  approval, stored report bytes, browser downloads, and completion
+- delivery/report tests passed: 21/21; product PowerShell security/parser tests
+  passed with all 9 scripts parsed
+- desktop Rust format, check, Clippy with warnings denied, and tests passed; Rust
+  tests passed 5/5
+
+The full shared backend suite is not green on the concurrent backend-owner work:
+six tests currently fail in PLC template rendering, rename-impact validation,
+domain-contract drift, and destructive-write range validation. In particular,
+`contracts/domain.schema.json` does not match the backend generator. These are
+outside Sol ownership and no product commit stages or rewrites them.
+
+Full engineering release is also still blocked by `CLAUDE-REQUEST-S006`. Contract
+1.0.0 publishes report reads/downloads but no Project Core/revision/validation/
+release-candidate/artifact/engineering-ZIP API. The in-progress backend release
+assembler produces a directory rather than the required deterministic ZIP and
+is not exposed by HTTP. Release controls therefore remain honestly disabled;
+the Windows installer package is an application distribution and must never be
+represented as the project's traceable engineering release package.
 
 ## Current screen matrix
 

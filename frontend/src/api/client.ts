@@ -1,6 +1,9 @@
 import type {
+  AgentDefinitionRead,
   AgentInstanceRead,
   AgentMessageRead,
+  AgentRunDetail,
+  AgentRunRead,
   ApprovalRead,
   ApiErrorBody,
   CapabilityStatus,
@@ -25,6 +28,13 @@ import type {
 import { configuredApiBase } from "../config";
 
 export const API_BASE = configuredApiBase();
+
+const PROJECT_PAGE_SIZE = 500;
+const PROJECT_LIST_LIMIT = 10_000;
+const EVENT_PAGE_SIZE = 1_000;
+const EVENT_REPLAY_LIMIT = 10_000;
+const MESSAGE_PAGE_SIZE = 500;
+const MESSAGE_REPLAY_LIMIT = 10_000;
 
 function apiUrl(path: string): string {
   return new URL(`${API_BASE}${path}`, window.location.origin).toString();
@@ -72,6 +82,62 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function listProjects(): Promise<Page<ProjectRead>> {
+  const items: ProjectRead[] = [];
+  let total = 0;
+
+  for (let offset = 0; offset < PROJECT_LIST_LIMIT; offset += PROJECT_PAGE_SIZE) {
+    const limit = Math.min(PROJECT_PAGE_SIZE, PROJECT_LIST_LIMIT - offset);
+    const page = await request<Page<ProjectRead>>(`/projects?limit=${limit}&offset=${offset}`);
+    total = page.total;
+    items.push(...page.items.slice(0, limit));
+
+    if (page.items.length < limit || offset + page.items.length >= page.total) break;
+  }
+
+  return {
+    items,
+    total,
+    limit: PROJECT_LIST_LIMIT,
+    offset: 0
+  };
+}
+
+async function replayProjectEvents(projectId: string, sinceSeq = 0): Promise<EventEnvelope[]> {
+  const events: EventEnvelope[] = [];
+
+  for (let offset = 0; offset < EVENT_REPLAY_LIMIT; offset += EVENT_PAGE_SIZE) {
+    const limit = Math.min(EVENT_PAGE_SIZE, EVENT_REPLAY_LIMIT - offset);
+    const page = await request<EventEnvelope[]>(
+      `/projects/${projectId}/events?since_seq=${sinceSeq}&limit=${limit}&offset=${offset}`
+    );
+    events.push(...page.slice(0, limit));
+    if (page.length < limit) break;
+  }
+
+  return events;
+}
+
+async function replayProjectMessages(projectId: string): Promise<AgentMessageRead[]> {
+  const messages: AgentMessageRead[] = [];
+  let since: string | null = null;
+
+  while (messages.length < MESSAGE_REPLAY_LIMIT) {
+    const limit = Math.min(MESSAGE_PAGE_SIZE, MESSAGE_REPLAY_LIMIT - messages.length);
+    const cursor: string = since ? `&since=${encodeURIComponent(since)}` : "";
+    const page: AgentMessageRead[] = await request<AgentMessageRead[]>(
+      `/projects/${projectId}/messages?limit=${limit}${cursor}`
+    );
+    messages.push(...page.slice(0, limit));
+    if (page.length < limit) break;
+    const next: string | undefined = page.at(-1)?.id;
+    if (!next || next === since) break;
+    since = next;
+  }
+
+  return messages;
+}
+
 export const engineeringApi = {
   health: () => request<HealthResponse>("/health"),
   capabilities: () => request<CapabilityStatus[]>("/system/capabilities"),
@@ -82,7 +148,7 @@ export const engineeringApi = {
     }),
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
   me: () => request<CurrentUserResponse>("/auth/me"),
-  projects: () => request<Page<ProjectRead>>("/projects?limit=50"),
+  projects: listProjects,
   createProject: (input: {
     name: string;
     description?: string;
@@ -121,11 +187,13 @@ export const engineeringApi = {
       method: "POST",
       body: JSON.stringify({ reason })
     }),
-  events: (projectId: string, sinceSeq = 0) =>
-    request<EventEnvelope[]>(`/projects/${projectId}/events?since_seq=${sinceSeq}&limit=1000`),
+  events: replayProjectEvents,
+  agentDefinitions: () => request<AgentDefinitionRead[]>("/agents"),
   agents: (projectId: string) => request<AgentInstanceRead[]>(`/projects/${projectId}/agents`),
-  messages: (projectId: string) =>
-    request<AgentMessageRead[]>(`/projects/${projectId}/messages?limit=200`),
+  agentRuns: (projectId: string) =>
+    request<AgentRunRead[]>(`/projects/${projectId}/agent-runs?limit=200`),
+  agentRun: (runId: string) => request<AgentRunDetail>(`/agent-runs/${runId}`),
+  messages: replayProjectMessages,
   findings: (projectId: string) =>
     request<Page<FindingRead>>(`/projects/${projectId}/findings?limit=500`),
   finding: (findingId: string) => request<FindingDetail>(`/findings/${findingId}`),

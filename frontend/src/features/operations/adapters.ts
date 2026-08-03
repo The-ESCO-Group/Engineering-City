@@ -1,4 +1,4 @@
-import type { AgentMessageRead, EventEnvelope, TaskRead } from "../../api/types";
+import type { AgentMessageRead, AgentRunRead, EventEnvelope, TaskRead } from "../../api/types";
 import type {
   AuditSignal,
   OperationsAgentRecord,
@@ -65,28 +65,45 @@ function auditSignal(eventType: string): AuditSignal {
   return "info";
 }
 
-function messageMatchesAgent(message: AgentMessageRead, agentId: string, agentKind: string): boolean {
-  const contextAgentId = message.context.agent_id;
-  return contextAgentId === agentId || message.agent_kind === agentKind;
+function messageMatchesAgent(message: AgentMessageRead, agentId: string): boolean {
+  return message.agent_instance_id === agentId;
 }
 
 function eventMatchesAgent(event: EventEnvelope, agentId: string): boolean {
   return event.agent_id === agentId || event.payload.agent_id === agentId;
 }
 
-function taskMatchesAgent(task: TaskRead, agentId: string, agentKind: string): boolean {
-  return task.agent_instance_id === agentId || task.agent_kind === agentKind;
+function taskMatchesAgent(task: TaskRead, agentId: string): boolean {
+  return task.agent_instance_id === agentId;
+}
+
+function runMatchesAgent(run: AgentRunRead, agentId: string): boolean {
+  return run.agent_instance_id === agentId;
 }
 
 function buildAgentRecords(source: OperationsSource): OperationsAgentRecord[] {
   return source.agents
     .map((agent) => {
-      const currentTask = agent.current_task_id
-        ? source.tasks.find((task) => task.id === agent.current_task_id) ?? null
-        : source.tasks.find((task) => task.agent_instance_id === agent.id && !task.finished_at) ?? null;
+      const definition = source.agentDefinitions.find((candidate) => (
+        candidate.id === agent.definition_id
+      )) ?? null;
+      const publishedCurrentTask = agent.current_task_id
+        ? source.tasks.find((task) => (
+            task.id === agent.current_task_id && task.agent_instance_id === agent.id
+          ))
+        : undefined;
+      const currentTask = publishedCurrentTask
+        ?? source.tasks.find((task) => task.agent_instance_id === agent.id && !task.finished_at)
+        ?? null;
       const messages = source.messages
-        .filter((message) => messageMatchesAgent(message, agent.id, agent.kind))
+        .filter((message) => messageMatchesAgent(message, agent.id))
         .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+      const instanceRuns = source.agentRuns
+        .filter((run) => runMatchesAgent(run, agent.id))
+        .sort((left, right) => (
+          (Date.parse(right.started_at ?? "") || 0) - (Date.parse(left.started_at ?? "") || 0)
+        ));
+      const recentRuns = instanceRuns.slice(0, 5);
       const recentEvents = source.events
         .filter((event) => eventMatchesAgent(event, agent.id))
         .sort((left, right) => right.seq - left.seq)
@@ -95,14 +112,18 @@ function buildAgentRecords(source: OperationsSource): OperationsAgentRecord[] {
         id: agent.id,
         projectId: agent.project_id,
         kind: agent.kind,
+        definition,
         name: agent.display_name,
         status: agent.status,
-        location: agent.location,
-        currentActivity: agent.current_activity,
+        location: agent.location ?? "",
+        currentActivity: agent.current_activity ?? "",
         updatedAt: agent.updated_at,
         currentTask,
-        relatedTaskCount: source.tasks.filter((task) => taskMatchesAgent(task, agent.id, agent.kind)).length,
+        relatedTaskCount: source.tasks.filter((task) => taskMatchesAgent(task, agent.id)).length,
         messages,
+        recentRuns,
+        matchedRunCount: instanceRuns.length,
+        runWindowSize: source.agentRuns.length,
         recentEvents
       };
     })

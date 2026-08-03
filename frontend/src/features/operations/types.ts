@@ -1,6 +1,8 @@
 import type {
+  AgentDefinitionRead,
   AgentInstanceRead,
   AgentMessageRead,
+  AgentRunRead,
   EventEnvelope,
   ProjectDetail,
   TaskRead
@@ -13,7 +15,9 @@ export interface OperationsSource {
   dataMode: OperationsMode;
   fallbackReason: string;
   project: ProjectDetail | null;
+  agentDefinitions: AgentDefinitionRead[];
   agents: AgentInstanceRead[];
+  agentRuns: AgentRunRead[];
   tasks: TaskRead[];
   messages: AgentMessageRead[];
   events: EventEnvelope[];
@@ -23,6 +27,7 @@ export interface OperationsAgentRecord {
   id: string;
   projectId: string;
   kind: string;
+  definition: AgentDefinitionRead | null;
   name: string;
   status: AgentInstanceRead["status"];
   location: string;
@@ -31,6 +36,9 @@ export interface OperationsAgentRecord {
   currentTask: TaskRead | null;
   relatedTaskCount: number;
   messages: AgentMessageRead[];
+  recentRuns: AgentRunRead[];
+  matchedRunCount: number;
+  runWindowSize: number;
   recentEvents: EventEnvelope[];
 }
 
