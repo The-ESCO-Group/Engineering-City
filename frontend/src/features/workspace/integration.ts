@@ -18,11 +18,14 @@ type WorkspaceEngineeringData = Pick<
   | "events"
   | "refresh"
   | "selectProject"
->;
+> & Partial<Pick<EngineeringData, "connection" | "currentUser">>;
 
 export function workspaceSourceFromEngineering(data: WorkspaceEngineeringData): WorkspaceSource {
+  const authenticatedEmptyProject = data.dataMode === "unavailable" &&
+    data.connection === "live" &&
+    Boolean(data.currentUser);
   return {
-    dataMode: data.dataMode,
+    dataMode: authenticatedEmptyProject ? "live" : data.dataMode,
     fallbackReason: data.fallbackReason,
     project: data.project,
     files: data.files,
@@ -35,6 +38,7 @@ export function workspaceSourceFromEngineering(data: WorkspaceEngineeringData): 
 
 export interface WorkspaceIntegrationOptions {
   openCityLocation?: (semanticLocation: string) => void;
+  openReleaseCenter?: () => void;
 }
 
 export function workspaceOperationsFromEngineering(
@@ -42,9 +46,13 @@ export function workspaceOperationsFromEngineering(
   options: WorkspaceIntegrationOptions = {}
 ): WorkspaceOperations {
   const operations: WorkspaceOperations = {
-    openCityLocation: options.openCityLocation
+    openCityLocation: options.openCityLocation,
+    openReleaseCenter: options.openReleaseCenter
   };
-  if (data.dataMode !== "live") return operations;
+  const liveSession = data.dataMode === "live" || (
+    data.dataMode === "unavailable" && data.connection === "live" && Boolean(data.currentUser)
+  );
+  if (!liveSession) return operations;
 
   operations.loadFindingDetail = engineeringApi.finding;
   operations.submitIntake = async ({ draft, files }) => {

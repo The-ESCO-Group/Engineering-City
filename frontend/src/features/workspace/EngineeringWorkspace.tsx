@@ -1,14 +1,18 @@
 import {
   BookOpenCheck,
+  BellRing,
+  BookOpen,
   Cable,
   ClipboardCheck,
   FileInput,
   Files,
+  FlaskConical,
   GitCompareArrows,
   GitPullRequestArrow,
   ListChecks,
   ListTree,
   Map,
+  Monitor,
   Network,
   ShieldAlert,
   Tags
@@ -17,6 +21,7 @@ import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { buildWorkspaceModel } from "./adapters";
 import { ApprovalInbox } from "./ApprovalInbox";
 import { ChangeReviewWorkspace } from "./ChangeReviewWorkspace";
+import { DeliveryCoreWorkspace } from "./DeliveryCoreWorkspace";
 import { FilesWorkspace } from "./FilesWorkspace";
 import { FindingsWorkspace } from "./FindingsWorkspace";
 import { ProjectCoreExplorer } from "./ProjectCoreExplorer";
@@ -58,7 +63,11 @@ const NAVIGATION: Array<{ label: string; items: NavigationItem[] }> = [
       { id: "requirements", label: "Requirements", icon: BookOpenCheck },
       { id: "devices", label: "Devices & I/O", icon: Cable },
       { id: "tags", label: "Tags", icon: Tags },
-      { id: "plc", label: "PLC logic", icon: ListTree }
+      { id: "plc", label: "PLC logic", icon: ListTree },
+      { id: "hmi", label: "HMI", icon: Monitor },
+      { id: "alarms", label: "Alarms", icon: BellRing },
+      { id: "tests", label: "Tests", icon: FlaskConical },
+      { id: "documentation", label: "Documentation", icon: BookOpen }
     ]
   },
   {
@@ -156,6 +165,7 @@ export function EngineeringWorkspace({ source, initialView = "requirements", ope
           {view === "files" && <FilesWorkspace files={model.files} onOpenIntake={() => setView("intake")} />}
           {view === "tasks" && <TaskWorkspace tasks={model.tasks} onOpenCityLocation={effectiveOperations.openCityLocation} />}
           {(view === "requirements" || view === "devices" || view === "tags" || view === "plc") && <ProjectCoreExplorer view={view} capability={model.capabilities.projectCore} requirements={model.requirements} devices={model.devices} tags={model.tags} plcPrograms={model.plcPrograms} onExport={effectiveOperations.exportCoreView} />}
+          {(view === "hmi" || view === "alarms" || view === "tests" || view === "documentation") && <DeliveryCoreWorkspace view={view} capability={model.capabilities.deliveryCore} hmiScreens={model.hmiScreens} alarms={model.alarms} tests={model.testProcedures} documents={model.documents} tasks={model.tasks} findings={model.findings} onOpenReleaseCenter={effectiveOperations.openReleaseCenter} />}
           {(view === "planning" || view === "changesets" || view === "revisions") && <ChangeReviewWorkspace view={view} plans={model.plans} changesets={model.changesets} revisions={model.revisions} changesetCapability={model.capabilities.changesetOperations} revisionCapability={model.capabilities.revisionComparison} operations={effectiveOperations} />}
           {view === "findings" && <FindingsWorkspace findings={model.findings} capability={model.capabilities.findingEvidence} loadFindingDetail={effectiveOperations.loadFindingDetail} onOpenChangeset={() => setView("changesets")} onOpenApprovals={() => setView("approvals")} />}
           {view === "approvals" && <ApprovalInbox approvals={model.approvals} capability={model.capabilities.approvalDecisions} onDecision={effectiveOperations.decideApproval} onOpenChangeset={() => setView("changesets")} />}

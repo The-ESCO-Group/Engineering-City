@@ -43,7 +43,15 @@ try {
     $env:VITE_DEMO_MODE = if ($Demo) { "true" } else { "false" }
     $env:VITE_ESCO_API_BASE = "$backendBase/api"
     $env:ESCO_ENVIRONMENT = if ($Demo) { "demo" } else { "development" }
-    $env:ESCO_CORS_ORIGINS = "$frontendUrl,http://localhost:$FrontendPort,http://127.0.0.1:1420,http://localhost:1420,http://tauri.localhost,https://tauri.localhost,tauri://localhost"
+    $env:ESCO_CORS_ORIGINS = @(
+        $frontendUrl,
+        "http://localhost:$FrontendPort",
+        "http://127.0.0.1:1420",
+        "http://localhost:1420",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+        "tauri://localhost"
+    ) | ConvertTo-Json -Compress
     $env:ESCO_DATA_DIR = Join-Path $repoRoot "data"
     $env:ESCO_PROJECTS_DIR = Join-Path $repoRoot "data\projects"
 

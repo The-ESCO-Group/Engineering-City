@@ -97,6 +97,7 @@ export function City() {
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
   const [qualityMode, setQualityMode] = useState<WorldQualityMode>(initialWorldQualityMode);
+  const [worldFps, setWorldFps] = useState<number | null>(null);
   const [focusedLocation, setFocusedLocation] = useState<CityLocation | null>(null);
   const [focusRequestKey, setFocusRequestKey] = useState(0);
   const [selectionRequestKey, setSelectionRequestKey] = useState(0);
@@ -117,6 +118,8 @@ export function City() {
     () => selectWorldQuality(qualityMode, hardwareHints, reducedMotion),
     [hardwareHints, qualityMode, reducedMotion]
   );
+  const updateWorldFps = useCallback((fps: number) => setWorldFps(fps), []);
+  useEffect(() => setWorldFps(null), [qualitySelection.resolved]);
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -436,6 +439,7 @@ export function City() {
           selectedAgentId={selectedAgentId}
           onSelectAgent={setSelectedAgentId}
           onLabelPositionsChange={updateLabelPositions}
+          onFpsSample={updateWorldFps}
         />
         {!isWalking && <CityLayerLegend activeLayer={activeLayer} />}
         {!isWalking && focusedLocation && (
@@ -495,6 +499,7 @@ export function City() {
               requested={qualitySelection.requested}
               resolved={qualitySelection.resolved}
               profile={qualitySelection.profile}
+              fpsStatus={worldFps === null ? null : { currentFps: worldFps }}
               onChange={changeQualityMode}
               autoFocus
               className="is-city-hud"

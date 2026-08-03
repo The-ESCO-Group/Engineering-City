@@ -1,12 +1,14 @@
 import { lazy, Suspense, useEffect, useMemo } from "react";
 import { NavLink, Route, Routes, useLocation, useNavigate, useParams } from "./routing";
-import { Activity, AlertTriangle, Archive, Bell, Bot, Building2, ChevronDown, ClipboardCheck, Clock3, FileText, Filter, FolderKanban, ListChecks, LogOut, Menu, Plus, Search, Settings, ShieldAlert, Wifi } from "lucide-react";
+import { Activity, AlertTriangle, Archive, Bell, BellRing, Bot, Building2, ChevronDown, ClipboardCheck, Clock3, Database, FileText, Filter, FlaskConical, FolderKanban, ListChecks, LogOut, Menu, Monitor, Plus, Search, Settings, ShieldAlert, Wifi } from "lucide-react";
 import { useEngineeringData } from "./api/live";
 import { City } from "./components/City";
 import { ConnectionCenter } from "./components/ConnectionCenter";
 import { DesktopCenter } from "./components/DesktopCenter";
 import { notifyOperatorEvent } from "./desktop/bridge";
 import { agents as demoAgents, findings as demoFindings, projects } from "./domain";
+import { operationsSourceFromEngineering } from "./features/operations/integration";
+import type { OperationsView } from "./features/operations/types";
 import { releaseOperationsFromEngineering, releaseSourceFromEngineering } from "./features/release/integration";
 import type { ReleaseCenterView } from "./features/release/ReleaseCenter";
 import { workspaceOperationsFromEngineering, workspaceSourceFromEngineering } from "./features/workspace/integration";
@@ -22,6 +24,11 @@ const ReleaseCenter = lazy(async () => {
   return { default: feature.ReleaseCenter };
 });
 
+const OperationsCenter = lazy(async () => {
+  const feature = await import("./features/operations/OperationsCenter");
+  return { default: feature.OperationsCenter };
+});
+
 function FeatureLoading({ label }: { label: string }) {
   return <div className="feature-loading" role="status"><span className="brand-mark">E</span><b>Loading {label}…</b></div>;
 }
@@ -31,7 +38,9 @@ function titleCase(value: string) {
 }
 
 const nav = [
-  ["Engineering City", "/", Building2], ["Projects", "/projects", FolderKanban], ["Tasks", "/tasks", ListChecks],
+  ["Engineering City", "/", Building2], ["Projects", "/projects", FolderKanban], ["Project Core", "/workspace/requirements", Database],
+  ["Tasks", "/tasks", ListChecks], ["HMI", "/workspace/hmi", Monitor], ["Alarms", "/workspace/alarms", BellRing],
+  ["Tests", "/workspace/tests", FlaskConical],
   ["Findings", "/findings", ShieldAlert], ["Approvals", "/approvals", ClipboardCheck], ["Reports", "/reports", FileText],
   ["Agents", "/agents", Bot], ["Audit Trail", "/audit", Archive], ["Settings", "/settings", Settings]
 ] as const;
@@ -46,6 +55,7 @@ function Shell() {
   const isReleaseShell = location.pathname === "/reports" ||
     location.pathname === "/release" ||
     location.pathname.startsWith("/release/");
+  const isOperationsShell = location.pathname === "/agents" || location.pathname === "/audit";
   const engineering = useEngineeringData();
   const projectReference = engineering.project?.client_reference || "NO PROJECT";
   const projectName = engineering.project?.name || "Select an authorized workspace";
@@ -115,7 +125,7 @@ function Shell() {
       );
     }
   }, [engineering.approvals, engineering.dataMode, engineering.events, engineering.projectId, projectReference]);
-  return <div className={`app${isCityHome ? " city-home" : ""}${isWorkspaceShell ? " engineering-workspace-shell" : ""}${isReleaseShell ? " release-center-shell" : ""}`}>
+  return <div className={`app${isCityHome ? " city-home" : ""}${isWorkspaceShell ? " engineering-workspace-shell" : ""}${isReleaseShell ? " release-center-shell" : ""}${isOperationsShell ? " operations-shell" : ""}`}>
     <header className="topbar">
       <button className="menu" type="button" aria-label="Open navigation menu"><Menu aria-hidden="true" /></button>
       <div className="brand-mark">E</div><div className="brand"><strong>ESCO</strong><span>ENGINEERING CITY</span></div>
@@ -127,7 +137,7 @@ function Shell() {
       <NavLink className="user" to="/settings" aria-label="Open connection and account settings">{initials}</NavLink>
     </header>
     <aside className="sidebar">
-      <nav aria-label="Primary navigation">{nav.map(([label, to, Icon]) => <NavLink key={label} to={to} end={to === "/"} aria-label={isCityHome ? label : undefined} title={isCityHome ? label : undefined}><Icon /><span>{label}</span>{label === "Findings" && <em>{findingCount}</em>}{label === "Approvals" && <em>{approvalCount}</em>}</NavLink>)}</nav>
+      <nav aria-label="Primary navigation">{nav.map(([label, to, Icon]) => <NavLink key={label} to={to} end={to === "/"} aria-label={label} title={label}><Icon aria-hidden="true" /><span>{label}</span>{label === "Findings" && <em>{findingCount}</em>}{label === "Approvals" && <em>{approvalCount}</em>}</NavLink>)}</nav>
       <div className="sidebar-foot"><div className="avatar">{initials}</div><div><b>{user?.display_name || (engineering.dataMode === "demo" ? "Demo reviewer" : "Not signed in")}</b><span>{user ? user.roles.map(titleCase).join(" · ") : engineering.dataMode === "demo" ? "Synthetic session" : "Local account required"}</span></div>{user && <button type="button" className="sidebar-logout" onClick={() => void engineering.logout()} aria-label="Sign out of local backend"><LogOut aria-hidden="true" /></button>}</div>
     </aside>
     <main tabIndex={0} aria-label="Application content">
@@ -142,11 +152,13 @@ function Shell() {
         <Route path="/reports" element={<ReleaseCenterPage initialView="reports" />} />
         <Route path="/release" element={<ReleaseCenterPage initialView="overview" />} />
         <Route path="/release/:view" element={<ReleaseRoutePage />} />
+        <Route path="/agents" element={<OperationsCenterPage view="agents" />} />
+        <Route path="/audit" element={<OperationsCenterPage view="audit" />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<SimplePage />} />
       </Routes>
     </main>
-    {!isCityHome && !isWorkspaceShell && !isReleaseShell && <ActivityPanel />}
+    {!isCityHome && !isWorkspaceShell && !isReleaseShell && !isOperationsShell && <ActivityPanel />}
   </div>;
 }
 
@@ -158,6 +170,10 @@ const WORKSPACE_VIEWS = new Set<WorkspaceView>([
   "devices",
   "tags",
   "plc",
+  "hmi",
+  "alarms",
+  "tests",
+  "documentation",
   "planning",
   "changesets",
   "revisions",
@@ -181,7 +197,8 @@ function EngineeringWorkspacePage({ initialView }: { initialView: WorkspaceView 
     () => workspaceOperationsFromEngineering(engineering, {
       openCityLocation: (semanticLocation) => {
         navigate(`/?location=${encodeURIComponent(semanticLocation)}`);
-      }
+      },
+      openReleaseCenter: () => navigate("/release")
     }),
     [engineering, navigate]
   );
@@ -226,6 +243,21 @@ function ReleaseCenterPage({ initialView }: { initialView: ReleaseCenterView }) 
         operations={operations}
         initialView={initialView}
         onReturnToCity={() => navigate("/")}
+      />
+    </Suspense>
+  );
+}
+
+function OperationsCenterPage({ view }: { view: OperationsView }) {
+  const engineering = useEngineeringData();
+  const navigate = useNavigate();
+  const source = useMemo(() => operationsSourceFromEngineering(engineering), [engineering]);
+  return (
+    <Suspense fallback={<FeatureLoading label={view === "agents" ? "agent operations" : "Audit Trail"} />}>
+      <OperationsCenter
+        source={source}
+        view={view}
+        onOpenCityLocation={(semanticLocation) => navigate(`/?location=${encodeURIComponent(semanticLocation)}`)}
       />
     </Suspense>
   );

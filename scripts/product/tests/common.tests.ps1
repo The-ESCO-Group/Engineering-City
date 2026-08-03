@@ -77,7 +77,39 @@ Assert-True ($capability.permissions -notcontains "notification:default") "Front
 $tauriConfig = Get-Content -LiteralPath (Join-Path $repoRoot "desktop\src-tauri\tauri.conf.json") -Raw | ConvertFrom-Json
 Assert-True ($tauriConfig.app.security.csp -match "object-src 'none'") "Desktop CSP must disable object embedding."
 Assert-True ($tauriConfig.app.security.csp -notmatch 'https://\*') "Desktop CSP must not allow wildcard HTTPS connections."
+Assert-True ($tauriConfig.build.beforeBuildCommand -eq "npm --prefix ../frontend run build") "Tauri build hook must resolve frontend from the desktop application root."
+Assert-True ($tauriConfig.build.beforeDevCommand -eq "npm --prefix ../frontend run dev") "Tauri development hook must resolve frontend from the desktop application root."
+Assert-True ($tauriConfig.build.frontendDist -eq "../../frontend/dist") "Tauri frontendDist must remain relative to src-tauri/tauri.conf.json."
+$windowsIcon = $tauriConfig.bundle.icon | Where-Object { $_ -match '\.ico$' } | Select-Object -First 1
+Assert-True ([bool]$windowsIcon) "Tauri bundle configuration must declare a Windows ICO asset."
+if ($windowsIcon) {
+    Assert-True (Test-Path -LiteralPath (Join-Path $repoRoot "desktop\src-tauri\$windowsIcon") -PathType Leaf) "Declared Tauri Windows ICO asset must exist."
+}
 Assert-True ((Test-Path -LiteralPath (Join-Path $repoRoot "scripts\product\package-release.ps1"))) "Desktop release packaging workflow is required."
+
+$desktopManifest = Get-Content -LiteralPath (Join-Path $repoRoot "desktop\package.json") -Raw | ConvertFrom-Json
+$desktopLock = Get-Content -LiteralPath (Join-Path $repoRoot "desktop\package-lock.json") -Raw | ConvertFrom-Json -AsHashtable -Depth 100
+$pinnedTauriVersion = [string]$desktopManifest.devDependencies.'@tauri-apps/cli'
+$lockedTauri = $desktopLock.packages['node_modules/@tauri-apps/cli']
+Assert-True ($pinnedTauriVersion -match '^2\.\d+\.\d+$') "Tauri CLI must be pinned to one exact major-version-2 release."
+Assert-True ([string]$lockedTauri.version -eq $pinnedTauriVersion) "Tauri CLI lock version must match desktop/package.json."
+Assert-True ([string]$lockedTauri.integrity -match '^sha512-') "Tauri CLI lock entry must include SHA-512 integrity."
+if (Test-Path -LiteralPath (Join-Path $repoRoot "desktop\node_modules\@tauri-apps\cli\package.json") -PathType Leaf) {
+    try {
+        $localTauri = Get-ProductLocalTauriCli
+        $desktopRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "desktop"))
+        $relativeTauri = [System.IO.Path]::GetRelativePath($desktopRoot, $localTauri.CliPath)
+        Assert-True (-not $relativeTauri.StartsWith("..")) "Tauri CLI executable must resolve beneath the repository desktop directory."
+        Assert-True ($localTauri.Version -eq $pinnedTauriVersion) "Resolved local Tauri CLI version must match the manifest pin."
+    }
+    catch {
+        $failures.Add("Repository-local Tauri CLI resolution failed: $($_.Exception.Message)")
+    }
+}
+
+$desktopBuildScript = Get-Content -LiteralPath (Join-Path $repoRoot "scripts\product\build-desktop.ps1") -Raw
+Assert-True ($desktopBuildScript -notmatch '(?m)\bcargo\s+tauri\b') "Desktop build must not fall back to a global cargo-tauri command."
+Assert-True ($desktopBuildScript -match 'Get-ProductLocalTauriCli') "Desktop build must resolve the pinned repository-local Tauri CLI."
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ }

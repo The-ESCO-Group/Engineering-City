@@ -80,6 +80,7 @@ export function createDemoWorkspaceModel(): WorkspaceModel {
     capabilities: {
       intakeSubmission: { level: "available", reason: "Demo drafts remain on this device and do not create a live project." },
       projectCore: { level: "available", reason: "Synthetic Project Core objects are available for offline demonstration." },
+      deliveryCore: { level: "available", reason: "Synthetic HMI, alarm, test, and documentation records are available for offline demonstration." },
       changesetOperations: { level: "available", reason: "Synthetic operation-level diffs are available for offline demonstration." },
       revisionComparison: { level: "available", reason: "Synthetic revision metadata is available for offline demonstration." },
       findingEvidence: { level: "available", reason: "Synthetic citations are embedded in the offline demonstration fixture." },
@@ -446,6 +447,167 @@ export function createDemoWorkspaceModel(): WorkspaceModel {
         ]
       }
     ],
+    hmiScreens: [
+      {
+        id: "demo-hmi-overview",
+        name: "Line4_Overview",
+        displayType: "Process overview",
+        template: "Synthetic ESCO ME overview template · v3.2",
+        resolution: "1280 × 800",
+        navigationFrom: ["Plant_Overview"],
+        navigationTo: ["Line4_Diagnostics", "Line4_Alarms"],
+        bindings: [
+          {
+            id: "demo-binding-run",
+            object: "Conveyor status banner",
+            property: "State indicator",
+            tag: "Line4_MTR402_RunFb",
+            status: "Valid",
+            evidence: "Synthetic HMI.xml · Display Line4_Overview · Object 18"
+          },
+          {
+            id: "demo-binding-jam",
+            object: "Jam alarm banner",
+            property: "Visibility",
+            tag: "Conveyor_4.JamAlarm",
+            status: "Unresolved",
+            evidence: "Synthetic HMI.xml · Display Line4_Overview · Object 27"
+          }
+        ],
+        validation: "1 unresolved binding · target import verification not performed",
+        approvalState: "Awaiting tag rename review",
+        source: "Synthetic HMI.xml · /Displays/Display[@name='Line4_Overview']"
+      },
+      {
+        id: "demo-hmi-diagnostics",
+        name: "Line4_Diagnostics",
+        displayType: "Maintenance detail",
+        template: "Synthetic ESCO ME diagnostics template · v2.1",
+        resolution: "1280 × 800",
+        navigationFrom: ["Line4_Overview"],
+        navigationTo: ["Line4_Overview"],
+        bindings: [
+          {
+            id: "demo-binding-photoeye",
+            object: "Photoeye PE-402 diagnostic",
+            property: "Value",
+            tag: "Line4_PE402",
+            status: "Valid",
+            evidence: "Synthetic HMI.xml · Display Line4_Diagnostics · Object 11"
+          }
+        ],
+        validation: "Structured references valid",
+        approvalState: "Proposed",
+        source: "Synthetic HMI.xml · /Displays/Display[@name='Line4_Diagnostics']"
+      }
+    ],
+    alarms: [
+      {
+        id: "demo-alarm-jam",
+        alarmId: "L4-JAM-402",
+        message: "Line 4 conveyor jam at PE-402",
+        trigger: "Conveyor_4.JamAlarm",
+        severity: "High",
+        acknowledgement: "Required",
+        delay: "2 s",
+        deadband: "Not applicable",
+        operatorResponse: "Stop feed, verify the guarded zone is safe, then inspect PE-402. Follow the approved lockout procedure before entry.",
+        linkedScreen: "Line4_Overview",
+        linkedDevice: "PE-402",
+        linkedTests: ["DEMO-FAT-014"],
+        validation: "Trigger tag unresolved · human review required",
+        source: "Synthetic Alarms.xml · /Alarms/Alarm[18]"
+      },
+      {
+        id: "demo-alarm-downstream",
+        alarmId: "L4-DOWNSTREAM-UNAVAILABLE",
+        message: "Line 4 downstream accumulation unavailable",
+        trigger: "Line4_ZoneAvailable = 0",
+        severity: "Medium",
+        acknowledgement: "Required",
+        delay: "5 s",
+        deadband: "Not applicable",
+        operatorResponse: "Check downstream accumulation status and restore availability before restarting Line 4.",
+        linkedScreen: "Line4_Overview",
+        linkedDevice: "ZONE-405",
+        linkedTests: ["DEMO-IAT-008"],
+        validation: "Structured references valid",
+        source: "Synthetic Alarms.xml · /Alarms/Alarm[21]"
+      }
+    ],
+    testProcedures: [
+      {
+        id: "demo-test-fat-reset",
+        testId: "DEMO-FAT-014",
+        title: "Guarded conveyor reset permissive",
+        testType: "FAT · automatic-mode interlock",
+        status: "Blocked by clarification",
+        prerequisites: ["Approved synthetic revision", "Guard circuit simulator available", "Named test witness assigned"],
+        initialConditions: ["Line 4 stopped", "Guard circuit healthy", "Downstream zone available"],
+        safetyPrecautions: ["No physical equipment operation is authorized by this procedure.", "Use the approved risk assessment and lockout procedure for any field work."],
+        steps: [
+          { sequence: 1, action: "Simulate AxisRunning = true and issue the reset request.", expectedResult: "Reset is rejected and GuardSafe remains false.", evidenceRequired: "Timestamped FAT result and controller test trace" },
+          { sequence: 2, action: "Set AxisRunning = false with every guard input healthy, then issue reset.", expectedResult: "Reset is accepted and the run permissive may be evaluated.", evidenceRequired: "Witness initials and result capture" }
+        ],
+        requirementLinks: ["SRS-4.3.2"],
+        findingLinks: ["DEMO-F-104"],
+        approvalState: "Restricted-domain approval required"
+      },
+      {
+        id: "demo-test-iat-downstream",
+        testId: "DEMO-IAT-008",
+        title: "Downstream availability response",
+        testType: "IAT · permissive loss",
+        status: "Ready for review",
+        prerequisites: ["Approved I/O checkout", "Downstream interface simulator connected"],
+        initialConditions: ["Line 4 running in the approved test environment", "ZoneAvailable true"],
+        safetyPrecautions: ["Execute only under the site commissioning plan and named human supervision."],
+        steps: [
+          { sequence: 1, action: "Remove the simulated downstream ZoneAvailable signal.", expectedResult: "The Line 4 run permissive drops and the unavailable alarm enters its configured delay.", evidenceRequired: "IAT result, alarm timestamp, and witness initials" }
+        ],
+        requirementLinks: ["URS-2.8"],
+        findingLinks: [],
+        approvalState: "Reviewer unassigned"
+      }
+    ],
+    documents: [
+      {
+        id: "demo-doc-discrepancy",
+        title: "Detailed engineering discrepancy report",
+        documentType: "Detailed report",
+        format: "HTML / PDF / DOCX",
+        status: "Generated from synthetic snapshot",
+        revision: 7,
+        evidenceCount: 5,
+        approvalState: "Draft · not engineering approval",
+        generatedAt: "2026-07-31T17:42:00Z",
+        source: "Documentation and Release Agent · synthetic snapshot"
+      },
+      {
+        id: "demo-doc-fat",
+        title: "Line 4 FAT plan",
+        documentType: "Test plan",
+        format: "DOCX / XLSX",
+        status: "Blocked by open safety clarification",
+        revision: 7,
+        evidenceCount: 3,
+        approvalState: "Human review required",
+        generatedAt: null,
+        source: "Testing and Commissioning Agent · synthetic proposal"
+      },
+      {
+        id: "demo-doc-audit",
+        title: "Project audit export",
+        documentType: "Audit",
+        format: "JSON / CSV",
+        status: "Current through synthetic event 40",
+        revision: 7,
+        evidenceCount: null,
+        approvalState: "Read-only record",
+        generatedAt: "2026-07-31T17:42:00Z",
+        source: "Synthetic ordered event history"
+      }
+    ],
     plans: [
       {
         id: "demo-plan-01",
@@ -749,4 +911,3 @@ export function createDemoWorkspaceModel(): WorkspaceModel {
     ]
   };
 }
-

@@ -50,11 +50,17 @@ if (-not $SkipBackend) {
 }
 
 if ($IncludeDesktop) {
+    $null = Assert-ProductNodeVersion
+    $desktopRoot = Join-Path $repoRoot "desktop"
+    $desktopNpm = Get-ProductCommandPath -Name "npm.cmd" -InstallHint "Install npm with Node.js."
     $cargo = Get-ProductCommandPath -Name "cargo" -InstallHint "Install the stable Rust toolchain."
     $rustc = Get-ProductCommandPath -Name "rustc" -InstallHint "Install the stable Rust toolchain."
+    Invoke-ProductNative -FilePath $desktopNpm -ArgumentList @("ci", "--ignore-scripts") -WorkingDirectory $desktopRoot -Description "Install locked repository-local Tauri CLI"
+    $tauriCli = Get-ProductLocalTauriCli
+    Write-Host "Repository-local Tauri CLI $($tauriCli.Version)"
     Write-Host (& $rustc --version)
     Invoke-ProductNative -FilePath $cargo -ArgumentList @("fetch", "--locked") -WorkingDirectory (Join-Path $repoRoot "desktop\src-tauri") -Description "Fetch locked desktop dependencies"
-    Write-Host "Tauri CLI is validated by build-desktop.ps1 and is never installed globally by setup."
+    Write-Host "Desktop tooling is installed only beneath desktop\node_modules; no global Tauri CLI is required."
 }
 
 Write-Host "Setup complete."

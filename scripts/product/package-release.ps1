@@ -13,6 +13,7 @@ Assert-ProductVersion -Version $Version
 $repoRoot = Get-ProductRepoRoot
 $tauriConfigPath = Join-Path $repoRoot "desktop\src-tauri\tauri.conf.json"
 $cargoManifestPath = Join-Path $repoRoot "desktop\src-tauri\Cargo.toml"
+$tauriCli = Get-ProductLocalTauriCli
 $configuredVersion = (Get-Content -LiteralPath $tauriConfigPath -Raw | ConvertFrom-Json).version
 $cargoManifest = Get-Content -LiteralPath $cargoManifestPath -Raw
 $cargoVersion = if ($cargoManifest -match '(?m)^version\s*=\s*"(?<version>[^"]+)"\s*$') { $Matches.version } else { "" }
@@ -93,6 +94,7 @@ $manifest = [ordered]@{
     source_tree = $sourceTree
     source_tracked_status_sha256 = $sourceStatusHash
     verification = "packaged_not_import_verified"
+    tauri_cli = "@tauri-apps/cli@$($tauriCli.Version)"
     artifacts = $artifactRows
     safety_boundary = "No controller upload, download, online edit, force, or live equipment control is included."
 }

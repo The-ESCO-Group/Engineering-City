@@ -18,6 +18,10 @@ export type WorkspaceView =
   | "devices"
   | "tags"
   | "plc"
+  | "hmi"
+  | "alarms"
+  | "tests"
+  | "documentation"
   | "planning"
   | "changesets"
   | "revisions"
@@ -34,6 +38,7 @@ export interface WorkspaceCapability {
 export interface WorkspaceCapabilities {
   intakeSubmission: WorkspaceCapability;
   projectCore: WorkspaceCapability;
+  deliveryCore: WorkspaceCapability;
   changesetOperations: WorkspaceCapability;
   revisionComparison: WorkspaceCapability;
   findingEvidence: WorkspaceCapability;
@@ -179,6 +184,81 @@ export interface WorkspaceProgram {
   routines: WorkspaceRoutine[];
   validation: string;
   generatedPreviewAvailable: boolean;
+}
+
+export interface WorkspaceHmiBinding {
+  id: string;
+  object: string;
+  property: string;
+  tag: string;
+  status: string;
+  evidence: string;
+}
+
+export interface WorkspaceHmiScreen {
+  id: string;
+  name: string;
+  displayType: string;
+  template: string;
+  resolution: string;
+  navigationFrom: string[];
+  navigationTo: string[];
+  bindings: WorkspaceHmiBinding[];
+  validation: string;
+  approvalState: string;
+  source: string;
+}
+
+export interface WorkspaceAlarm {
+  id: string;
+  alarmId: string;
+  message: string;
+  trigger: string;
+  severity: string;
+  acknowledgement: string;
+  delay: string;
+  deadband: string;
+  operatorResponse: string;
+  linkedScreen: string;
+  linkedDevice: string;
+  linkedTests: string[];
+  validation: string;
+  source: string;
+}
+
+export interface WorkspaceTestStep {
+  sequence: number;
+  action: string;
+  expectedResult: string;
+  evidenceRequired: string;
+}
+
+export interface WorkspaceTestProcedure {
+  id: string;
+  testId: string;
+  title: string;
+  testType: string;
+  status: string;
+  prerequisites: string[];
+  initialConditions: string[];
+  safetyPrecautions: string[];
+  steps: WorkspaceTestStep[];
+  requirementLinks: string[];
+  findingLinks: string[];
+  approvalState: string;
+}
+
+export interface WorkspaceDocumentRecord {
+  id: string;
+  title: string;
+  documentType: string;
+  format: string;
+  status: string;
+  revision: number | null;
+  evidenceCount: number | null;
+  approvalState: string;
+  generatedAt: string | null;
+  source: string;
 }
 
 export type EvidenceSourceKind =
@@ -365,6 +445,10 @@ export interface WorkspaceModel {
   devices: WorkspaceDevice[];
   tags: WorkspaceTag[];
   plcPrograms: WorkspaceProgram[];
+  hmiScreens: WorkspaceHmiScreen[];
+  alarms: WorkspaceAlarm[];
+  testProcedures: WorkspaceTestProcedure[];
+  documents: WorkspaceDocumentRecord[];
   plans: WorkspacePlan[];
   changesets: WorkspaceChangeSet[];
   revisions: WorkspaceRevision[];
@@ -464,5 +548,6 @@ export interface WorkspaceOperations {
   ) => Promise<void>;
   compareRevisions?: (baseRevision: number, targetRevision: number) => Promise<void>;
   exportCoreView?: (view: "requirements" | "devices" | "tags" | "plc") => Promise<void>;
+  openReleaseCenter?: () => void;
   openCityLocation?: (semanticLocation: string) => void;
 }

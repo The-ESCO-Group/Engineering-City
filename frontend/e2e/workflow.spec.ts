@@ -83,6 +83,37 @@ test("synthetic city-to-release review workflow is operable and honest", async (
   await expect(page.getByText(/disabled in the browser/)).toBeVisible();
 });
 
+test("delivery engineering and operations surfaces remain usable on a compact laptop viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+
+  await page.goto("/?demo=1#/workspace/hmi");
+  await expect(page.getByRole("heading", { name: "HMI engineering" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Line4_Overview" })).toBeVisible();
+
+  await page.goto("/?demo=1#/workspace/alarms");
+  await expect(page.getByRole("heading", { name: "Alarm engineering" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "L4-JAM-402" })).toBeVisible();
+
+  await page.goto("/?demo=1#/workspace/tests");
+  await expect(page.getByRole("heading", { name: "IAT and FAT procedures" })).toBeVisible();
+  await expect(page.getByText(/No physical equipment operation is authorized/)).toBeVisible();
+
+  await page.goto("/?demo=1#/workspace/documentation");
+  await expect(page.getByRole("heading", { name: "Engineering documentation" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Release Center" })).toBeEnabled();
+
+  await page.goto("/?demo=1#/agents");
+  await expect(page.getByRole("heading", { name: "Agent operations" })).toBeVisible();
+  await expect(page.getByText(/no agent-control actions/i)).toBeVisible();
+
+  await page.goto("/?demo=1#/audit");
+  await expect(page.getByRole("heading", { name: "Audit Trail", level: 2 })).toBeVisible();
+  await expect(page.getByText(/Recent stream window—not a separate audit-read service/)).toBeVisible();
+
+  const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(horizontalOverflow).toBeLessThanOrEqual(1);
+});
+
 test.describe("reduced motion", () => {
   test.use({ reducedMotion: "reduce" });
 

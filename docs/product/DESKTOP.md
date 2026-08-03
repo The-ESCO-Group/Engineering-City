@@ -4,7 +4,7 @@ The Tauri shell is a local presentation layer for ESCO Engineering City. It does
 
 ## Setup and daily use
 
-PowerShell 7, Node.js 20+, npm, and Python 3.12+ are required for the complete local stack. Rust is required for desktop checks and builds. Tauri CLI 2 is required only when creating MSI/NSIS installers.
+PowerShell 7, Node.js 20+, npm, and Python 3.12+ are required for the complete local stack. Rust is required for desktop checks and builds. The Tauri CLI is pinned in `desktop/package.json` and installed beneath `desktop/node_modules`; no global Tauri installation is required.
 
 ```powershell
 # Repository-local Node/Python dependencies; no global package changes.
@@ -55,7 +55,13 @@ Local OS notifications are deliberately narrow: the frontend may request one onl
 # Add browser E2E when Chromium is installed.
 .\scripts\product\test.ps1 -IncludeE2E
 
-# Build MSI and NSIS packages (requires an intentionally installed Tauri CLI 2).
+# Exercise a fresh isolated SQLite backend through the real browser workflow.
+.\scripts\product\test.ps1 -IncludeLiveE2E
+
+# Install the pinned repository-local CLI and locked Rust dependencies.
+.\scripts\product\setup.ps1 -SkipBackend -SkipFrontend -IncludeDesktop
+
+# Build MSI and NSIS packages with the repository-local Tauri CLI 2.
 .\scripts\product\build-desktop.ps1
 
 # Build and package installers with manifest and SHA-256 checksums.
@@ -66,14 +72,10 @@ Local OS notifications are deliberately narrow: the frontend may request one onl
 .\scripts\product\collect-support-logs.ps1
 ```
 
-`setup.ps1 -IncludeDesktop` fetches locked Rust dependencies but deliberately does not install a global CLI. If needed, install Tauri CLI 2 as an explicit workstation-administration choice:
-
-```powershell
-cargo install tauri-cli --version "^2.0" --locked
-```
+`setup.ps1 -IncludeDesktop` runs `npm ci --ignore-scripts` in `desktop/`, validates the exact CLI version and lockfile integrity, and fetches locked Rust dependencies. `build-desktop.ps1` executes the CLI entrypoint through the resolved Node executable and refuses to use a global `cargo tauri` fallback. Review changes to `desktop/package-lock.json` before dependency updates.
 
 Desktop packaging is signing-independent by default. Internal release policy must apply any required code-signing step outside the repository without committing certificates or passwords. A packaged installer or ZIP is not a Rockwell import verification, a human approval, or a released engineering deliverable.
 
-`package-release.ps1` always invokes a fresh desktop build, requires its requested version to match both Tauri and Cargo metadata, and packages only installers written by that invocation. Its manifest records the source commit, whether tracked changes were present, a hash of that tracked status, artifact hashes, and the candidate-only verification boundary. `-SkipBuild` is rejected for release packaging.
+`package-release.ps1` always invokes a fresh desktop build, requires its requested version to match both Tauri and Cargo metadata, and packages only installers written by that invocation. Its manifest records the source commit, whether tracked changes were present, a hash of that tracked status, the pinned Tauri CLI version, artifact hashes, and the candidate-only verification boundary. `-SkipBuild` is rejected for release packaging.
 
 Service logs under `logs/product/` and native Tauri logs under the application log directory are distinct sources. The support collector tails both when present and removes common authorization, cookie, secret, private-key, and user-profile patterns. Redaction is best-effort; `REVIEW-BEFORE-SHARING.txt` requires a human to inspect every bundle before it leaves the authorized engineering team.

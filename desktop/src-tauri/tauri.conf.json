@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.escogroup.engineeringcity",
   "build": {
-    "beforeDevCommand": "npm --prefix ../../frontend run dev",
+    "beforeDevCommand": "npm --prefix ../frontend run dev",
     "devUrl": "http://127.0.0.1:4173",
-    "beforeBuildCommand": "npm --prefix ../../frontend run build",
+    "beforeBuildCommand": "npm --prefix ../frontend run build",
     "frontendDist": "../../frontend/dist"
   },
   "app": {
@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "msi"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
     "category": "DeveloperTool",
     "shortDescription": "Local engineering workflow and evidence review",
     "longDescription": "Local-only ESCO engineering workflow, evidence review, and release-candidate workspace.",

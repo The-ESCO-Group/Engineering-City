@@ -428,6 +428,12 @@ export function buildWorkspaceModel(source: WorkspaceSource): WorkspaceModel {
           : source.fallbackReason
       },
       projectCore: { level: live ? "summary_only" : "unavailable", reason: contractPending },
+      deliveryCore: {
+        level: live ? "summary_only" : "unavailable",
+        reason: live
+          ? "The current contract publishes delivery tasks and findings, but not canonical HMI, alarm, or test resources."
+          : source.fallbackReason
+      },
       changesetOperations: { level: live ? "summary_only" : "unavailable", reason: contractPending },
       revisionComparison: { level: live ? "summary_only" : "unavailable", reason: contractPending },
       findingEvidence: {
@@ -458,6 +464,10 @@ export function buildWorkspaceModel(source: WorkspaceSource): WorkspaceModel {
     devices: [],
     tags: [],
     plcPrograms: [],
+    hmiScreens: [],
+    alarms: [],
+    testProcedures: [],
+    documents: [],
     plans: plansFromEvents(orderedEvents),
     changesets: changesetsFromEvents(orderedEvents),
     revisions,
@@ -465,4 +475,3 @@ export function buildWorkspaceModel(source: WorkspaceSource): WorkspaceModel {
     approvals: source.approvals.map(approvalToWorkspace)
   };
 }
-

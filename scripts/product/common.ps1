@@ -39,6 +39,65 @@ function Assert-ProductNodeVersion {
     return $raw
 }
 
+function Get-ProductLocalTauriCli {
+    [CmdletBinding()]
+    param()
+
+    $repoRoot = Get-ProductRepoRoot
+    $desktopRoot = Join-Path $repoRoot "desktop"
+    $manifestPath = Join-Path $desktopRoot "package.json"
+    $lockPath = Join-Path $desktopRoot "package-lock.json"
+    $installedRoot = Join-Path $desktopRoot "node_modules\@tauri-apps\cli"
+    $installedManifestPath = Join-Path $installedRoot "package.json"
+
+    foreach ($requiredPath in @($manifestPath, $lockPath, $installedManifestPath)) {
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            throw "Repository-local Tauri CLI files are missing. Run '.\scripts\product\setup.ps1 -IncludeDesktop' before building installers. Missing: '$requiredPath'."
+        }
+    }
+
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $declaredVersion = [string]$manifest.devDependencies.'@tauri-apps/cli'
+    if ($declaredVersion -notmatch '^2\.\d+\.\d+$') {
+        throw "desktop/package.json must pin @tauri-apps/cli to one exact Tauri CLI 2 version; found '$declaredVersion'."
+    }
+
+    $lock = Get-Content -LiteralPath $lockPath -Raw | ConvertFrom-Json -AsHashtable -Depth 100
+    $lockedPackage = $lock.packages['node_modules/@tauri-apps/cli']
+    if (-not $lockedPackage -or [string]$lockedPackage.version -ne $declaredVersion -or
+        [string]$lockedPackage.integrity -notmatch '^sha512-') {
+        throw "desktop/package-lock.json does not lock @tauri-apps/cli $declaredVersion with SHA-512 integrity. Run npm ci only after reviewing the lockfile."
+    }
+
+    $installedManifest = Get-Content -LiteralPath $installedManifestPath -Raw | ConvertFrom-Json
+    if ([string]$installedManifest.version -ne $declaredVersion) {
+        throw "Installed repository-local Tauri CLI version '$($installedManifest.version)' does not match the pinned version '$declaredVersion'. Run '.\scripts\product\setup.ps1 -IncludeDesktop'."
+    }
+
+    $binRelative = [string]$installedManifest.bin.tauri
+    if (-not $binRelative) {
+        throw "The installed @tauri-apps/cli package does not publish the expected 'tauri' executable entry."
+    }
+    $packageRoot = [System.IO.Path]::GetFullPath($installedRoot)
+    $cliPath = [System.IO.Path]::GetFullPath((Join-Path $packageRoot $binRelative))
+    $relativeCliPath = [System.IO.Path]::GetRelativePath($packageRoot, $cliPath)
+    $parentPrefix = "..$([System.IO.Path]::DirectorySeparatorChar)"
+    if ([System.IO.Path]::IsPathRooted($relativeCliPath) -or
+        $relativeCliPath -eq ".." -or $relativeCliPath.StartsWith($parentPrefix, [StringComparison]::Ordinal)) {
+        throw "The repository-local Tauri CLI executable escaped its installed package directory."
+    }
+    if (-not (Test-Path -LiteralPath $cliPath -PathType Leaf)) {
+        throw "The repository-local Tauri CLI executable was not found at '$cliPath'. Run '.\scripts\product\setup.ps1 -IncludeDesktop'."
+    }
+
+    return [pscustomobject]@{
+        NodePath = Get-ProductCommandPath -Name "node" -InstallHint "Install Node.js 20 or newer."
+        CliPath = $cliPath
+        Version = $declaredVersion
+        PackageRoot = $packageRoot
+    }
+}
+
 function Assert-ProductPythonVersion {
     [CmdletBinding()]
     param(

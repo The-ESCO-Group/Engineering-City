@@ -30,6 +30,27 @@ describe("workspace live integration", () => {
     expect(source.findings).toEqual([]);
   });
 
+  it("keeps intake available for an authenticated live account before its first project exists", () => {
+    const data = {
+      ...liveData(),
+      dataMode: "unavailable" as const,
+      connection: "live" as const,
+      currentUser: {
+        user: {
+          id: "user-1",
+          email: "admin@esco.internal",
+          display_name: "ESCO Administrator",
+          is_active: true,
+          roles: ["administrator" as const]
+        },
+        project_roles: {}
+      }
+    };
+
+    expect(workspaceSourceFromEngineering(data).dataMode).toBe("live");
+    expect(workspaceOperationsFromEngineering(data).submitIntake).toBeTypeOf("function");
+  });
+
   it("creates project identity and uploads files by declared document role", async () => {
     const data = liveData();
     const project = {

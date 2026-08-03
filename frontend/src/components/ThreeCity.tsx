@@ -42,6 +42,7 @@ export interface ThreeCityProps {
   selectedAgentId?: AgentId | null;
   onSelectAgent?: (agentId: AgentId) => void;
   onLabelPositionsChange?: (positions: CityLabelPositions) => void;
+  onFpsSample?: (fps: number) => void;
 }
 
 export interface CityLabelProjection {
@@ -3616,7 +3617,8 @@ export function ThreeCity({
   worldPackages = [],
   selectedAgentId = null,
   onSelectAgent,
-  onLabelPositionsChange
+  onLabelPositionsChange,
+  onFpsSample
 }: ThreeCityProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -3639,6 +3641,7 @@ export function ThreeCity({
   const selectedAgentRef = useRef<AgentId | null>(selectedAgentId);
   const selectAgentRef = useRef(onSelectAgent);
   const labelPositionsChangeRef = useRef(onLabelPositionsChange);
+  const fpsSampleRef = useRef(onFpsSample);
   const pressedKeysRef = useRef(new Set<string>());
   const firstPersonLookRef = useRef<FirstPersonLook>({ yaw: 0, pitch: 0 });
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -3655,6 +3658,7 @@ export function ThreeCity({
   selectedAgentRef.current = selectedAgentId;
   selectAgentRef.current = onSelectAgent;
   labelPositionsChangeRef.current = onLabelPositionsChange;
+  fpsSampleRef.current = onFpsSample;
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -4031,6 +4035,8 @@ export function ThreeCity({
       timer.connect(document);
       let animationElapsed = 0;
       let lastFrameTimestamp: number | null = null;
+      let fpsWindowStartedAt: number | null = null;
+      let fpsWindowFrames = 0;
       const targetFrameRate = automatedRuntime ? 8 : qualityProfile.targetFps;
       const targetFrameInterval = 1000 / targetFrameRate;
       const firstPersonForward = new THREE.Vector3();
@@ -4048,6 +4054,16 @@ export function ThreeCity({
           lastFrameTimestamp = frameTimestamp - (elapsedSinceFrame % targetFrameInterval);
         } else {
           lastFrameTimestamp = frameTimestamp;
+        }
+        if (!automatedRuntime) {
+          fpsWindowStartedAt ??= frameTimestamp;
+          fpsWindowFrames += 1;
+          const sampleDuration = frameTimestamp - fpsWindowStartedAt;
+          if (sampleDuration >= 1000) {
+            fpsSampleRef.current?.((fpsWindowFrames * 1000) / sampleDuration);
+            fpsWindowStartedAt = frameTimestamp;
+            fpsWindowFrames = 0;
+          }
         }
         timer.update(timestamp);
         const delta = Math.min(timer.getDelta(), 0.05);

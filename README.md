@@ -6,6 +6,8 @@ Local-first engineering review and delivery software for ESCO Group. The homepag
 
 - Engineering City — 23 named operational zones, dense skyline and infrastructure, canals, bridges, utilities, renewables, logistics, moving traffic and pedestrians, semantic district focus, event replay, quality controls, free orbit/zoom, and bounded Walk mode
 - Engineering Workspace — intake, files, tasks, Project Core requirements/devices/I-O/tags/PLC, planning, change sets, revisions, findings, exact evidence, and explanation-gated approvals
+- Delivery workspaces — searchable HMI, alarm, test/commissioning, and documentation master/detail views, with explicit live-empty states when the canonical backend resource is not contracted
+- Operations — searchable agent status/location/task inspection plus a read-only, ordered project-event audit stream with gap and payload detail
 - Delivery and reporting — five read-only cross-discipline audit plugins plus a 19-report catalog and real HTML, PDF, DOCX, XLSX, CSV, and JSON generation behind the backend-owned execution boundary
 - Release Center — 13 conservative readiness checks, the exact `00 Manifest` through `06 Audit` package tree, provenance, validation/import-verification truth, and API-backed downloads only
 - Desktop — Windows-first Tauri 2 shell with loopback-only services, canonical authorized paths, a safe artifact allowlist, approval/failure notifications, support logs, and no general shell/opener permission
@@ -39,13 +41,16 @@ The development script starts and supervises the loopback backend first, validat
 ```powershell
 .\scripts\product\test.ps1
 .\scripts\product\test.ps1 -IncludeE2E
+.\scripts\product\test.ps1 -IncludeLiveE2E
 pwsh -NoProfile -File .\scripts\product\tests\common.tests.ps1
 .venv\Scripts\python.exe -m pytest backend\tests_delivery -q
 cargo test --locked --manifest-path desktop\src-tauri\Cargo.toml
 cargo clippy --locked --all-targets --manifest-path desktop\src-tauri\Cargo.toml -- -D warnings
 ```
 
-Rust is required for desktop checks and builds. Tauri CLI 2 is required only to create MSI/NSIS installers; it is intentionally not installed globally by setup.
+Rust is required for desktop checks and builds. Tauri CLI 2 is pinned in `desktop/package.json` and installed repository-locally by `setup.ps1 -IncludeDesktop`; no global CLI install is required.
+
+`-IncludeLiveE2E` launches a fresh isolated SQLite backend and separate Vite server, then proves login, project creation, ZIP intake, reload persistence, workflow execution, human decisions, stored report bytes, browser download, and completion. It never touches the normal development database.
 
 ## Safety boundary
 

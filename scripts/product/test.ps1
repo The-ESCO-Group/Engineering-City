@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch] $IncludeE2E,
+    [switch] $IncludeLiveE2E,
     [switch] $SkipBackend,
     [switch] $SkipDesktop
 )
@@ -43,6 +44,14 @@ if (-not $SkipDesktop) {
 
 if ($IncludeE2E) {
     Invoke-ProductNative -FilePath $npm -ArgumentList @("run", "test:e2e") -WorkingDirectory $frontend -Description "Run local browser E2E tests"
+}
+
+if ($IncludeLiveE2E) {
+    if ($SkipBackend) {
+        throw "-IncludeLiveE2E cannot be combined with -SkipBackend because the live acceptance test starts an isolated real backend."
+    }
+
+    Invoke-ProductNative -FilePath $npm -ArgumentList @("run", "test:e2e:live") -WorkingDirectory $frontend -Description "Run isolated real-backend browser acceptance test"
 }
 
 Write-Host "Product validation completed successfully."

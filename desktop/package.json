@@ -1,0 +1,9 @@
+{
+  "name": "esco-engineering-city-desktop-tooling",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Repository-local desktop build tooling for ESCO Engineering City",
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}
