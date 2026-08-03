@@ -370,8 +370,8 @@ Milestone 7 validation:
 
 The repository-local pinned Tauri CLI now produces both MSI and NSIS installers.
 The latest unsigned candidate package is
-`dist/desktop/esco-engineering-city-0.1.0-windows-20260803-094053.zip` with
-SHA-256 `54288e1a18eecb374115aa5eb2f9e8e964241985b8fef25496af188a0d982f5b`.
+`dist/desktop/esco-engineering-city-0.1.0-windows-20260803-101438.zip` with
+SHA-256 `99d1098ed94c94f1e2d2eec89fe44dae6aee00dca46a234dabcacf015da45af8`.
 Signing remains an external release-policy step; the package is not represented
 as signed or as an engineering import verification.
 
