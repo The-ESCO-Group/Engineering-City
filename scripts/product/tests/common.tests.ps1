@@ -111,6 +111,9 @@ $desktopBuildScript = Get-Content -LiteralPath (Join-Path $repoRoot "scripts\pro
 Assert-True ($desktopBuildScript -notmatch '(?m)\bcargo\s+tauri\b') "Desktop build must not fall back to a global cargo-tauri command."
 Assert-True ($desktopBuildScript -match 'Get-ProductLocalTauriCli') "Desktop build must resolve the pinned repository-local Tauri CLI."
 
+$developmentScript = Get-Content -LiteralPath (Join-Path $repoRoot "scripts\product\dev.ps1") -Raw
+Assert-True ($developmentScript -match '"--app-dir",\s*"backend"') "Development startup must expose backend/app to Uvicorn from the repository root."
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ }
     exit 1

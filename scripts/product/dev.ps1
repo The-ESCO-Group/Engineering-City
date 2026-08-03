@@ -59,7 +59,7 @@ try {
         $null = Assert-ProductPythonVersion -PythonPath $venvPython
         Write-Host "Starting the local backend first at $backendBase"
         $backendHandle = Start-ProductLoggedProcess -FilePath $venvPython `
-            -ArgumentList @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", [string]$BackendPort) `
+            -ArgumentList @("-m", "uvicorn", "app.main:app", "--app-dir", "backend", "--host", "127.0.0.1", "--port", [string]$BackendPort) `
             -WorkingDirectory $repoRoot -Name "backend"
         try {
             $health = Wait-ProductHttp -Url $backendHealth -TimeoutSeconds 60 -ServiceName "ESCO backend"
