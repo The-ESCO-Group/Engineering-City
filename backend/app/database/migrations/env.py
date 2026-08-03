@@ -14,7 +14,7 @@ from __future__ import annotations
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import create_engine, pool
 
 from app.core.config import get_settings
 from app.database.types import StrEnumType
@@ -31,7 +31,20 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+
+# NOT via ``config.set_main_option``. Alembic stores that value in a
+# ``configparser``, which applies pyformat interpolation to it — so a PostgreSQL
+# password containing any character RFC 3986 requires to be percent-encoded
+# (``@ / : # ? %`` or a space) arrives as ``%40``, ``%2F``, ``%21`` and
+# configparser rejects the whole string before a single migration runs.
+#
+# The failure is nastier than it sounds because it is *asymmetric*: SQLAlchemy
+# parses the same URL correctly, so the API and the worker start and connect
+# fine. Only the migration runner dies — the one tool needed to create the
+# schema in the first place. And SQLite URLs never contain a ``%``, so demo mode
+# never sees it.
+_ESCAPED_DATABASE_URL = settings.database_url.replace("%", "%%")
+config.set_main_option("sqlalchemy.url", _ESCAPED_DATABASE_URL)
 
 
 def _include_object(
@@ -82,11 +95,14 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations against a live connection."""
-    section = config.get_section(config.config_ini_section, {})
-    section["sqlalchemy.url"] = settings.database_url
+    """Run migrations against a live connection.
 
-    connectable = engine_from_config(section, prefix="sqlalchemy.", poolclass=pool.NullPool)
+    The engine is built straight from the settings rather than through
+    ``engine_from_config``, which would route the URL back through configparser
+    interpolation. Escaping it on the way in is enough to stop the crash; not
+    round-tripping it at all is enough to stop the class of bug.
+    """
+    connectable = create_engine(settings.database_url, poolclass=pool.NullPool)
 
     with connectable.connect() as connection:
         if connection.dialect.name == "sqlite":
