@@ -18,6 +18,11 @@ interface ApprovalSummary {
   status: string;
 }
 
+interface ProjectSummary {
+  id: string;
+  name: string;
+}
+
 interface ReportSummary {
   id: string;
   status: string;
@@ -38,6 +43,13 @@ async function generatedReports(request: APIRequestContext, projectId: string): 
   return ((await response.json()) as ReportSummary[]).filter((item) => item.status === "generated");
 }
 
+async function projectIdByName(request: APIRequestContext, name: string): Promise<string> {
+  const response = await request.get(`${BACKEND}/projects?limit=500`);
+  expect(response.ok(), await response.text()).toBeTruthy();
+  const body = (await response.json()) as { items: ProjectSummary[] };
+  return body.items.find((project) => project.name === name)?.id ?? "";
+}
+
 async function signIn(page: Page): Promise<void> {
   await page.goto("/#/settings");
   const submit = page.getByRole("button", { name: "Sign in to local backend" });
@@ -51,43 +63,38 @@ async function signIn(page: Page): Promise<void> {
 
 test("real local workflow persists intake, human decisions, and downloadable reports", async ({ page }) => {
   await signIn(page);
-  await page.evaluate(() => localStorage.removeItem("esco.intake-draft.v1"));
+  await page.evaluate(() => localStorage.removeItem("esco:intake-draft:v1"));
   await page.goto("/#/workspace/intake");
 
   await page.getByLabel("Project name").fill("Live E2E Conveyor Review");
   await page.getByLabel("Customer / internal label").fill("SYNTHETIC-E2E");
   await page.getByLabel("Plant / site").fill("Synthetic Test Plant");
-  await page.getByLabel("Project type").selectOption({ label: "Engineering review" });
-  await page.getByLabel("Original project description").fill(
+  await page.getByLabel("Project objective").fill(
     "Review the synthetic Line 3 package, preserve exact evidence, require human decisions, and produce local reports."
   );
-  await page.getByRole("button", { name: /Continue/ }).click();
 
-  await page.getByLabel("Controller family").fill("CompactLogix");
+  await page.getByLabel("Controller family").selectOption({ label: "CompactLogix" });
   await page.getByLabel("Catalog number").fill("5069-L306ER");
   await page.getByLabel("Firmware").fill("35");
   await page.getByLabel("Studio 5000 version").fill("35");
-  await page.getByRole("button", { name: /Continue/ }).click();
-
-  await page.getByLabel("ESCO naming standard").fill("Synthetic ESCO Naming v1");
-  await page.getByLabel("Controller template").fill("Synthetic CompactLogix Review Template v1");
-  await page.getByLabel("Test template set").fill("Synthetic IAT/FAT v1");
-  await page.getByRole("button", { name: /Continue/ }).click();
 
   await page.locator('input[type="file"]').setInputFiles(FIXTURE);
   await expect(page.getByText("Line3_Project_Package.zip")).toBeVisible();
-  await page.getByRole("button", { name: /Continue/ }).click();
 
   await page.getByLabel(/Engineering responsibility acknowledged/).check();
-  await page.getByLabel(/Inputs reviewed/).check();
-  const create = page.getByRole("button", { name: "Create project & stage files" });
+  const create = page.getByRole("button", { name: "Create project & start agents" });
   await expect(create).toBeEnabled();
   await create.click();
-  const success = page.getByRole("status").filter({ hasText: /was created by the local backend/ });
-  await expect(success).toBeVisible({ timeout: 90_000 });
-  const successText = await success.textContent();
-  const projectId = successText?.match(/Project ([0-9a-f-]{36})/)?.[1];
-  expect(projectId, successText || "Missing project creation message").toBeTruthy();
+
+  await expect(page.getByLabel("Engineering city workflow visualization")).toBeVisible({ timeout: 90_000 });
+  let projectId = "";
+  await expect.poll(
+    async () => {
+      projectId = await projectIdByName(page.request, "Live E2E Conveyor Review");
+      return projectId;
+    },
+    { timeout: 90_000, intervals: [500, 1000, 2000] }
+  ).not.toBe("");
 
   await page.goto("/#/tasks");
   await expect(page.getByRole("heading", { name: "Task board & list" })).toBeVisible();
@@ -100,7 +107,7 @@ test("real local workflow persists intake, human decisions, and downloadable rep
   await expect(page.locator(".demo-badge")).toHaveText("LIVE LOCAL DATA");
 
   await expect.poll(
-    async () => (await pendingApprovals(page.request, projectId!)).length,
+    async () => (await pendingApprovals(page.request, projectId)).length,
     { timeout: 150_000, intervals: [500, 1000, 2000] }
   ).toBeGreaterThan(0);
 
@@ -116,7 +123,7 @@ test("real local workflow persists intake, human decisions, and downloadable rep
   await page.getByRole("button", { name: "Submit signed decision" }).click();
   await expect(page.getByText(/Approve recorded for/)).toBeVisible();
 
-  for (const approval of await pendingApprovals(page.request, projectId!)) {
+  for (const approval of await pendingApprovals(page.request, projectId)) {
     const response = await page.request.post(`${BACKEND}/approvals/${approval.id}/decision`, {
       data: {
         approved: true,
@@ -127,11 +134,11 @@ test("real local workflow persists intake, human decisions, and downloadable rep
   }
 
   await expect.poll(
-    async () => (await generatedReports(page.request, projectId!)).length,
+    async () => (await generatedReports(page.request, projectId)).length,
     { timeout: 150_000, intervals: [500, 1000, 2000] }
   ).toBeGreaterThan(0);
 
-  const reports = await generatedReports(page.request, projectId!);
+  const reports = await generatedReports(page.request, projectId);
   const actualReport = reports.find((item) => item.download_path && item.size_bytes && item.sha256);
   expect(actualReport).toBeTruthy();
   const artifactResponse = await page.request.get(new URL(actualReport!.download_path!, BACKEND).toString());

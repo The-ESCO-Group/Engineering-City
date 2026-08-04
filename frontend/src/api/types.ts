@@ -1,4 +1,10 @@
 import type { components, EventEnvelope as GeneratedEventEnvelope } from "../generated";
+import type {
+  ExportArtifactKind,
+  ImportVerificationStatus,
+  ReleaseCandidateStatus,
+  ValidationLevel
+} from "../generated";
 
 export interface Page<T> {
   items: T[];
@@ -31,6 +37,227 @@ export interface ProjectDetail extends ProjectRead {
     approvals_pending: number;
     reports: number;
   };
+}
+
+export interface ProjectQuestionRead {
+  id: string;
+  project_id: string;
+  reference: string;
+  category: string;
+  question: string;
+  why_it_matters: string;
+  status: string;
+  is_mandatory: boolean;
+  is_blocking: boolean;
+  blocks_task_kinds: string[];
+  answer: string;
+  answered_by_id: string | null;
+  answered_at: string | null;
+  asked_by_agent: string;
+  raised_in_task_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClarificationRead {
+  id: string;
+  project_id: string;
+  requirement_id: string | null;
+  object_type: string | null;
+  object_id: string | null;
+  question: string;
+  ambiguity: string;
+  status: string;
+  resolution: string;
+  resolved_by_id: string | null;
+  resolved_at: string | null;
+  blocks_generation: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClarificationInbox {
+  project_questions: ProjectQuestionRead[];
+  clarifications: ClarificationRead[];
+  blocking_count: number;
+}
+
+export interface ClarificationResolutionRead {
+  kind: "project_question" | "clarification";
+  id: string;
+  project_id: string;
+  status: string;
+  decision_id: string;
+  answered_by_id: string;
+  answered_at: string;
+  unblocked_task_count: number;
+}
+
+export interface RequirementSourceRead {
+  id: string;
+  file_id: string | null;
+  anchor_id: string | null;
+  quoted_text: string;
+  location_label: string;
+  is_primary: boolean;
+}
+
+export interface AcceptanceCriterionRead {
+  id: string;
+  reference: string;
+  statement: string;
+  ordinal: number;
+  is_testable: boolean;
+  test_notes: string;
+  status: string;
+  approval_state: string;
+}
+
+export interface RequirementRead {
+  id: string;
+  project_id: string;
+  reference: string;
+  title: string;
+  statement: string;
+  source_text: string;
+  kind: string;
+  priority: string;
+  status: string;
+  approval_state: string;
+  is_inferred: boolean;
+  confidence: number;
+  rationale: string;
+  verification_method: string;
+  sources: RequirementSourceRead[];
+  acceptance_criteria: AcceptanceCriterionRead[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RequirementDecisionRead {
+  requirement: RequirementRead;
+  decision_id: string;
+  decided_by_id: string;
+  decided_at: string;
+  unblocked_task_count: number;
+}
+
+export interface ReleaseBlockRead {
+  code: string;
+  summary: string;
+  detail: string;
+}
+
+export interface ReleaseReadinessRead {
+  revision_number: number;
+  is_ready: boolean;
+  blocking: ReleaseBlockRead[];
+  outstanding_gates: string[];
+  validation_error_count: number;
+  highest_attainable_validation_level: ValidationLevel;
+  import_verification_possible: boolean;
+  import_verification_detail: string;
+}
+
+export interface ReleaseActionRead {
+  available: boolean;
+  path: string;
+  reason: string;
+}
+
+export interface ReleaseActionsRead {
+  generate: ReleaseActionRead;
+  finalize: ReleaseActionRead;
+  download: ReleaseActionRead;
+}
+
+export interface ExportArtifactRead {
+  id: string;
+  release_candidate_id: string;
+  kind: ExportArtifactKind;
+  relative_path: string;
+  filename: string;
+  media_type: string;
+  size_bytes: number;
+  sha256: string;
+  validation_level: ValidationLevel;
+  generator_name: string;
+  generator_version: string;
+  import_order: number;
+  is_produced_by_plugin: boolean;
+  plugin_name: string;
+  warnings: unknown[];
+  created_at: string;
+}
+
+export interface ReleaseManifestRead {
+  id: string;
+  release_candidate_id: string;
+  manifest_version: string;
+  content_sha256: string;
+  artifact_count: number;
+  checksum_file_sha256: string;
+  evidence_index_sha256: string;
+  frozen_at: string | null;
+  frozen_by_id: string | null;
+  approved_by_id: string | null;
+  approval_summary: Record<string, unknown>;
+}
+
+export interface ReleaseArchiveRead {
+  id: string;
+  project_id: string;
+  release_candidate_id: string;
+  release_manifest_id: string;
+  approved_by_id: string | null;
+  approved_by_display_name: string;
+  finalized_by_id: string | null;
+  relative_path: string;
+  filename: string;
+  media_type: string;
+  size_bytes: number;
+  sha256: string;
+  file_count: number;
+  source_revision: number;
+  validation_level: ValidationLevel;
+  import_verification_status: ImportVerificationStatus;
+  import_verification_detail: string;
+  rockwell_import_verified: boolean;
+  manifest_sha256: string;
+  checksum_file_sha256: string;
+  frozen_at: string;
+  finalized_at: string;
+  download_path: string;
+}
+
+export interface ReleaseCandidateRead {
+  id: string;
+  project_id: string;
+  revision_number: number;
+  candidate_number: number;
+  name: string;
+  status: ReleaseCandidateStatus;
+  approval_state: "draft" | "proposed" | "approved" | "rejected" | "superseded";
+  export_profile_id: string | null;
+  validation_run_id: string | null;
+  validation_level: ValidationLevel;
+  import_verification_status: ImportVerificationStatus;
+  import_verification_detail: string;
+  generator_version: string;
+  package_path: string;
+  package_sha256: string;
+  package_bytes: number;
+  limitations: unknown[];
+  unsupported_items: unknown[];
+  approved_by_id: string | null;
+  approved_at: string | null;
+  released_at: string | null;
+  created_at: string;
+  updated_at: string;
+  artifact_count: number;
+  manifest: ReleaseManifestRead | null;
+  archive: ReleaseArchiveRead | null;
+  actions: ReleaseActionsRead;
 }
 
 export type AgentInstanceRead = components["schemas"]["AgentInstanceRead"];

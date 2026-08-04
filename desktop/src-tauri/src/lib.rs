@@ -14,6 +14,7 @@ use std::path::{Component, Prefix};
 const ALLOWED_ARTIFACT_EXTENSIONS: &[&str] = &[
     "csv", "docx", "html", "json", "l5x", "pdf", "txt", "xlsx", "xml", "zip",
 ];
+const FALLBACK_BACKEND_BASE_URL: &str = "http://127.0.0.1:8000";
 
 #[derive(Debug, Serialize)]
 struct DesktopCapabilities {
@@ -61,6 +62,17 @@ fn normalize_backend_base_url(raw: &str) -> Result<String, String> {
     let trimmed_path = url.path().trim_end_matches('/').to_owned();
     url.set_path(&trimmed_path);
     Ok(url.to_string().trim_end_matches('/').to_owned())
+}
+
+fn compiled_backend_base_url() -> &'static str {
+    option_env!("ESCO_DESKTOP_BACKEND_URL").unwrap_or(FALLBACK_BACKEND_BASE_URL)
+}
+
+fn resolve_backend_base_url(
+    runtime_override: Option<&str>,
+    compiled_default: &str,
+) -> Result<String, String> {
+    normalize_backend_base_url(runtime_override.unwrap_or(compiled_default))
 }
 
 #[tauri::command]
@@ -267,11 +279,13 @@ fn notify_operator_event(
 
 #[tauri::command]
 fn desktop_capabilities() -> Result<DesktopCapabilities, String> {
-    let configured =
-        env::var("ESCO_BACKEND_URL").unwrap_or_else(|_| "http://127.0.0.1:8000".to_string());
+    let runtime_override = env::var("ESCO_BACKEND_URL").ok();
     Ok(DesktopCapabilities {
         local_backend_only: true,
-        backend_base_url: normalize_backend_base_url(&configured)?,
+        backend_base_url: resolve_backend_base_url(
+            runtime_override.as_deref(),
+            compiled_backend_base_url(),
+        )?,
         project_directory_policy: "direct_child_of_configured_projects_root",
         allowed_artifact_extensions: ALLOWED_ARTIFACT_EXTENSIONS,
         live_equipment_control: false,
@@ -298,8 +312,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        backend_health_url, is_supported_local_absolute, normalize_backend_base_url,
-        validate_artifact_file, validate_notification_text, validate_project_directory,
+        backend_health_url, compiled_backend_base_url, is_supported_local_absolute,
+        normalize_backend_base_url, resolve_backend_base_url, validate_artifact_file,
+        validate_notification_text, validate_project_directory,
     };
     use std::{
         fs,
@@ -325,6 +340,31 @@ mod tests {
             normalize_backend_base_url("http://127.0.0.2:8000/").unwrap(),
             "http://127.0.0.2:8000"
         );
+    }
+
+    #[test]
+    fn native_backend_default_matches_the_validated_build_value_and_runtime_can_override_it() {
+        let compiled = compiled_backend_base_url();
+        assert_eq!(
+            resolve_backend_base_url(None, compiled).unwrap(),
+            normalize_backend_base_url(compiled).unwrap()
+        );
+        if let Ok(build_value) = std::env::var("ESCO_DESKTOP_BACKEND_URL") {
+            assert_eq!(
+                resolve_backend_base_url(None, compiled).unwrap(),
+                normalize_backend_base_url(&build_value).unwrap()
+            );
+        }
+        assert_eq!(
+            resolve_backend_base_url(Some("http://localhost:9010/api/"), "http://127.0.0.1:8010")
+                .unwrap(),
+            "http://localhost:9010/api"
+        );
+        assert!(resolve_backend_base_url(
+            Some("http://localhost.example.com:9010"),
+            "http://127.0.0.1:8010"
+        )
+        .is_err());
     }
 
     #[test]

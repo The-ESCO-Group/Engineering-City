@@ -299,6 +299,7 @@ def _accepted_findings(db: Session, project_id: uuid.UUID) -> tuple[FindingSnaps
                     str(item.anchor_id),
                 ),
             )
+            if link.anchor_id is not None
         )
         findings.append(
             FindingSnapshot(

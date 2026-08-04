@@ -110,6 +110,9 @@ if (Test-Path -LiteralPath (Join-Path $repoRoot "desktop\node_modules\@tauri-app
 $desktopBuildScript = Get-Content -LiteralPath (Join-Path $repoRoot "scripts\product\build-desktop.ps1") -Raw
 Assert-True ($desktopBuildScript -notmatch '(?m)\bcargo\s+tauri\b') "Desktop build must not fall back to a global cargo-tauri command."
 Assert-True ($desktopBuildScript -match 'Get-ProductLocalTauriCli') "Desktop build must resolve the pinned repository-local Tauri CLI."
+Assert-True ($desktopBuildScript -match '\$env:VITE_ESCO_API_BASE\s*=\s*"\$backendBase/api"') "Desktop frontend assets must compile the validated backend URL."
+Assert-True ($desktopBuildScript -match '\$env:ESCO_DESKTOP_BACKEND_URL\s*=\s*\$backendBase') "Native desktop capabilities must compile the same validated backend URL."
+Assert-True ($desktopBuildScript -match 'SetEnvironmentVariable\("ESCO_DESKTOP_BACKEND_URL",\s*\$priorDesktopBackend,\s*"Process"\)') "Desktop build must restore the prior native backend build value."
 
 $developmentScript = Get-Content -LiteralPath (Join-Path $repoRoot "scripts\product\dev.ps1") -Raw
 Assert-True ($developmentScript -match '"--app-dir",\s*"backend"') "Development startup must expose backend/app to Uvicorn from the repository root."

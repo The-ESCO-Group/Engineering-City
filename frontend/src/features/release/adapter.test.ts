@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EventEnvelope, ProjectDetail, ReportRead } from "../../api/types";
+import type { EventEnvelope, ExportArtifactRead, ProjectDetail, ReleaseCandidateRead, ReportRead } from "../../api/types";
 import { buildReleaseModel } from "./adapter";
 import { createDemoReleaseSource } from "./demo";
 import type { ReleaseSource } from "./types";
@@ -184,6 +184,7 @@ const fullSupport = {
   generate_artifacts: true,
   request_import_verification: true,
   request_final_approval: true,
+  finalize_release: true,
   download_release_zip: true
 } as const;
 
@@ -209,7 +210,8 @@ describe("buildReleaseModel", () => {
     const executive = model.reports.find((item) => item.id === "executive_summary");
     expect(executive?.files[0].download?.url).toBe("/downloads/executive-summary.pdf");
     expect(executive?.files[0].provenance.find((item) => item.label === "Report version")?.value).toBe("1.0.0");
-    expect(model.actions.every((item) => item.enabled)).toBe(true);
+    expect(model.actions.find((item) => item.id === "finalize_release")).toMatchObject({ enabled: false });
+    expect(model.actions.filter((item) => item.id !== "finalize_release").every((item) => item.enabled)).toBe(true);
   });
 
   it("disables engineering controls with an explicit role explanation for a viewer", () => {
@@ -239,5 +241,107 @@ describe("buildReleaseModel", () => {
     expect(model.candidate).toMatchObject({ id: newerCandidateId, number: 3 });
     expect(model.verification.status).toBe("not_attempted");
     expect(model.releaseOccurredAt).toBeNull();
+  });
+
+  it("reconstructs an immutable release from persisted resources without event history", () => {
+    const candidate: ReleaseCandidateRead = {
+      id: CANDIDATE_ID,
+      project_id: PROJECT_ID,
+      revision_number: 12,
+      candidate_number: 4,
+      name: "Restart-safe candidate",
+      status: "released",
+      approval_state: "approved",
+      export_profile_id: null,
+      validation_run_id: null,
+      validation_level: "released",
+      import_verification_status: "passed",
+      import_verification_detail: "Verified before immutable finalization.",
+      generator_version: "2.1.0",
+      package_path: "releases/RC-0004.zip",
+      package_sha256: "d".repeat(64),
+      package_bytes: 4096,
+      limitations: [],
+      unsupported_items: [],
+      approved_by_id: "10000000-0000-4000-8000-000000000007",
+      approved_at: "2026-08-03T10:00:00Z",
+      released_at: "2026-08-03T10:05:00Z",
+      created_at: "2026-08-03T09:00:00Z",
+      updated_at: "2026-08-03T10:05:00Z",
+      artifact_count: 1,
+      manifest: {
+        id: "10000000-0000-4000-8000-000000000010",
+        release_candidate_id: CANDIDATE_ID,
+        manifest_version: "1.0",
+        content_sha256: "e".repeat(64),
+        artifact_count: 1,
+        checksum_file_sha256: "f".repeat(64),
+        evidence_index_sha256: "1".repeat(64),
+        frozen_at: "2026-08-03T10:00:00Z",
+        frozen_by_id: null,
+        approved_by_id: "10000000-0000-4000-8000-000000000007",
+        approval_summary: {}
+      },
+      archive: {
+        id: "10000000-0000-4000-8000-000000000011",
+        project_id: PROJECT_ID,
+        release_candidate_id: CANDIDATE_ID,
+        release_manifest_id: "10000000-0000-4000-8000-000000000010",
+        approved_by_id: "10000000-0000-4000-8000-000000000007",
+        approved_by_display_name: "Review Engineer",
+        finalized_by_id: "10000000-0000-4000-8000-000000000008",
+        relative_path: "releases/RC-0004.zip",
+        filename: "RC-0004.zip",
+        media_type: "application/zip",
+        size_bytes: 4096,
+        sha256: "d".repeat(64),
+        file_count: 7,
+        source_revision: 12,
+        validation_level: "released",
+        import_verification_status: "passed",
+        import_verification_detail: "Verified before immutable finalization.",
+        rockwell_import_verified: true,
+        manifest_sha256: "e".repeat(64),
+        checksum_file_sha256: "f".repeat(64),
+        frozen_at: "2026-08-03T10:00:00Z",
+        finalized_at: "2026-08-03T10:05:00Z",
+        download_path: `/api/release-candidates/${CANDIDATE_ID}/download`
+      },
+      actions: {
+        generate: { available: false, path: "", reason: "Immutable." },
+        finalize: { available: false, path: "", reason: "Already finalized." },
+        download: { available: true, path: `/api/release-candidates/${CANDIDATE_ID}/download`, reason: "" }
+      }
+    };
+    const artifact: ExportArtifactRead = {
+      id: ARTIFACT_ID,
+      release_candidate_id: CANDIDATE_ID,
+      kind: "manifest",
+      relative_path: "00-manifest/manifest.json",
+      filename: "manifest.json",
+      media_type: "application/json",
+      size_bytes: 1024,
+      sha256: "a".repeat(64),
+      validation_level: "released",
+      generator_name: "ESCO",
+      generator_version: "2.1.0",
+      import_order: 0,
+      is_produced_by_plugin: false,
+      plugin_name: "",
+      warnings: [],
+      created_at: "2026-08-03T09:30:00Z"
+    };
+    const source = liveSource("viewer");
+    source.events = [];
+    source.releaseCandidates = [candidate];
+    source.releaseArtifacts = [artifact];
+    source.releaseZipDownload = { url: "/api/release-candidates/restart/download", filename: "RC-0004.zip" };
+
+    const model = buildReleaseModel(source);
+
+    expect(model.candidate).toMatchObject({ number: 4, revision: 12, status: "released" });
+    expect(model.artifactCoverage).toEqual({ actual: 1, expected: 1, hashed: 1 });
+    expect(model.releaseOccurredAt).toBe("2026-08-03T10:05:00Z");
+    expect(model.actions.find((item) => item.id === "download_release_zip")).toMatchObject({ enabled: true });
   });
 });

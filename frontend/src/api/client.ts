@@ -7,6 +7,8 @@ import type {
   ApprovalRead,
   ApiErrorBody,
   CapabilityStatus,
+  ClarificationInbox,
+  ClarificationResolutionRead,
   CurrentUserResponse,
   EventEnvelope,
   FindingDetail,
@@ -18,6 +20,12 @@ import type {
   ProjectDetail,
   ProjectRead,
   ProviderCapability,
+  ExportArtifactRead,
+  ReleaseArchiveRead,
+  ReleaseCandidateRead,
+  ReleaseReadinessRead,
+  RequirementDecisionRead,
+  RequirementRead,
   ReportRead,
   RunRead,
   TaskRead,
@@ -25,9 +33,16 @@ import type {
   UploadedFileRead,
   WorkflowStateResponse
 } from "./types";
+import { isTauri } from "@tauri-apps/api/core";
 import { configuredApiBase } from "../config";
 
 export const API_BASE = configuredApiBase();
+
+const DESKTOP_RUNTIME = isTauri();
+// The packaged WebView is cross-site to the loopback API, so its SameSite
+// cookie cannot authenticate fetch/WebSocket traffic. Keep the token only for
+// this renderer lifetime; browser sessions continue to use the httpOnly cookie.
+let desktopAccessToken: string | null = null;
 
 const PROJECT_PAGE_SIZE = 500;
 const PROJECT_LIST_LIMIT = 10_000;
@@ -56,16 +71,29 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  includeDesktopAuthorization = true
+): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
+  }
+  if (
+    DESKTOP_RUNTIME &&
+    includeDesktopAuthorization &&
+    desktopAccessToken &&
+    !headers.has("Authorization")
+  ) {
+    headers.set("Authorization", `Bearer ${desktopAccessToken}`);
   }
   const response = await fetch(apiUrl(path), {
     credentials: "include",
     ...init,
     headers
   });
+  if (DESKTOP_RUNTIME && response.status === 401) desktopAccessToken = null;
   if (!response.ok) {
     let body: ApiErrorBody = {};
     try {
@@ -80,6 +108,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   return (await response.json()) as T;
+}
+
+async function login(email: string, password: string): Promise<LoginResponse> {
+  const response = await request<LoginResponse>(
+    "/auth/login",
+    {
+      method: "POST",
+      body: JSON.stringify({ email, password })
+    },
+    false
+  );
+  if (DESKTOP_RUNTIME) desktopAccessToken = response.access_token;
+  return response;
+}
+
+async function logout(): Promise<{ ok: boolean }> {
+  const response = await request<{ ok: boolean }>("/auth/logout", { method: "POST" });
+  if (DESKTOP_RUNTIME) desktopAccessToken = null;
+  return response;
 }
 
 async function listProjects(): Promise<Page<ProjectRead>> {
@@ -141,12 +188,8 @@ async function replayProjectMessages(projectId: string): Promise<AgentMessageRea
 export const engineeringApi = {
   health: () => request<HealthResponse>("/health"),
   capabilities: () => request<CapabilityStatus[]>("/system/capabilities"),
-  login: (email: string, password: string) =>
-    request<LoginResponse>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password })
-    }),
-  logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
+  login,
+  logout,
   me: () => request<CurrentUserResponse>("/auth/me"),
   projects: listProjects,
   createProject: (input: {
@@ -154,8 +197,58 @@ export const engineeringApi = {
     description?: string;
     client_reference?: string;
     attributes?: Record<string, unknown>;
+    engineering_profile?: {
+      project_name: string;
+      customer_label: string;
+      plant_or_site: string;
+      project_description: string;
+      project_type: string;
+      units: string;
+      locale: string;
+      network_architecture: string;
+      release_mode: string;
+      restricted_domains: string[];
+      target: {
+        controller_family: string;
+        controller_catalog_number: string;
+        firmware_revision: string;
+        studio_5000_version: string;
+        safety_classification: string;
+        hmi_product: string;
+        hmi_version: string;
+        hmi_terminal_model: string;
+        hmi_resolution: string;
+      };
+      standards: {
+        naming_standard_version: string;
+        alarm_philosophy_version: string;
+        controller_template: string;
+        aoi_udt_library: string;
+        hmi_library: string;
+        test_template_set: string;
+      };
+    };
   }) => request<ProjectDetail>("/projects", { method: "POST", body: JSON.stringify(input) }),
   project: (projectId: string) => request<ProjectDetail>(`/projects/${projectId}`),
+  clarifications: (projectId: string) =>
+    request<ClarificationInbox>(`/projects/${projectId}/clarifications`),
+  resolveProjectQuestion: (questionId: string, answer: string) =>
+    request<ClarificationResolutionRead>(`/project-questions/${questionId}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ answer, resolution: "answered" })
+    }),
+  resolveClarification: (clarificationId: string, answer: string) =>
+    request<ClarificationResolutionRead>(`/clarifications/${clarificationId}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ answer, resolution: "answered" })
+    }),
+  requirements: (projectId: string) =>
+    request<RequirementRead[]>(`/projects/${projectId}/requirements`),
+  decideRequirement: (requirementId: string, decision: "accept" | "reject", rationale: string) =>
+    request<RequirementDecisionRead>(`/requirements/${requirementId}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ decision, rationale })
+    }),
   files: (projectId: string) =>
     request<UploadedFileRead[]>(`/projects/${projectId}/files`),
   uploadFiles: (projectId: string, files: File[], documentRole?: string) => {
@@ -205,6 +298,26 @@ export const engineeringApi = {
       body: JSON.stringify({ approved, notes })
     }),
   reports: (projectId: string) => request<ReportRead[]>(`/projects/${projectId}/reports`),
+  releaseReadiness: (projectId: string) =>
+    request<ReleaseReadinessRead>(`/projects/${projectId}/release-readiness`),
+  releaseCandidates: (projectId: string) =>
+    request<Page<ReleaseCandidateRead>>(`/projects/${projectId}/release-candidates?limit=200&offset=0`),
+  releaseArtifacts: (candidateId: string) =>
+    request<Page<ExportArtifactRead>>(`/release-candidates/${candidateId}/artifacts?limit=500&offset=0`),
+  createReleaseCandidate: (projectId: string) =>
+    request<ReleaseCandidateRead>(`/projects/${projectId}/release-candidates`, {
+      method: "POST",
+      body: JSON.stringify({ force: false })
+    }),
+  generateReleaseArtifacts: (candidateId: string) =>
+    request<ReleaseCandidateRead>(`/release-candidates/${candidateId}/artifacts`, {
+      method: "POST"
+    }),
+  finalizeRelease: (candidateId: string) =>
+    request<ReleaseArchiveRead>(`/release-candidates/${candidateId}/finalize`, {
+      method: "POST",
+      body: JSON.stringify({ confirm: true })
+    }),
   parsers: (projectId: string) =>
     request<ParserCapability[]>(`/projects/${projectId}/parsers`),
   providers: () => request<ProviderCapability[]>("/model-configurations/providers")
@@ -229,5 +342,8 @@ export function projectSocketUrl(projectId: string, sinceSeq: number): string {
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = `/ws/projects/${projectId}`;
   url.searchParams.set("since_seq", String(sinceSeq));
+  if (DESKTOP_RUNTIME && desktopAccessToken) {
+    url.searchParams.set("token", desktopAccessToken);
+  }
   return url.toString();
 }

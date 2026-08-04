@@ -184,6 +184,23 @@ export type paths = {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/clarifications/{clarification_id}/resolve": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** Resolve a requirement or object ambiguity as a named human decision */
+        readonly post: operations["resolve_clarification_api_clarifications__clarification_id__resolve_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/files/{file_id}": {
         readonly parameters: {
             readonly query?: never;
@@ -389,6 +406,23 @@ export type paths = {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/project-questions/{question_id}/resolve": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** Resolve a project-level question as a named human decision */
+        readonly post: operations["resolve_project_question_api_project_questions__question_id__resolve_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/projects": {
         readonly parameters: {
             readonly query?: never;
@@ -516,6 +550,41 @@ export type paths = {
          *     it already found.
          */
         readonly post: operations["cancel_run_api_projects__project_id__cancel_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/projects/{project_id}/clarifications": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** Questions and ambiguities that need a named human answer */
+        readonly get: operations["list_clarifications_api_projects__project_id__clarifications_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/projects/{project_id}/engineering-profile": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** Canonical engineering profile and exact target platform */
+        readonly get: operations["get_engineering_profile_api_projects__project_id__engineering_profile_get"];
+        /** Record engineering intake before workflow work begins */
+        readonly put: operations["put_engineering_profile_api_projects__project_id__engineering_profile_put"];
+        readonly post?: never;
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -722,6 +791,41 @@ export type paths = {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/projects/{project_id}/release-candidates": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** List release candidates for a project */
+        readonly get: operations["list_release_candidates_api_projects__project_id__release_candidates_get"];
+        readonly put?: never;
+        /** Reserve a release candidate at the current project revision */
+        readonly post: operations["create_release_candidate_api_projects__project_id__release_candidates_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/projects/{project_id}/release-readiness": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** Explain whether the current project revision can produce a release candidate */
+        readonly get: operations["release_readiness_api_projects__project_id__release_readiness_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/projects/{project_id}/reports": {
         readonly parameters: {
             readonly query?: never;
@@ -731,6 +835,23 @@ export type paths = {
         };
         /** Reports generated for a project */
         readonly get: operations["list_reports_api_projects__project_id__reports_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/projects/{project_id}/requirements": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** Canonical requirements and their exact source citations */
+        readonly get: operations["list_requirements_api_projects__project_id__requirements_get"];
         readonly put?: never;
         readonly post?: never;
         readonly delete?: never;
@@ -813,6 +934,75 @@ export type paths = {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/release-candidates/{candidate_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** Read one release candidate and its available actions */
+        readonly get: operations["get_release_candidate_api_release_candidates__candidate_id__get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/release-candidates/{candidate_id}/artifacts": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** List the exact artifact rows in a release candidate */
+        readonly get: operations["list_release_artifacts_api_release_candidates__candidate_id__artifacts_get"];
+        readonly put?: never;
+        /** Generate or regenerate the candidate's verified package artifacts */
+        readonly post: operations["generate_release_artifacts_api_release_candidates__candidate_id__artifacts_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/release-candidates/{candidate_id}/download": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** Download a pre-verified immutable release ZIP */
+        readonly get: operations["download_release_candidate_api_release_candidates__candidate_id__download_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/release-candidates/{candidate_id}/finalize": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** Finalize an approved candidate into an immutable deterministic ZIP */
+        readonly post: operations["finalize_release_candidate_api_release_candidates__candidate_id__finalize_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/reports/{report_id}": {
         readonly parameters: {
             readonly query?: never;
@@ -841,6 +1031,23 @@ export type paths = {
         readonly get: operations["download_report_api_reports__report_id__content_get"];
         readonly put?: never;
         readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/requirements/{requirement_id}/decision": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** Accept or reject an extracted requirement as a named reviewer */
+        readonly post: operations["decide_requirement_api_requirements__requirement_id__decision_post"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -885,6 +1092,26 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
+        /** AcceptanceCriterionRead */
+        readonly AcceptanceCriterionRead: {
+            readonly approval_state: components["schemas"]["ObjectApprovalState"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Is Testable */
+            readonly is_testable: boolean;
+            /** Ordinal */
+            readonly ordinal: number;
+            /** Reference */
+            readonly reference: string;
+            /** Statement */
+            readonly statement: string;
+            readonly status: components["schemas"]["RequirementStatus"];
+            /** Test Notes */
+            readonly test_notes: string;
+        };
         /** AddProjectMemberRequest */
         readonly AddProjectMemberRequest: {
             /** @default engineer */
@@ -1276,6 +1503,16 @@ export type components = {
             /** Decided By Id */
             readonly decided_by_id?: string | null;
             /**
+             * Decision Allowed
+             * @default true
+             */
+            readonly decision_allowed?: boolean;
+            /**
+             * Decision Disabled Reason
+             * @default
+             */
+            readonly decision_disabled_reason?: string;
+            /**
              * Decision Notes
              * @default
              */
@@ -1359,6 +1596,109 @@ export type components = {
              */
             readonly version?: string;
         };
+        /** ClarificationInbox */
+        readonly ClarificationInbox: {
+            /**
+             * Blocking Count
+             * @default 0
+             */
+            readonly blocking_count?: number;
+            /** Clarifications */
+            readonly clarifications?: readonly components["schemas"]["ClarificationRead"][];
+            /** Project Questions */
+            readonly project_questions?: readonly components["schemas"]["ProjectQuestionRead"][];
+        };
+        /** ClarificationRead */
+        readonly ClarificationRead: {
+            /** Ambiguity */
+            readonly ambiguity: string;
+            /** Blocks Generation */
+            readonly blocks_generation: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            readonly created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Object Id */
+            readonly object_id?: string | null;
+            /** Object Type */
+            readonly object_type?: string | null;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            readonly project_id: string;
+            /** Question */
+            readonly question: string;
+            /** Requirement Id */
+            readonly requirement_id?: string | null;
+            /** Resolution */
+            readonly resolution: string;
+            /** Resolved At */
+            readonly resolved_at?: string | null;
+            /** Resolved By Id */
+            readonly resolved_by_id?: string | null;
+            readonly status: components["schemas"]["ClarificationStatus"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            readonly updated_at: string;
+        };
+        /** ClarificationResolutionRead */
+        readonly ClarificationResolutionRead: {
+            /**
+             * Answered At
+             * Format: date-time
+             */
+            readonly answered_at: string;
+            /**
+             * Answered By Id
+             * Format: uuid
+             */
+            readonly answered_by_id: string;
+            /**
+             * Decision Id
+             * Format: uuid
+             */
+            readonly decision_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            readonly kind: "project_question" | "clarification";
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            readonly project_id: string;
+            readonly status: components["schemas"]["ClarificationStatus"];
+            /**
+             * Unblocked Task Count
+             * @default 0
+             */
+            readonly unblocked_task_count?: number;
+        };
+        /**
+         * ClarificationStatus
+         * @enum {string}
+         */
+        readonly ClarificationStatus: "open" | "answered" | "deferred" | "dismissed" | "obsolete";
+        /**
+         * ControllerFamily
+         * @enum {string}
+         */
+        readonly ControllerFamily: "compactlogix" | "controllogix" | "guardlogix" | "compact_guardlogix" | "micro800" | "slc500" | "plc5" | "other";
         /** CreateFindingCommentRequest */
         readonly CreateFindingCommentRequest: {
             /** Body */
@@ -1380,8 +1720,20 @@ export type components = {
              * @default
              */
             readonly description?: string;
+            readonly engineering_profile?: components["schemas"]["EngineeringProfileInput"] | null;
             /** Name */
             readonly name: string;
+        };
+        /** CreateReleaseCandidateRequest */
+        readonly CreateReleaseCandidateRequest: {
+            /** Export Profile Id */
+            readonly export_profile_id?: string | null;
+            /**
+             * Force
+             * @description Record explicit permission to continue if this candidate later becomes stale.
+             * @default false
+             */
+            readonly force?: boolean;
         };
         /**
          * CreateUserRequest
@@ -1415,6 +1767,120 @@ export type components = {
          * @enum {string}
          */
         readonly DocumentRole: "control_logic" | "interlock_schedule" | "io_list" | "functional_description" | "testing_notes" | "hmi_export" | "alarm_list" | "other" | "unclassified";
+        /** EngineeringProfileInput */
+        readonly EngineeringProfileInput: {
+            /**
+             * Customer Label
+             * @default
+             */
+            readonly customer_label?: string;
+            /**
+             * Locale
+             * @default en-US
+             */
+            readonly locale?: string;
+            /**
+             * Network Architecture
+             * @default
+             */
+            readonly network_architecture?: string;
+            /** Plant Or Site */
+            readonly plant_or_site: string;
+            /** Project Description */
+            readonly project_description: string;
+            /** Project Name */
+            readonly project_name: string;
+            readonly project_type: components["schemas"]["ProjectType"];
+            /** @default import_package_only */
+            readonly release_mode?: components["schemas"]["ReleaseMode"];
+            /** Restricted Domains */
+            readonly restricted_domains?: readonly components["schemas"]["RestrictedDomain"][];
+            readonly standards: components["schemas"]["EngineeringStandardsInput"];
+            readonly target: components["schemas"]["TargetPlatformInput"];
+            /** @default metric */
+            readonly units?: components["schemas"]["UnitSystem"];
+        };
+        /** EngineeringProfileRead */
+        readonly EngineeringProfileRead: {
+            /** Alarm Philosophy Version */
+            readonly alarm_philosophy_version: string;
+            /** Blocks Generation */
+            readonly blocks_generation: boolean;
+            /** Completeness */
+            readonly completeness: {
+                readonly [key: string]: components["schemas"]["ProfileFieldStatus"];
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            readonly created_at: string;
+            /** Customer Label */
+            readonly customer_label: string;
+            /** Engineering Standard Set Id */
+            readonly engineering_standard_set_id?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Is Complete For Generation */
+            readonly is_complete_for_generation: boolean;
+            /** Locale */
+            readonly locale: string;
+            /** Missing Required Fields */
+            readonly missing_required_fields?: readonly unknown[];
+            /** Naming Standard Version */
+            readonly naming_standard_version: string;
+            /** Network Architecture */
+            readonly network_architecture: string;
+            /** Plant Or Site */
+            readonly plant_or_site: string;
+            /** Project Description */
+            readonly project_description: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            readonly project_id: string;
+            /** Project Name */
+            readonly project_name: string;
+            readonly project_type: components["schemas"]["ProjectType"];
+            readonly release_mode: components["schemas"]["ReleaseMode"];
+            readonly restricted_domain_mode: components["schemas"]["RestrictedDomainMode"];
+            /** Restricted Domains */
+            readonly restricted_domains?: readonly unknown[];
+            readonly target: components["schemas"]["TargetPlatformRead"];
+            /** Template Set Id */
+            readonly template_set_id?: string | null;
+            readonly units: components["schemas"]["UnitSystem"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            readonly updated_at: string;
+        };
+        /** EngineeringStandardsInput */
+        readonly EngineeringStandardsInput: {
+            /** Alarm Philosophy Version */
+            readonly alarm_philosophy_version: string;
+            /**
+             * Aoi Udt Library
+             * @default
+             */
+            readonly aoi_udt_library?: string;
+            /** Controller Template */
+            readonly controller_template: string;
+            /**
+             * Hmi Library
+             * @default
+             */
+            readonly hmi_library?: string;
+            /** Naming Standard Version */
+            readonly naming_standard_version: string;
+            /** Test Template Set */
+            readonly test_template_set: string;
+        };
         /**
          * EventEnvelope
          * @description One entry in a project's ordered event stream.
@@ -1520,6 +1986,71 @@ export type components = {
          * @enum {string}
          */
         readonly EvidenceKind: "direct" | "inference" | "missing_expected" | "parser_warning" | "unsupported_content" | "template_rule" | "human_decision" | "generated_object" | "validation_output";
+        /**
+         * ExportArtifactKind
+         * @enum {string}
+         */
+        readonly ExportArtifactKind: "controller_project_l5x" | "program_l5x" | "routine_l5x" | "udt_l5x" | "aoi_l5x" | "tag_csv" | "comment_csv" | "cross_reference_csv" | "import_order" | "limitations" | "target_profile" | "validation_summary" | "manifest" | "checksums" | "change_log" | "approval_log" | "evidence_index" | "hmi_display_xml" | "hmi_tag_csv" | "alarm_import" | "test_plan" | "report";
+        /** ExportArtifactRead */
+        readonly ExportArtifactRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            readonly created_at: string;
+            /** Filename */
+            readonly filename: string;
+            /**
+             * Generator Name
+             * @default
+             */
+            readonly generator_name?: string;
+            /**
+             * Generator Version
+             * @default
+             */
+            readonly generator_version?: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /**
+             * Import Order
+             * @default 0
+             */
+            readonly import_order?: number;
+            /**
+             * Is Produced By Plugin
+             * @default false
+             */
+            readonly is_produced_by_plugin?: boolean;
+            readonly kind: components["schemas"]["ExportArtifactKind"];
+            /**
+             * Media Type
+             * @default
+             */
+            readonly media_type?: string;
+            /**
+             * Plugin Name
+             * @default
+             */
+            readonly plugin_name?: string;
+            /** Relative Path */
+            readonly relative_path: string;
+            /**
+             * Release Candidate Id
+             * Format: uuid
+             */
+            readonly release_candidate_id: string;
+            /** Sha256 */
+            readonly sha256: string;
+            /** Size Bytes */
+            readonly size_bytes: number;
+            readonly validation_level: components["schemas"]["ValidationLevel"];
+            /** Warnings */
+            readonly warnings?: readonly unknown[];
+        };
         /** FileDetail */
         readonly FileDetail: {
             /**
@@ -1608,6 +2139,15 @@ export type components = {
          * @enum {string}
          */
         readonly FileStatus: "uploaded" | "parsing" | "parsed" | "parse_failed" | "rejected" | "deleted";
+        /** FinalizeReleaseRequest */
+        readonly FinalizeReleaseRequest: {
+            /**
+             * Confirm
+             * @description Explicit acknowledgement that finalization creates immutable delivery bytes.
+             * @constant
+             */
+            readonly confirm: true;
+        };
         /**
          * FindingCategory
          * @description What kind of engineering concern a finding describes.
@@ -1911,11 +2451,21 @@ export type components = {
             /** Version */
             readonly version: string;
         };
+        /**
+         * HmiProduct
+         * @enum {string}
+         */
+        readonly HmiProduct: "factorytalk_view_me" | "factorytalk_view_se" | "factorytalk_optix" | "panelview_800" | "none" | "other";
         /** HTTPValidationError */
         readonly HTTPValidationError: {
             /** Detail */
             readonly detail?: readonly components["schemas"]["ValidationError"][];
         };
+        /**
+         * ImportVerificationStatus
+         * @enum {string}
+         */
+        readonly ImportVerificationStatus: "not_attempted" | "unavailable" | "queued" | "running" | "passed" | "failed" | "error";
         /** LoginRequest */
         readonly LoginRequest: {
             /**
@@ -1987,6 +2537,16 @@ export type components = {
             readonly temperature?: number;
         };
         /**
+         * ObjectApprovalState
+         * @description How settled a canonical object is.
+         *
+         *     ``APPROVED`` is what makes an object protected: changing it afterwards
+         *     requires an explicit supersede path and a fresh approval, so an agent
+         *     cannot quietly edit something an engineer signed off.
+         * @enum {string}
+         */
+        readonly ObjectApprovalState: "draft" | "proposed" | "approved" | "rejected" | "superseded";
+        /**
          * OkResponse
          * @description Acknowledgement for operations with no meaningful body.
          */
@@ -2001,6 +2561,20 @@ export type components = {
              * @default true
              */
             readonly ok?: boolean;
+        };
+        /** Page[ExportArtifactRead] */
+        readonly Page_ExportArtifactRead_: {
+            /** Items */
+            readonly items: readonly components["schemas"]["ExportArtifactRead"][];
+            /** Limit */
+            readonly limit: number;
+            /** Offset */
+            readonly offset: number;
+            /**
+             * Total
+             * @description Total matching rows, ignoring limit/offset.
+             */
+            readonly total: number;
         };
         /** Page[FindingRead] */
         readonly Page_FindingRead_: {
@@ -2020,6 +2594,20 @@ export type components = {
         readonly Page_ProjectRead_: {
             /** Items */
             readonly items: readonly components["schemas"]["ProjectRead"][];
+            /** Limit */
+            readonly limit: number;
+            /** Offset */
+            readonly offset: number;
+            /**
+             * Total
+             * @description Total matching rows, ignoring limit/offset.
+             */
+            readonly total: number;
+        };
+        /** Page[ReleaseCandidateRead] */
+        readonly Page_ReleaseCandidateRead_: {
+            /** Items */
+            readonly items: readonly components["schemas"]["ReleaseCandidateRead"][];
             /** Limit */
             readonly limit: number;
             /** Offset */
@@ -2067,6 +2655,12 @@ export type components = {
             /** Warnings */
             readonly warnings?: readonly unknown[];
         };
+        /**
+         * ProfileFieldStatus
+         * @description Why a required profile field is not usable yet.
+         * @enum {string}
+         */
+        readonly ProfileFieldStatus: "present" | "missing" | "ambiguous" | "unsupported";
         /**
          * ProjectCounts
          * @description Cheap roll-ups so the city view does not have to fetch every collection.
@@ -2194,6 +2788,53 @@ export type components = {
              */
             readonly user_id: string;
         };
+        /** ProjectQuestionRead */
+        readonly ProjectQuestionRead: {
+            /** Answer */
+            readonly answer: string;
+            /** Answered At */
+            readonly answered_at?: string | null;
+            /** Answered By Id */
+            readonly answered_by_id?: string | null;
+            /** Asked By Agent */
+            readonly asked_by_agent: string;
+            /** Blocks Task Kinds */
+            readonly blocks_task_kinds?: readonly unknown[];
+            readonly category: components["schemas"]["QuestionCategory"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            readonly created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Is Blocking */
+            readonly is_blocking: boolean;
+            /** Is Mandatory */
+            readonly is_mandatory: boolean;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            readonly project_id: string;
+            /** Question */
+            readonly question: string;
+            /** Raised In Task Id */
+            readonly raised_in_task_id?: string | null;
+            /** Reference */
+            readonly reference: string;
+            readonly status: components["schemas"]["ClarificationStatus"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            readonly updated_at: string;
+            /** Why It Matters */
+            readonly why_it_matters: string;
+        };
         /** ProjectRead */
         readonly ProjectRead: {
             /** Archived At */
@@ -2270,6 +2911,17 @@ export type components = {
          * @enum {string}
          */
         readonly ProjectStatus: "draft" | "ingesting" | "planned" | "running" | "awaiting_review" | "completed" | "failed" | "archived" | "clarification_required" | "tag_and_io_design" | "plc_architecture" | "implementation" | "cross_discipline_review" | "test_development" | "release_validation" | "ready_for_export" | "blocked";
+        /**
+         * ProjectType
+         * @enum {string}
+         */
+        readonly ProjectType: "new_installation" | "upgrade" | "retrofit" | "migration" | "expansion" | "other";
+        /**
+         * QuestionCategory
+         * @description What a clarification is about. Drives who should answer it.
+         * @enum {string}
+         */
+        readonly QuestionCategory: "target_platform" | "requirement_ambiguity" | "scope" | "device_or_equipment" | "io_assignment" | "tag_naming" | "interlock" | "sequence_or_mode" | "alarm" | "hmi" | "testing" | "template_selection" | "restricted_domain" | "other";
         /** RecommendationRead */
         readonly RecommendationRead: {
             /**
@@ -2342,6 +2994,252 @@ export type components = {
          * @enum {string}
          */
         readonly RecommendationStatus: "proposed" | "approved" | "rejected" | "superseded";
+        /** ReleaseActionRead */
+        readonly ReleaseActionRead: {
+            /** Available */
+            readonly available: boolean;
+            /** Path */
+            readonly path: string;
+            /**
+             * Reason
+             * @default
+             */
+            readonly reason?: string;
+        };
+        /** ReleaseActionsRead */
+        readonly ReleaseActionsRead: {
+            readonly download: components["schemas"]["ReleaseActionRead"];
+            readonly finalize: components["schemas"]["ReleaseActionRead"];
+            readonly generate: components["schemas"]["ReleaseActionRead"];
+        };
+        /** ReleaseArchiveRead */
+        readonly ReleaseArchiveRead: {
+            /** Approved By Display Name */
+            readonly approved_by_display_name: string;
+            /** Approved By Id */
+            readonly approved_by_id?: string | null;
+            /** Checksum File Sha256 */
+            readonly checksum_file_sha256: string;
+            /**
+             * Download Path
+             * @default
+             */
+            readonly download_path?: string;
+            /** File Count */
+            readonly file_count: number;
+            /** Filename */
+            readonly filename: string;
+            /**
+             * Finalized At
+             * Format: date-time
+             */
+            readonly finalized_at: string;
+            /** Finalized By Id */
+            readonly finalized_by_id?: string | null;
+            /**
+             * Frozen At
+             * Format: date-time
+             */
+            readonly frozen_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /**
+             * Import Verification Detail
+             * @default
+             */
+            readonly import_verification_detail?: string;
+            readonly import_verification_status: components["schemas"]["ImportVerificationStatus"];
+            /** Manifest Sha256 */
+            readonly manifest_sha256: string;
+            /** Media Type */
+            readonly media_type: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            readonly project_id: string;
+            /** Relative Path */
+            readonly relative_path: string;
+            /**
+             * Release Candidate Id
+             * Format: uuid
+             */
+            readonly release_candidate_id: string;
+            /**
+             * Release Manifest Id
+             * Format: uuid
+             */
+            readonly release_manifest_id: string;
+            /** Rockwell Import Verified */
+            readonly rockwell_import_verified: boolean;
+            /** Sha256 */
+            readonly sha256: string;
+            /** Size Bytes */
+            readonly size_bytes: number;
+            /** Source Revision */
+            readonly source_revision: number;
+            readonly validation_level: components["schemas"]["ValidationLevel"];
+        };
+        /** ReleaseBlockRead */
+        readonly ReleaseBlockRead: {
+            /** Code */
+            readonly code: string;
+            /** Detail */
+            readonly detail: string;
+            /** Summary */
+            readonly summary: string;
+        };
+        /** ReleaseCandidateRead */
+        readonly ReleaseCandidateRead: {
+            readonly actions: components["schemas"]["ReleaseActionsRead"];
+            readonly approval_state: components["schemas"]["ObjectApprovalState"];
+            /** Approved At */
+            readonly approved_at?: string | null;
+            /** Approved By Id */
+            readonly approved_by_id?: string | null;
+            readonly archive?: components["schemas"]["ReleaseArchiveRead"] | null;
+            /**
+             * Artifact Count
+             * @default 0
+             */
+            readonly artifact_count?: number;
+            /** Candidate Number */
+            readonly candidate_number: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            readonly created_at: string;
+            /** Export Profile Id */
+            readonly export_profile_id?: string | null;
+            /**
+             * Generator Version
+             * @default
+             */
+            readonly generator_version?: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /**
+             * Import Verification Detail
+             * @default
+             */
+            readonly import_verification_detail?: string;
+            readonly import_verification_status: components["schemas"]["ImportVerificationStatus"];
+            /** Limitations */
+            readonly limitations?: readonly unknown[];
+            readonly manifest?: components["schemas"]["ReleaseManifestRead"] | null;
+            /** Name */
+            readonly name: string;
+            /**
+             * Package Bytes
+             * @default 0
+             */
+            readonly package_bytes?: number;
+            /**
+             * Package Path
+             * @default
+             */
+            readonly package_path?: string;
+            /**
+             * Package Sha256
+             * @default
+             */
+            readonly package_sha256?: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            readonly project_id: string;
+            /** Released At */
+            readonly released_at?: string | null;
+            /** Revision Number */
+            readonly revision_number: number;
+            readonly status: components["schemas"]["ReleaseCandidateStatus"];
+            /** Unsupported Items */
+            readonly unsupported_items?: readonly unknown[];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            readonly updated_at: string;
+            readonly validation_level: components["schemas"]["ValidationLevel"];
+            /** Validation Run Id */
+            readonly validation_run_id?: string | null;
+        };
+        /**
+         * ReleaseCandidateStatus
+         * @enum {string}
+         */
+        readonly ReleaseCandidateStatus: "draft" | "generating" | "generated" | "validation_failed" | "awaiting_approval" | "approved" | "released" | "superseded" | "failed";
+        /** ReleaseManifestRead */
+        readonly ReleaseManifestRead: {
+            /** Approval Summary */
+            readonly approval_summary?: {
+                readonly [key: string]: unknown;
+            };
+            /** Approved By Id */
+            readonly approved_by_id?: string | null;
+            /** Artifact Count */
+            readonly artifact_count: number;
+            /** Checksum File Sha256 */
+            readonly checksum_file_sha256: string;
+            /** Content Sha256 */
+            readonly content_sha256: string;
+            /** Evidence Index Sha256 */
+            readonly evidence_index_sha256: string;
+            /** Frozen At */
+            readonly frozen_at?: string | null;
+            /** Frozen By Id */
+            readonly frozen_by_id?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Manifest Version */
+            readonly manifest_version: string;
+            /**
+             * Release Candidate Id
+             * Format: uuid
+             */
+            readonly release_candidate_id: string;
+        };
+        /**
+         * ReleaseMode
+         * @description How far this project intends to take generation.
+         * @enum {string}
+         */
+        readonly ReleaseMode: "import_package_only" | "rockwell_workstation_assembly" | "review_only";
+        /** ReleaseReadinessRead */
+        readonly ReleaseReadinessRead: {
+            /** Blocking */
+            readonly blocking?: readonly components["schemas"]["ReleaseBlockRead"][];
+            readonly highest_attainable_validation_level: components["schemas"]["ValidationLevel"];
+            /**
+             * Import Verification Detail
+             * @default
+             */
+            readonly import_verification_detail?: string;
+            /** Import Verification Possible */
+            readonly import_verification_possible: boolean;
+            /** Is Ready */
+            readonly is_ready: boolean;
+            /** Outstanding Gates */
+            readonly outstanding_gates?: readonly string[];
+            /** Revision Number */
+            readonly revision_number: number;
+            /**
+             * Validation Error Count
+             * @default 0
+             */
+            readonly validation_error_count?: number;
+        };
         /** ReportRead */
         readonly ReportRead: {
             /**
@@ -2417,6 +3315,147 @@ export type components = {
          * @enum {string}
          */
         readonly ReportStatus: "draft" | "generated" | "failed";
+        /** RequirementDecisionRead */
+        readonly RequirementDecisionRead: {
+            /**
+             * Decided At
+             * Format: date-time
+             */
+            readonly decided_at: string;
+            /**
+             * Decided By Id
+             * Format: uuid
+             */
+            readonly decided_by_id: string;
+            /**
+             * Decision Id
+             * Format: uuid
+             */
+            readonly decision_id: string;
+            readonly requirement: components["schemas"]["RequirementRead"];
+            /**
+             * Unblocked Task Count
+             * @default 0
+             */
+            readonly unblocked_task_count?: number;
+        };
+        /** RequirementDecisionRequest */
+        readonly RequirementDecisionRequest: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            readonly decision: "accept" | "reject";
+            /** Rationale */
+            readonly rationale: string;
+        };
+        /**
+         * RequirementKind
+         * @enum {string}
+         */
+        readonly RequirementKind: "functional" | "performance" | "safety" | "interface" | "operational" | "regulatory" | "constraint" | "other";
+        /**
+         * RequirementPriority
+         * @enum {string}
+         */
+        readonly RequirementPriority: "mandatory" | "expected" | "optional";
+        /** RequirementRead */
+        readonly RequirementRead: {
+            /** Acceptance Criteria */
+            readonly acceptance_criteria?: readonly components["schemas"]["AcceptanceCriterionRead"][];
+            readonly approval_state: components["schemas"]["ObjectApprovalState"];
+            /** Confidence */
+            readonly confidence: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            readonly created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Is Inferred */
+            readonly is_inferred: boolean;
+            readonly kind: components["schemas"]["RequirementKind"];
+            readonly priority: components["schemas"]["RequirementPriority"];
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            readonly project_id: string;
+            /** Rationale */
+            readonly rationale: string;
+            /** Reference */
+            readonly reference: string;
+            /** Source Text */
+            readonly source_text: string;
+            /** Sources */
+            readonly sources?: readonly components["schemas"]["RequirementSourceRead"][];
+            /** Statement */
+            readonly statement: string;
+            readonly status: components["schemas"]["RequirementStatus"];
+            /** Title */
+            readonly title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            readonly updated_at: string;
+            /** Verification Method */
+            readonly verification_method: string;
+        };
+        /** RequirementSourceRead */
+        readonly RequirementSourceRead: {
+            /** Anchor Id */
+            readonly anchor_id?: string | null;
+            /** File Id */
+            readonly file_id?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Is Primary */
+            readonly is_primary: boolean;
+            /** Location Label */
+            readonly location_label: string;
+            /** Quoted Text */
+            readonly quoted_text: string;
+        };
+        /**
+         * RequirementStatus
+         * @enum {string}
+         */
+        readonly RequirementStatus: "proposed" | "accepted" | "rejected" | "superseded" | "implemented" | "verified";
+        /** ResolveClarificationRequest */
+        readonly ResolveClarificationRequest: {
+            /** Answer */
+            readonly answer: string;
+            /**
+             * Resolution
+             * @default answered
+             * @enum {string}
+             */
+            readonly resolution?: "answered" | "dismissed";
+        };
+        /**
+         * RestrictedDomain
+         * @description Engineering domains this platform will not generate for by default.
+         *
+         *     Each is a domain where a plausible-looking generated artifact could cause
+         *     injury or major equipment damage, and where the competence to review it is
+         *     a formal qualification rather than general controls experience.
+         * @enum {string}
+         */
+        readonly RestrictedDomain: "motion" | "safety_logic" | "burner_management" | "process_safety" | "high_energy" | "electrical_power_distribution" | "robotics";
+        /**
+         * RestrictedDomainMode
+         * @description What the platform is permitted to do in a restricted domain.
+         * @enum {string}
+         */
+        readonly RestrictedDomainMode: "blocked" | "manual_review_only" | "qualified_workflow_enabled";
         /**
          * RoleName
          * @description Global (system-wide) role assigned to a :class:`~app.models.user.User`.
@@ -2451,6 +3490,15 @@ export type components = {
             readonly tasks?: readonly components["schemas"]["TaskRead"][];
         };
         /**
+         * SafetyClassification
+         * @description How a controller is classified for safety purposes.
+         *
+         *     Anything other than ``STANDARD`` puts the project into manual-review-only
+         *     mode unless an administrator has enabled a qualified workflow.
+         * @enum {string}
+         */
+        readonly SafetyClassification: "standard" | "safety_rated" | "mixed_standard_and_safety" | "unknown";
+        /**
          * StartRunRequest
          * @description Starts a workflow run over the project's current files.
          */
@@ -2467,6 +3515,78 @@ export type components = {
              * @default
              */
             readonly note?: string;
+        };
+        /** TargetPlatformInput */
+        readonly TargetPlatformInput: {
+            /** Controller Catalog Number */
+            readonly controller_catalog_number: string;
+            readonly controller_family: components["schemas"]["ControllerFamily"];
+            /**
+             * Factorytalk Architecture
+             * @default
+             */
+            readonly factorytalk_architecture?: string;
+            /** Firmware Revision */
+            readonly firmware_revision: string;
+            /** @default none */
+            readonly hmi_product?: components["schemas"]["HmiProduct"];
+            /**
+             * Hmi Resolution
+             * @default
+             */
+            readonly hmi_resolution?: string;
+            /**
+             * Hmi Terminal Model
+             * @default
+             */
+            readonly hmi_terminal_model?: string;
+            /**
+             * Hmi Version
+             * @default
+             */
+            readonly hmi_version?: string;
+            /** Known Limitations */
+            readonly known_limitations?: readonly unknown[];
+            /** @default unknown */
+            readonly safety_classification?: components["schemas"]["SafetyClassification"];
+            /** Studio 5000 Version */
+            readonly studio_5000_version: string;
+            /**
+             * Supported Instruction Set Key
+             * @default
+             */
+            readonly supported_instruction_set_key?: string;
+        };
+        /** TargetPlatformRead */
+        readonly TargetPlatformRead: {
+            /** Controller Catalog Number */
+            readonly controller_catalog_number: string;
+            readonly controller_family: components["schemas"]["ControllerFamily"];
+            /** Factorytalk Architecture */
+            readonly factorytalk_architecture: string;
+            /** Firmware Revision */
+            readonly firmware_revision: string;
+            readonly hmi_product: components["schemas"]["HmiProduct"];
+            /** Hmi Resolution Height */
+            readonly hmi_resolution_height: number;
+            /** Hmi Resolution Width */
+            readonly hmi_resolution_width: number;
+            /** Hmi Terminal Model */
+            readonly hmi_terminal_model: string;
+            /** Hmi Version */
+            readonly hmi_version: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Known Limitations */
+            readonly known_limitations?: readonly unknown[];
+            readonly safety_classification: components["schemas"]["SafetyClassification"];
+            /** Studio 5000 Version */
+            readonly studio_5000_version: string;
+            /** Supported Instruction Set Key */
+            readonly supported_instruction_set_key: string;
         };
         /** TaskDetail */
         readonly TaskDetail: {
@@ -2639,6 +3759,11 @@ export type components = {
          * @enum {string}
          */
         readonly TaskStatus: "queued" | "running" | "blocked" | "awaiting_approval" | "completed" | "failed" | "cancelled";
+        /**
+         * UnitSystem
+         * @enum {string}
+         */
+        readonly UnitSystem: "metric" | "imperial" | "mixed";
         /**
          * UpdateFindingRequest
          * @description Human disposition of a finding.
@@ -2834,6 +3959,17 @@ export type components = {
             /** Error Type */
             readonly type: string;
         };
+        /**
+         * ValidationLevel
+         * @description How far an artifact has actually been proved.
+         *
+         *     Strictly ordered, and never collapsed to a boolean. Everything this backend
+         *     can do offline stops at ``ROUND_TRIP_PARSED``: we can prove our own output
+         *     parses back into the same model, which is not the same as proving Studio
+         *     5000 will import it.
+         * @enum {string}
+         */
+        readonly ValidationLevel: "generated" | "schema_validated" | "internal_semantic_validated" | "round_trip_parsed" | "rockwell_import_verified" | "human_approved" | "released";
         /** WorkflowControlRequest */
         readonly WorkflowControlRequest: {
             /**
@@ -3152,6 +4288,41 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["UserSummary"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly resolve_clarification_api_clarifications__clarification_id__resolve_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly clarification_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ResolveClarificationRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ClarificationResolutionRead"];
                 };
             };
             /** @description Validation Error */
@@ -3538,6 +4709,41 @@ export interface operations {
             };
         };
     };
+    readonly resolve_project_question_api_project_questions__question_id__resolve_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly question_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ResolveClarificationRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ClarificationResolutionRead"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     readonly list_projects_api_projects_get: {
         readonly parameters: {
             readonly query?: {
@@ -3824,6 +5030,103 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["WorkflowStateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly list_clarifications_api_projects__project_id__clarifications_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly project_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ClarificationInbox"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly get_engineering_profile_api_projects__project_id__engineering_profile_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly project_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["EngineeringProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly put_engineering_profile_api_projects__project_id__engineering_profile_put: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly project_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["EngineeringProfileInput"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["EngineeringProfileRead"];
                 };
             };
             /** @description Validation Error */
@@ -4211,6 +5514,106 @@ export interface operations {
             };
         };
     };
+    readonly list_release_candidates_api_projects__project_id__release_candidates_get: {
+        readonly parameters: {
+            readonly query?: {
+                readonly limit?: number;
+                readonly offset?: number;
+            };
+            readonly header?: never;
+            readonly path: {
+                readonly project_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["Page_ReleaseCandidateRead_"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly create_release_candidate_api_projects__project_id__release_candidates_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly project_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["CreateReleaseCandidateRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ReleaseCandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly release_readiness_api_projects__project_id__release_readiness_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly project_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ReleaseReadinessRead"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     readonly list_reports_api_projects__project_id__reports_get: {
         readonly parameters: {
             readonly query?: never;
@@ -4229,6 +5632,37 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": readonly components["schemas"]["ReportRead"][];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly list_requirements_api_projects__project_id__requirements_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly project_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": readonly components["schemas"]["RequirementRead"][];
                 };
             };
             /** @description Validation Error */
@@ -4377,6 +5811,166 @@ export interface operations {
             };
         };
     };
+    readonly get_release_candidate_api_release_candidates__candidate_id__get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly candidate_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ReleaseCandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly list_release_artifacts_api_release_candidates__candidate_id__artifacts_get: {
+        readonly parameters: {
+            readonly query?: {
+                readonly limit?: number;
+                readonly offset?: number;
+            };
+            readonly header?: never;
+            readonly path: {
+                readonly candidate_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["Page_ExportArtifactRead_"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly generate_release_artifacts_api_release_candidates__candidate_id__artifacts_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly candidate_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ReleaseCandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly download_release_candidate_api_release_candidates__candidate_id__download_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly candidate_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly finalize_release_candidate_api_release_candidates__candidate_id__finalize_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly candidate_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["FinalizeReleaseRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ReleaseArchiveRead"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     readonly get_report_api_reports__report_id__get: {
         readonly parameters: {
             readonly query?: never;
@@ -4425,6 +6019,43 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly decide_requirement_api_requirements__requirement_id__decision_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: {
+                readonly "User-Agent"?: string | null;
+            };
+            readonly path: {
+                readonly requirement_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["RequirementDecisionRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["RequirementDecisionRead"];
+                };
             };
             /** @description Validation Error */
             readonly 422: {

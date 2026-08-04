@@ -19,7 +19,7 @@ describe("product configuration", () => {
 
   it("exposes the pinned product and backend contract versions", () => {
     expect(PRODUCT_VERSION).toBe("0.1.0");
-    expect(CONTRACT_VERSION).toBe("1.0.0");
+    expect(CONTRACT_VERSION).toBe("1.1.0");
   });
 
   it("uses the safe feature-flag defaults", () => {

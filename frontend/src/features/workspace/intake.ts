@@ -36,6 +36,16 @@ export const RESTRICTED_DOMAINS = [
   { value: "robotics", label: "Robotics" }
 ] as const;
 
+export const QUICK_INTAKE_DEFAULTS = {
+  plantSite: "Not specified",
+  description: "Autonomous engineering review of uploaded project source files.",
+  projectType: "other",
+  namingStandard: "ESCO default naming standard",
+  alarmPhilosophy: "ESCO default alarm philosophy",
+  controllerTemplate: "ESCO default controller template",
+  testTemplateSet: "ESCO default engineering test templates"
+} as const;
+
 const SUPPORTED_EXTENSIONS = new Set([
   ".l5x",
   ".xlsx",
@@ -67,27 +77,30 @@ export function createEmptyIntakeDraft(): IntakeDraft {
       customerLabel: "",
       plantSite: "",
       description: "",
-      projectType: ""
+      projectType: QUICK_INTAKE_DEFAULTS.projectType,
+      units: "metric",
+      locale: "en-US"
     },
     target: {
       controllerFamily: "",
       catalogNumber: "",
       firmware: "",
       studio5000Version: "",
-      hmiProduct: "",
+      safetyClassification: "unknown",
+      hmiProduct: "none",
       hmiVersion: "",
       terminalModel: "",
       resolution: "",
-      releaseMode: "review_candidate",
+      releaseMode: "import_package_only",
       restrictedDomains: []
     },
     standards: {
-      namingStandard: "",
-      alarmPhilosophy: "",
-      controllerTemplate: "",
+      namingStandard: QUICK_INTAKE_DEFAULTS.namingStandard,
+      alarmPhilosophy: QUICK_INTAKE_DEFAULTS.alarmPhilosophy,
+      controllerTemplate: QUICK_INTAKE_DEFAULTS.controllerTemplate,
       aoiUdtLibrary: "",
       hmiLibrary: "",
-      testTemplateSet: ""
+      testTemplateSet: QUICK_INTAKE_DEFAULTS.testTemplateSet
     },
     files: [],
     safetyAcknowledged: false,
@@ -146,31 +159,34 @@ export function restoreIntakeDraft(raw: string | null): IntakeDraft {
         customerLabel: stringField(identity, "customerLabel"),
         plantSite: stringField(identity, "plantSite"),
         description: stringField(identity, "description"),
-        projectType: stringField(identity, "projectType")
+        projectType: stringField(identity, "projectType") || QUICK_INTAKE_DEFAULTS.projectType,
+        units: stringField(identity, "units") || "metric",
+        locale: stringField(identity, "locale") || "en-US"
       },
       target: {
         controllerFamily: stringField(target, "controllerFamily"),
         catalogNumber: stringField(target, "catalogNumber"),
         firmware: stringField(target, "firmware"),
         studio5000Version: stringField(target, "studio5000Version"),
-        hmiProduct: stringField(target, "hmiProduct"),
+        safetyClassification: stringField(target, "safetyClassification") || "unknown",
+        hmiProduct: stringField(target, "hmiProduct") || "none",
         hmiVersion: stringField(target, "hmiVersion"),
         terminalModel: stringField(target, "terminalModel"),
         resolution: stringField(target, "resolution"),
-        releaseMode: stringField(target, "releaseMode") || "review_candidate",
+        releaseMode: stringField(target, "releaseMode") || "import_package_only",
         restrictedDomains: stringList(target, "restrictedDomains")
       },
       standards: {
-        namingStandard: stringField(standards, "namingStandard"),
-        alarmPhilosophy: stringField(standards, "alarmPhilosophy"),
-        controllerTemplate: stringField(standards, "controllerTemplate"),
+        namingStandard: stringField(standards, "namingStandard") || QUICK_INTAKE_DEFAULTS.namingStandard,
+        alarmPhilosophy: stringField(standards, "alarmPhilosophy") || QUICK_INTAKE_DEFAULTS.alarmPhilosophy,
+        controllerTemplate: stringField(standards, "controllerTemplate") || QUICK_INTAKE_DEFAULTS.controllerTemplate,
         aoiUdtLibrary: stringField(standards, "aoiUdtLibrary"),
         hmiLibrary: stringField(standards, "hmiLibrary"),
-        testTemplateSet: stringField(standards, "testTemplateSet")
+        testTemplateSet: stringField(standards, "testTemplateSet") || QUICK_INTAKE_DEFAULTS.testTemplateSet
       },
       files: restoredFiles(parsed.files),
       safetyAcknowledged: parsed.safetyAcknowledged === true,
-      analysisConfirmed: false
+      analysisConfirmed: parsed.safetyAcknowledged === true
     };
   } catch {
     return createEmptyIntakeDraft();
@@ -204,33 +220,26 @@ function requireField(
 export function validateIntakeDraft(draft: IntakeDraft): IntakeValidationIssue[] {
   const issues: IntakeValidationIssue[] = [];
   requireField(issues, 1, "identity.name", draft.identity.name, "Project name");
-  requireField(issues, 1, "identity.customerLabel", draft.identity.customerLabel, "Customer or internal label");
-  requireField(issues, 1, "identity.plantSite", draft.identity.plantSite, "Plant or site");
-  requireField(issues, 1, "identity.description", draft.identity.description, "Original project description");
   requireField(issues, 1, "identity.projectType", draft.identity.projectType, "Project type");
+  requireField(issues, 1, "identity.units", draft.identity.units, "Unit system");
+  requireField(issues, 1, "identity.locale", draft.identity.locale, "Locale");
 
   requireField(issues, 2, "target.controllerFamily", draft.target.controllerFamily, "Controller family");
   requireField(issues, 2, "target.catalogNumber", draft.target.catalogNumber, "Controller catalog number");
   requireField(issues, 2, "target.firmware", draft.target.firmware, "Firmware version");
   requireField(issues, 2, "target.studio5000Version", draft.target.studio5000Version, "Studio 5000 version");
+  requireField(issues, 2, "target.safetyClassification", draft.target.safetyClassification, "Safety classification");
   requireField(issues, 2, "target.releaseMode", draft.target.releaseMode, "Release mode");
-  if (draft.target.hmiProduct.trim()) {
+  if (draft.target.hmiProduct !== "none") {
     requireField(issues, 2, "target.hmiVersion", draft.target.hmiVersion, "HMI version");
     requireField(issues, 2, "target.terminalModel", draft.target.terminalModel, "HMI terminal or model");
     requireField(issues, 2, "target.resolution", draft.target.resolution, "HMI resolution");
   }
 
   requireField(issues, 3, "standards.namingStandard", draft.standards.namingStandard, "Naming standard");
+  requireField(issues, 3, "standards.alarmPhilosophy", draft.standards.alarmPhilosophy, "Alarm philosophy");
   requireField(issues, 3, "standards.controllerTemplate", draft.standards.controllerTemplate, "Controller template");
   requireField(issues, 3, "standards.testTemplateSet", draft.standards.testTemplateSet, "Test template set");
-  if (!draft.standards.alarmPhilosophy.trim()) {
-    issues.push({
-      step: 3,
-      field: "standards.alarmPhilosophy",
-      message: "No alarm philosophy selected; alarm engineering must remain blocked.",
-      severity: "warning"
-    });
-  }
 
   if (draft.files.length === 0) {
     issues.push({
@@ -264,15 +273,34 @@ export function validateIntakeDraft(draft: IntakeDraft): IntakeValidationIssue[]
       severity: "error"
     });
   }
-  if (!draft.analysisConfirmed) {
-    issues.push({
-      step: 5,
-      field: "analysisConfirmed",
-      message: "Confirm the reviewed inputs before analysis begins.",
-      severity: "error"
-    });
-  }
   return issues;
+}
+
+/**
+ * Fill contract-required fields that are intentionally optional in quick intake.
+ * Explicit user values always win; these defaults remain visible in Advanced
+ * settings so an engineer can replace them before launch.
+ */
+export function prepareIntakeSubmissionDraft(draft: IntakeDraft): IntakeDraft {
+  return {
+    ...draft,
+    identity: {
+      ...draft.identity,
+      plantSite: draft.identity.plantSite.trim() || QUICK_INTAKE_DEFAULTS.plantSite,
+      description: draft.identity.description.trim() || QUICK_INTAKE_DEFAULTS.description,
+      projectType: draft.identity.projectType || QUICK_INTAKE_DEFAULTS.projectType,
+      units: draft.identity.units || "metric",
+      locale: draft.identity.locale.trim() || "en-US"
+    },
+    standards: {
+      ...draft.standards,
+      namingStandard: draft.standards.namingStandard.trim() || QUICK_INTAKE_DEFAULTS.namingStandard,
+      alarmPhilosophy: draft.standards.alarmPhilosophy.trim() || QUICK_INTAKE_DEFAULTS.alarmPhilosophy,
+      controllerTemplate: draft.standards.controllerTemplate.trim() || QUICK_INTAKE_DEFAULTS.controllerTemplate,
+      testTemplateSet: draft.standards.testTemplateSet.trim() || QUICK_INTAKE_DEFAULTS.testTemplateSet
+    },
+    analysisConfirmed: draft.safetyAcknowledged
+  };
 }
 
 export function issuesForStep(issues: IntakeValidationIssue[], step: number): IntakeValidationIssue[] {
@@ -311,4 +339,3 @@ export function buildProjectIdentityInput(draft: IntakeDraft): {
     client_reference: draft.identity.customerLabel.trim()
   };
 }
-

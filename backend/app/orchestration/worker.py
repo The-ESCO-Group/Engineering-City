@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.agents.base.presence import begin_task_presence, finish_task_presence
 from app.core.config import Settings
 from app.core.enums import EventType, TaskStatus
 from app.core.logging import get_logger, set_request_context
@@ -78,10 +79,12 @@ def run_one(db: Session, task: Task, settings: Settings) -> str:
             f"{upstream.title} ({upstream.status.value})" for upstream in broken[:3]
         )
         queue.fail(task, code="dependency_failed", message=reason, retry=False)
+        finish_task_presence(db, task)
         record_event(
             db,
             project_id=project.id,
             event_type=EventType.TASK_FAILED,
+            agent_id=task.agent_instance_id,
             task_id=task.id,
             payload={
                 "task_id": str(task.id),
@@ -98,10 +101,19 @@ def run_one(db: Session, task: Task, settings: Settings) -> str:
 
     context = handlers.TaskContext(db=db, task=task, project=project, settings=settings)
 
+    # Presence is deliberately committed before the handler begins.  Provider
+    # calls and document parsing can take long enough that keeping this in the
+    # handler transaction would make the city show an idle agent for the whole
+    # task and publish its "working" event only after the work had finished.
+    # ``run_one`` owns a fresh session containing no handler writes yet, so this
+    # commit persists only the claimed task's assignment/presence and starts a
+    # new transaction for the handler's authoritative engineering output.
+    begin_task_presence(db, task, project)
     record_event(
         db,
         project_id=project.id,
         event_type=EventType.TASK_STARTED,
+        agent_id=task.agent_instance_id,
         task_id=task.id,
         payload={
             "task_id": str(task.id),
@@ -112,6 +124,7 @@ def run_one(db: Session, task: Task, settings: Settings) -> str:
             "attempts": task.attempts,
         },
     )
+    db.commit()
 
     started = time.perf_counter()
     try:
@@ -152,10 +165,12 @@ def run_one(db: Session, task: Task, settings: Settings) -> str:
         )
         detail = outcome.reason
 
+    finish_task_presence(db, task)
     record_event(
         db,
         project_id=project.id,
         event_type=event,
+        agent_id=task.agent_instance_id,
         task_id=task.id,
         payload={
             "task_id": str(task.id),

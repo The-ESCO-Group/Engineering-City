@@ -4,6 +4,7 @@ import {
   BookOpen,
   Cable,
   ClipboardCheck,
+  CircleHelp,
   FileInput,
   Files,
   FlaskConical,
@@ -21,6 +22,7 @@ import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { buildWorkspaceModel } from "./adapters";
 import { ApprovalInbox } from "./ApprovalInbox";
 import { ChangeReviewWorkspace } from "./ChangeReviewWorkspace";
+import { ClarificationInbox } from "./ClarificationInbox";
 import { DeliveryCoreWorkspace } from "./DeliveryCoreWorkspace";
 import { FilesWorkspace } from "./FilesWorkspace";
 import { FindingsWorkspace } from "./FindingsWorkspace";
@@ -28,6 +30,7 @@ import { ProjectCoreExplorer } from "./ProjectCoreExplorer";
 import { ProjectIntake } from "./ProjectIntake";
 import { TaskWorkspace } from "./TaskWorkspace";
 import type {
+  IntakeSubmission,
   WorkspaceApprovalDecision,
   WorkspaceOperations,
   WorkspaceSource,
@@ -56,7 +59,8 @@ const NAVIGATION: Array<{ label: string; items: NavigationItem[] }> = [
     items: [
       { id: "intake", label: "Project intake", icon: FileInput },
       { id: "files", label: "Files", icon: Files },
-      { id: "tasks", label: "Tasks", icon: ListChecks }
+      { id: "tasks", label: "Tasks", icon: ListChecks },
+      { id: "clarifications", label: "Clarifications", icon: CircleHelp }
     ]
   },
   {
@@ -134,6 +138,15 @@ export function EngineeringWorkspace({ source, initialView = "requirements", ini
     });
   }
 
+  const submitIntake = effectiveOperations.submitIntake;
+  const submitIntakeAndOpenCity = submitIntake
+    ? async (submission: IntakeSubmission) => {
+        const result = await submitIntake(submission);
+        onReturnToCity?.();
+        return result;
+      }
+    : undefined;
+
   const activeLabel = NAVIGATION.flatMap((group) => group.items).find((item) => item.id === view)?.label ?? humanize(view);
   const pendingApprovals = model.approvals.filter((approval) => approval.status === "pending").length;
   const openFindings = model.findings.filter((finding) => finding.status === "open").length;
@@ -156,7 +169,7 @@ export function EngineeringWorkspace({ source, initialView = "requirements", ini
               <span>{group.label}</span>
               {group.items.map((item) => {
                 const Icon = item.icon;
-                const count = item.id === "tasks" ? model.tasks.length : item.id === "findings" ? openFindings : item.id === "approvals" ? pendingApprovals : null;
+                const count = item.id === "tasks" ? model.tasks.length : item.id === "clarifications" ? source.clarifications?.blocking_count ?? 0 : item.id === "findings" ? openFindings : item.id === "approvals" ? pendingApprovals : null;
                 return <button type="button" key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)} aria-current={view === item.id ? "page" : undefined}><Icon aria-hidden={true} /><span>{item.label}</span>{count !== null && <b>{count}</b>}</button>;
               })}
             </nav>
@@ -164,10 +177,11 @@ export function EngineeringWorkspace({ source, initialView = "requirements", ini
           <p><ShieldAlert aria-hidden="true" />No direct PLC control, online editing, controller mode, forces, or live equipment actions exist in this workspace.</p>
         </aside>
         <div className="eng-workspace-main" id={`workspace-${view}`} tabIndex={-1} role="region" aria-label="Engineering workspace content">
-          {view === "intake" && <ProjectIntake mode={model.mode} capability={model.capabilities.intakeSubmission} providerNotice={model.mode === "demo" ? "Synthetic offline provider. No internet or customer system is contacted." : model.mode === "live" ? "Authorized local backend only. The workspace does not silently fall back to cloud services." : model.unavailableReason} onSubmit={effectiveOperations.submitIntake} />}
+          {view === "intake" && <ProjectIntake mode={model.mode} capability={model.capabilities.intakeSubmission} providerNotice={model.mode === "demo" ? "Synthetic offline provider. No internet or customer system is contacted." : model.mode === "live" ? "Authorized local backend only. The workspace does not silently fall back to cloud services." : model.unavailableReason} onSubmit={submitIntakeAndOpenCity} />}
           {view === "files" && <FilesWorkspace files={model.files} onOpenIntake={() => setView("intake")} />}
           {view === "tasks" && <TaskWorkspace tasks={model.tasks} onOpenCityLocation={effectiveOperations.openCityLocation} />}
-          {(view === "requirements" || view === "devices" || view === "tags" || view === "plc") && <ProjectCoreExplorer view={view} initialRecordId={initialRecordId ?? undefined} capability={model.capabilities.projectCore} requirements={model.requirements} devices={model.devices} tags={model.tags} plcPrograms={model.plcPrograms} onExport={effectiveOperations.exportCoreView} />}
+          {view === "clarifications" && <ClarificationInbox inbox={source.clarifications} onResolve={effectiveOperations.resolveClarification} />}
+          {(view === "requirements" || view === "devices" || view === "tags" || view === "plc") && <ProjectCoreExplorer view={view} initialRecordId={initialRecordId ?? undefined} capability={model.capabilities.projectCore} requirements={model.requirements} devices={model.devices} tags={model.tags} plcPrograms={model.plcPrograms} onExport={effectiveOperations.exportCoreView} onDecideRequirement={effectiveOperations.decideRequirement} />}
           {(view === "hmi" || view === "alarms" || view === "tests" || view === "documentation") && <DeliveryCoreWorkspace view={view} capability={model.capabilities.deliveryCore} hmiScreens={model.hmiScreens} alarms={model.alarms} tests={model.testProcedures} documents={model.documents} tasks={model.tasks} findings={model.findings} onOpenReleaseCenter={effectiveOperations.openReleaseCenter} />}
           {(view === "planning" || view === "changesets" || view === "revisions") && <ChangeReviewWorkspace view={view} plans={model.plans} changesets={model.changesets} revisions={model.revisions} changesetCapability={model.capabilities.changesetOperations} revisionCapability={model.capabilities.revisionComparison} operations={effectiveOperations} />}
           {view === "findings" && <FindingsWorkspace findings={model.findings} initialFindingId={initialRecordId ?? undefined} initialEvidenceId={initialEvidenceId ?? undefined} capability={model.capabilities.findingEvidence} loadFindingDetail={effectiveOperations.loadFindingDetail} onOpenChangeset={() => setView("changesets")} onOpenApprovals={() => setView("approvals")} />}

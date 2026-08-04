@@ -14,6 +14,8 @@ function liveData() {
     tasks: [],
     findings: [],
     approvals: [],
+    clarifications: null,
+    requirements: [],
     events: [],
     refresh: vi.fn(async () => undefined),
     selectProject: vi.fn()
@@ -88,24 +90,24 @@ describe("workspace live integration", () => {
     const upload = vi.spyOn(engineeringApi, "uploadFiles").mockResolvedValue({ project_id: project.id, accepted_count: 1, rejected_count: 0, results: [{ accepted: true, original_filename: "source.zip", file: storedFile, extracted: [extractedFile], rejection_code: "", rejection_reason: "" }] });
     const startRun = vi.spyOn(engineeringApi, "startRun").mockResolvedValue({ run_id: "run-1", project_id: project.id, status: "running", started_at: "2026-07-31T10:02:00Z", task_count: 0, tasks: [] });
     const draft = createEmptyIntakeDraft();
-    draft.identity = { name: "Synthetic project", customerLabel: "Internal synthetic", plantSite: "Synthetic site", description: "Synthetic description", projectType: "Review" };
+    draft.identity = { name: "Synthetic project", customerLabel: "Internal synthetic", plantSite: "Synthetic site", description: "Synthetic description", projectType: "upgrade", units: "metric", locale: "en-US" };
     const operations = workspaceOperationsFromEngineering(data);
-    draft.target = { ...draft.target, controllerFamily: "CompactLogix", catalogNumber: "Synthetic catalog", firmware: "35", studio5000Version: "35", releaseMode: "review_candidate", restrictedDomains: ["safety_logic"] };
+    draft.target = { ...draft.target, controllerFamily: "compactlogix", catalogNumber: "Synthetic catalog", firmware: "35", studio5000Version: "35", releaseMode: "import_package_only", restrictedDomains: ["safety_logic"] };
     draft.standards = { ...draft.standards, namingStandard: "ESCO synthetic", alarmPhilosophy: "Synthetic alarms", controllerTemplate: "Synthetic template", testTemplateSet: "Synthetic tests" };
     const result = await operations.submitIntake?.({ draft, files: [{ file: new File(["synthetic"], "source.zip"), documentRole: "control_logic" }] });
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       name: "Synthetic project",
       description: "Synthetic description",
       client_reference: "Internal synthetic",
-      attributes: {
-        esco_product_intake: expect.objectContaining({
-          version: 1,
-          plant_site: "Synthetic site",
-          project_type: "Review",
-          target_profile: expect.objectContaining({ controller_family: "CompactLogix", restricted_domains: ["safety_logic"] }),
-          standards: expect.objectContaining({ naming_standard: "ESCO synthetic", test_template_set: "Synthetic tests" })
-        })
-      }
+      attributes: { intake_ui: { version: 2, safety_acknowledged: false, analysis_confirmed: false } },
+      engineering_profile: expect.objectContaining({
+        project_type: "upgrade",
+        plant_or_site: "Synthetic site",
+        release_mode: "import_package_only",
+        restricted_domains: ["safety_logic"],
+        target: expect.objectContaining({ controller_family: "compactlogix", controller_catalog_number: "Synthetic catalog" }),
+        standards: expect.objectContaining({ naming_standard_version: "ESCO synthetic", test_template_set: "Synthetic tests" })
+      })
     }));
     expect(upload).toHaveBeenCalledWith(project.id, [expect.any(File)], "control_logic");
     expect(startRun).toHaveBeenCalledWith(project.id, ["file-parent", "file-extracted"]);
@@ -133,7 +135,7 @@ describe("workspace live integration", () => {
     vi.spyOn(engineeringApi, "uploadFiles").mockResolvedValue({ project_id: project.id, accepted_count: 0, rejected_count: 1, results: [{ accepted: false, original_filename: "unsafe.exe", file: null, extracted: [], rejection_code: "unsupported", rejection_reason: "Executable files are not accepted." }] });
     const startRun = vi.spyOn(engineeringApi, "startRun");
     const draft = createEmptyIntakeDraft();
-    draft.identity = { name: "Synthetic project", customerLabel: "Internal synthetic", plantSite: "Synthetic site", description: "Synthetic description", projectType: "Review" };
+    draft.identity = { name: "Synthetic project", customerLabel: "Internal synthetic", plantSite: "Synthetic site", description: "Synthetic description", projectType: "upgrade", units: "metric", locale: "en-US" };
     const operations = workspaceOperationsFromEngineering(data);
     await expect(operations.submitIntake?.({ draft, files: [{ file: new File(["synthetic"], "unsafe.exe"), documentRole: "other" }] })).rejects.toThrow(/was created, but 1 file was rejected/);
     expect(startRun).not.toHaveBeenCalled();

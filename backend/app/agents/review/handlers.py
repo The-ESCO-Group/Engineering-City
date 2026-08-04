@@ -29,6 +29,7 @@ from sqlalchemy import select
 
 from app.agents.base.actions import ProposeChangesetPayload, RequestClarificationPayload
 from app.agents.base.agent import AgentContext, AgentResult, BaseAgent
+from app.agents.base.presence import provision_workflow_agents
 from app.agents.base.runner import ValidatedAction
 from app.agents.review import plc_logic, requirements_planning
 from app.agents.review.interlock_review import InterlockReviewAgent
@@ -329,6 +330,11 @@ def plan_project(context: TaskContext) -> HandlerResult:
         task = queue.enqueue(context.project.id, request)
         queue.add_dependency(senior, task.id, hard=True)
         created.append(task)
+
+    # Specialist roles are chosen dynamically by the planner.  Provision and
+    # announce them as soon as that plan is accepted so the live city gains the
+    # new named workers before their individual turns begin.
+    provision_workflow_agents(context.db, context.project, created)
 
     # Enqueueing here is intentional: the dependency edge and its specialist
     # task land in the handler's transaction together. Returning the requests to

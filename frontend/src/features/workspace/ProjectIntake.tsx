@@ -1,12 +1,12 @@
 import {
   AlertTriangle,
-  Check,
-  ChevronLeft,
-  ChevronRight,
+  Cpu,
   FilePlus2,
   HardDrive,
   Info,
+  Rocket,
   Save,
+  Settings2,
   ShieldCheck,
   Trash2,
   UploadCloud
@@ -14,12 +14,11 @@ import {
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import {
   DOCUMENT_ROLES,
-  INTAKE_STEPS,
   RESTRICTED_DOMAINS,
   clearIntakeDraft,
   createEmptyIntakeDraft,
-  issuesForStep,
   loadIntakeDraft,
+  prepareIntakeSubmissionDraft,
   saveIntakeDraft,
   stageIntakeFile,
   validateIntakeDraft
@@ -42,13 +41,33 @@ export interface ProjectIntakeProps {
 }
 
 const PROJECT_TYPES = [
-  "Controls upgrade",
-  "New automation system",
-  "PLC migration",
-  "HMI / alarm modernization",
-  "Engineering review",
-  "FAT / commissioning package"
-];
+  { value: "new_installation", label: "New installation" },
+  { value: "upgrade", label: "Controls upgrade" },
+  { value: "retrofit", label: "Retrofit" },
+  { value: "migration", label: "PLC migration" },
+  { value: "expansion", label: "Expansion" },
+  { value: "other", label: "Other / determine from sources" }
+] as const;
+
+const CONTROLLER_FAMILIES = [
+  { value: "compactlogix", label: "CompactLogix" },
+  { value: "controllogix", label: "ControlLogix" },
+  { value: "guardlogix", label: "GuardLogix" },
+  { value: "compact_guardlogix", label: "Compact GuardLogix" },
+  { value: "micro800", label: "Micro800" },
+  { value: "slc500", label: "SLC 500" },
+  { value: "plc5", label: "PLC-5" },
+  { value: "other", label: "Other" }
+] as const;
+
+const HMI_PRODUCTS = [
+  { value: "none", label: "None / out of scope" },
+  { value: "factorytalk_view_me", label: "FactoryTalk View ME" },
+  { value: "factorytalk_view_se", label: "FactoryTalk View SE" },
+  { value: "factorytalk_optix", label: "FactoryTalk Optix" },
+  { value: "panelview_800", label: "PanelView 800" },
+  { value: "other", label: "Other" }
+] as const;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -56,21 +75,15 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }
 
-function fieldError(draft: IntakeDraft, field: string): string | null {
-  return validateIntakeDraft(draft).find((issue) => issue.field === field && issue.severity === "error")?.message ?? null;
-}
-
 export function ProjectIntake({ mode, capability, providerNotice, onSubmit }: ProjectIntakeProps) {
   const [draft, setDraft] = useState<IntakeDraft>(() => {
     if (typeof window === "undefined") return createEmptyIntakeDraft();
     return loadIntakeDraft(window.localStorage);
   });
-  const [step, setStep] = useState(() => Math.min(draft.lastCompletedStep + 1, 5));
   const [files, setFiles] = useState<Map<string, File>>(() => new Map());
   const [submitState, setSubmitState] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [submitMessage, setSubmitMessage] = useState("");
   const issues = useMemo(() => validateIntakeDraft(draft), [draft]);
-  const currentIssues = issuesForStep(issues, step);
   const errors = issues.filter((issue) => issue.severity === "error");
 
   useEffect(() => {
@@ -87,15 +100,7 @@ export function ProjectIntake({ mode, capability, providerNotice, onSubmit }: Pr
   const updateStandards = <Key extends keyof IntakeStandards>(key: Key, value: IntakeStandards[Key]) => {
     setDraft((current) => ({ ...current, standards: { ...current.standards, [key]: value } }));
   };
-
-  const goToStep = (nextStep: number) => {
-    const bounded = Math.max(1, Math.min(5, nextStep));
-    setDraft((current) => ({
-      ...current,
-      lastCompletedStep: bounded > step ? Math.max(current.lastCompletedStep, step) : current.lastCompletedStep
-    }));
-    setStep(bounded);
-  };
+  const hasError = (field: string) => errors.some((issue) => issue.field === field);
 
   const addFiles = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? []);
@@ -152,24 +157,26 @@ export function ProjectIntake({ mode, capability, providerNotice, onSubmit }: Pr
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (errors.length > 0 || !onSubmit) return;
-    const selectedFiles = draft.files.flatMap((staged) => {
+    const submissionDraft = prepareIntakeSubmissionDraft(draft);
+    if (validateIntakeDraft(submissionDraft).some((issue) => issue.severity === "error") || !onSubmit) return;
+    const selectedFiles = submissionDraft.files.flatMap((staged) => {
       const file = files.get(staged.id);
       return file ? [{ file, documentRole: staged.documentRole }] : [];
     });
     setSubmitState("submitting");
     setSubmitMessage("");
     try {
-      const result = await onSubmit({ draft, files: selectedFiles });
+      const result = await onSubmit({ draft: submissionDraft, files: selectedFiles });
+      clearIntakeDraft(window.localStorage);
       setSubmitState("success");
       setSubmitMessage(
         mode === "demo"
-          ? `Synthetic intake ${result.projectId} was created in this demo session only.`
-          : `Project ${result.projectId} was created by the local backend.`
+          ? `Synthetic project ${result.projectId} was created and demo agents were started.`
+          : `Project ${result.projectId} was created and engineering agents were started.`
       );
     } catch (error) {
       setSubmitState("error");
-      setSubmitMessage(error instanceof Error ? error.message : "The local intake request failed.");
+      setSubmitMessage(error instanceof Error ? error.message : "The local project launch failed.");
     }
   };
 
@@ -177,90 +184,153 @@ export function ProjectIntake({ mode, capability, providerNotice, onSubmit }: Pr
     clearIntakeDraft(window.localStorage);
     setDraft(createEmptyIntakeDraft());
     setFiles(new Map());
-    setStep(1);
     setSubmitState("idle");
     setSubmitMessage("");
   };
 
   return (
     <form className="eng-intake" onSubmit={submit} aria-labelledby="intake-title">
-      <header className="eng-workspace-header">
+      <header className="eng-workspace-header eng-quick-intake-header">
         <div>
-          <span className="eng-eyebrow">PROJECT INTAKE</span>
-          <h2 id="intake-title">Guided engineering intake</h2>
-          <p>Drafts are saved locally on this workstation. File contents must be reselected after a browser restart.</p>
+          <span className="eng-eyebrow">QUICK PROJECT LAUNCH</span>
+          <h2 id="intake-title">Start a project</h2>
+          <p>Name the project, identify the controller, and add source files. The engineering agents start automatically.</p>
         </div>
         <div className="eng-draft-state"><Save aria-hidden="true" /> Draft autosaved</div>
       </header>
 
-      <ol className="eng-stepper" aria-label="Intake progress">
-        {INTAKE_STEPS.map((label, index) => {
-          const number = index + 1;
-          return (
-            <li key={label} className={number === step ? "active" : number < step ? "complete" : ""}>
-              <button type="button" onClick={() => goToStep(number)} aria-current={number === step ? "step" : undefined}>
-                <span>{number < step ? <Check aria-hidden="true" /> : number}</span>
-                <b>{label}</b>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-
-      <div className="eng-intake-stage">
-        {step === 1 && (
-          <section aria-labelledby="identity-heading">
-            <div className="eng-section-heading">
-              <span>01</span><div><h3 id="identity-heading">Project identity</h3><p>Use the original customer or internal wording. Do not summarize away constraints.</p></div>
+      <div className="eng-intake-stage eng-quick-intake">
+        <div className="eng-quick-intake-grid">
+          <section className="eng-quick-card" aria-labelledby="quick-project-heading">
+            <div className="eng-quick-heading">
+              <span>1</span>
+              <div><h3 id="quick-project-heading">Project</h3><p>Only the name is required.</p></div>
             </div>
             <div className="eng-form-grid">
               <label className="wide">Project name
-                <input value={draft.identity.name} onChange={(event) => updateIdentity("name", event.target.value)} aria-invalid={Boolean(fieldError(draft, "identity.name"))} />
+                <input
+                  autoFocus
+                  value={draft.identity.name}
+                  onChange={(event) => updateIdentity("name", event.target.value)}
+                  aria-invalid={hasError("identity.name")}
+                  placeholder="e.g. Line 3 controls upgrade"
+                />
               </label>
-              <label>Customer / internal label
+              <label><span>Customer / internal label <small>Optional</small></span>
                 <input value={draft.identity.customerLabel} onChange={(event) => updateIdentity("customerLabel", event.target.value)} />
               </label>
-              <label>Plant / site
-                <input value={draft.identity.plantSite} onChange={(event) => updateIdentity("plantSite", event.target.value)} />
+              <label><span>Plant / site <small>Optional</small></span>
+                <input value={draft.identity.plantSite} onChange={(event) => updateIdentity("plantSite", event.target.value)} placeholder="Can be resolved later" />
               </label>
-              <label>Project type
-                <select value={draft.identity.projectType} onChange={(event) => updateIdentity("projectType", event.target.value)}>
-                  <option value="">Select project type…</option>
-                  {PROJECT_TYPES.map((type) => <option key={type}>{type}</option>)}
-                </select>
-              </label>
-              <label className="wide">Original project description
-                <textarea rows={7} value={draft.identity.description} onChange={(event) => updateIdentity("description", event.target.value)} placeholder="Paste the original scope, objectives, constraints, and known acceptance conditions…" />
+              <label className="wide"><span>Project objective <small>Optional when the source files contain the scope</small></span>
+                <textarea rows={3} value={draft.identity.description} onChange={(event) => updateIdentity("description", event.target.value)} placeholder="What should the engineering agents review, change, or deliver?" />
               </label>
             </div>
           </section>
-        )}
 
-        {step === 2 && (
-          <section aria-labelledby="target-heading">
-            <div className="eng-section-heading">
-              <span>02</span><div><h3 id="target-heading">Target Rockwell profile</h3><p>Exact target versions determine what can be generated and what must remain unsupported.</p></div>
+          <section className="eng-quick-card" aria-labelledby="quick-target-heading">
+            <div className="eng-quick-heading">
+              <span>2</span>
+              <div><h3 id="quick-target-heading">Target controller</h3><p>The minimum profile needed to start analysis.</p></div>
             </div>
-            <div className="eng-form-grid three">
-              <label>Controller family<input value={draft.target.controllerFamily} onChange={(event) => updateTarget("controllerFamily", event.target.value)} placeholder="CompactLogix / ControlLogix" /></label>
-              <label>Catalog number<input value={draft.target.catalogNumber} onChange={(event) => updateTarget("catalogNumber", event.target.value)} /></label>
-              <label>Firmware<input value={draft.target.firmware} onChange={(event) => updateTarget("firmware", event.target.value)} /></label>
-              <label>Studio 5000 version<input value={draft.target.studio5000Version} onChange={(event) => updateTarget("studio5000Version", event.target.value)} /></label>
-              <label>HMI product<input value={draft.target.hmiProduct} onChange={(event) => updateTarget("hmiProduct", event.target.value)} placeholder="Leave blank when out of scope" /></label>
-              <label>HMI version<input value={draft.target.hmiVersion} onChange={(event) => updateTarget("hmiVersion", event.target.value)} /></label>
-              <label>Terminal / model<input value={draft.target.terminalModel} onChange={(event) => updateTarget("terminalModel", event.target.value)} /></label>
-              <label>Resolution<input value={draft.target.resolution} onChange={(event) => updateTarget("resolution", event.target.value)} placeholder="e.g. 1280 × 800" /></label>
-              <label>Release mode
-                <select value={draft.target.releaseMode} onChange={(event) => updateTarget("releaseMode", event.target.value)}>
-                  <option value="review_candidate">Review candidate</option>
-                  <option value="import_ready_candidate">Import-ready candidate</option>
-                  <option value="documentation_only">Documentation only</option>
+            <div className="eng-form-grid">
+              <label>Controller family
+                <select value={draft.target.controllerFamily} onChange={(event) => updateTarget("controllerFamily", event.target.value)} aria-invalid={hasError("target.controllerFamily")}>
+                  <option value="">Select family…</option>
+                  {CONTROLLER_FAMILIES.map((family) => <option value={family.value} key={family.value}>{family.label}</option>)}
                 </select>
               </label>
+              <label>Catalog number
+                <input value={draft.target.catalogNumber} onChange={(event) => updateTarget("catalogNumber", event.target.value)} aria-invalid={hasError("target.catalogNumber")} placeholder="e.g. 5069-L306ER" />
+              </label>
+              <label>Firmware
+                <input value={draft.target.firmware} onChange={(event) => updateTarget("firmware", event.target.value)} aria-invalid={hasError("target.firmware")} placeholder="e.g. 35" />
+              </label>
+              <label>Studio 5000 version
+                <input value={draft.target.studio5000Version} onChange={(event) => updateTarget("studio5000Version", event.target.value)} aria-invalid={hasError("target.studio5000Version")} placeholder="e.g. 35" />
+              </label>
             </div>
+            {capability.level !== "available" && <CapabilityNotice text={capability.reason} />}
+          </section>
+        </div>
+
+        <section className="eng-quick-card eng-quick-files" aria-labelledby="quick-files-heading">
+          <div className="eng-quick-heading">
+            <span>3</span>
+            <div><h3 id="quick-files-heading">Project source files</h3><p>Add the requirements and project package. File roles can be corrected after selection.</p></div>
+          </div>
+          <label className="eng-dropzone">
+            <UploadCloud aria-hidden="true" />
+            <b>Select or drop engineering files</b>
+            <span>L5X, XLSX, CSV, DOCX, PDF, XML, ZIP, or TXT</span>
+            <input type="file" multiple accept=".l5x,.xlsx,.csv,.docx,.pdf,.xml,.zip,.txt" onChange={addFiles} />
+          </label>
+          <div className="eng-file-stage" aria-live="polite">
+            {draft.files.length === 0 && <EmptyInline icon={<FilePlus2 />} text="Add at least one requirements or project file." />}
+            {draft.files.map((file) => (
+              <article key={file.id} className={file.validation === "ready" ? "ready" : "attention"}>
+                <HardDrive aria-hidden="true" />
+                <div><b>{file.name}</b><span>{formatBytes(file.sizeBytes)} · {file.validationMessage}</span></div>
+                <label>Role
+                  <select value={file.documentRole} onChange={(event) => updateFileRole(file.id, event.target.value)}>
+                    {DOCUMENT_ROLES.map((role) => <option value={role.value} key={role.value}>{role.label}</option>)}
+                  </select>
+                </label>
+                <button type="button" onClick={() => removeFile(file.id)} aria-label={`Remove ${file.name}`}><Trash2 aria-hidden="true" /></button>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <details className="eng-intake-advanced">
+          <summary><Settings2 aria-hidden="true" /><span><b>Advanced project settings</b>Defaults are already applied; open only when this project needs overrides.</span></summary>
+          <div className="eng-intake-advanced-body">
+            <section>
+              <h4>Project profile</h4>
+              <div className="eng-form-grid three">
+                <label>Project type
+                  <select value={draft.identity.projectType} onChange={(event) => updateIdentity("projectType", event.target.value)}>
+                    {PROJECT_TYPES.map((type) => <option value={type.value} key={type.value}>{type.label}</option>)}
+                  </select>
+                </label>
+                <label>Unit system
+                  <select value={draft.identity.units} onChange={(event) => updateIdentity("units", event.target.value)}>
+                    <option value="metric">Metric</option><option value="imperial">Imperial</option><option value="mixed">Mixed</option>
+                  </select>
+                </label>
+                <label>Locale<input value={draft.identity.locale} onChange={(event) => updateIdentity("locale", event.target.value)} /></label>
+              </div>
+            </section>
+            <section>
+              <h4>Delivery and HMI</h4>
+              <div className="eng-form-grid three">
+                <label>Safety classification
+                  <select value={draft.target.safetyClassification} onChange={(event) => updateTarget("safetyClassification", event.target.value)}>
+                    <option value="unknown">Unknown — require review</option><option value="standard">Standard</option><option value="safety_rated">Safety rated</option><option value="mixed_standard_and_safety">Mixed standard and safety</option>
+                  </select>
+                </label>
+                <label>HMI product
+                  <select value={draft.target.hmiProduct} onChange={(event) => updateTarget("hmiProduct", event.target.value)}>
+                    {HMI_PRODUCTS.map((product) => <option value={product.value} key={product.value}>{product.label}</option>)}
+                  </select>
+                </label>
+                <label>Release mode
+                  <select value={draft.target.releaseMode} onChange={(event) => updateTarget("releaseMode", event.target.value)}>
+                    <option value="import_package_only">Import-ready package only</option><option value="rockwell_workstation_assembly">Verify on licensed Rockwell workstation</option><option value="review_only">Review and documentation only</option>
+                  </select>
+                </label>
+                {draft.target.hmiProduct !== "none" && (
+                  <>
+                    <label>HMI version<input value={draft.target.hmiVersion} onChange={(event) => updateTarget("hmiVersion", event.target.value)} /></label>
+                    <label>Terminal / model<input value={draft.target.terminalModel} onChange={(event) => updateTarget("terminalModel", event.target.value)} /></label>
+                    <label>Resolution<input value={draft.target.resolution} onChange={(event) => updateTarget("resolution", event.target.value)} placeholder="e.g. 1280 × 800" /></label>
+                  </>
+                )}
+              </div>
+            </section>
             <fieldset className="eng-check-grid">
-              <legend>Restricted engineering domains in scope</legend>
-              <p>Select every applicable domain. Selection adds human gates; it never grants automated authority.</p>
+              <legend>Restricted engineering domains</legend>
+              <p>Select applicable domains to add the required human gates.</p>
               {RESTRICTED_DOMAINS.map((domain) => (
                 <label key={domain.value}>
                   <input type="checkbox" checked={draft.target.restrictedDomains.includes(domain.value)} onChange={() => toggleRestrictedDomain(domain.value)} />
@@ -268,112 +338,54 @@ export function ProjectIntake({ mode, capability, providerNotice, onSubmit }: Pr
                 </label>
               ))}
             </fieldset>
-            {capability.level !== "available" && <CapabilityNotice text={capability.reason} />}
-          </section>
-        )}
-
-        {step === 3 && (
-          <section aria-labelledby="standards-heading">
-            <div className="eng-section-heading">
-              <span>03</span><div><h3 id="standards-heading">Standards & templates</h3><p>Name approved identifiers and versions. A blank library is treated as missing input, not permission to invent one.</p></div>
-            </div>
-            <div className="eng-form-grid">
-              <label>ESCO naming standard<input value={draft.standards.namingStandard} onChange={(event) => updateStandards("namingStandard", event.target.value)} /></label>
-              <label>Alarm philosophy<input value={draft.standards.alarmPhilosophy} onChange={(event) => updateStandards("alarmPhilosophy", event.target.value)} /></label>
-              <label>Controller template<input value={draft.standards.controllerTemplate} onChange={(event) => updateStandards("controllerTemplate", event.target.value)} /></label>
-              <label>AOI / UDT library<input value={draft.standards.aoiUdtLibrary} onChange={(event) => updateStandards("aoiUdtLibrary", event.target.value)} /></label>
-              <label>HMI / global object library<input value={draft.standards.hmiLibrary} onChange={(event) => updateStandards("hmiLibrary", event.target.value)} /></label>
-              <label>Test template set<input value={draft.standards.testTemplateSet} onChange={(event) => updateStandards("testTemplateSet", event.target.value)} /></label>
-            </div>
-          </section>
-        )}
-
-        {step === 4 && (
-          <section aria-labelledby="files-heading">
-            <div className="eng-section-heading">
-              <span>04</span><div><h3 id="files-heading">Engineering files</h3><p>Staging only checks the local format. The backend remains authoritative for parser support and file safety.</p></div>
-            </div>
-            <label className="eng-dropzone">
-              <UploadCloud aria-hidden="true" />
-              <b>Select local engineering files</b>
-              <span>L5X, XLSX, CSV, DOCX, PDF, XML, ZIP, or TXT</span>
-              <input type="file" multiple accept=".l5x,.xlsx,.csv,.docx,.pdf,.xml,.zip,.txt" onChange={addFiles} />
-            </label>
-            <div className="eng-file-stage" aria-live="polite">
-              {draft.files.length === 0 && <EmptyInline icon={<FilePlus2 />} text="No files staged. The original description remains saved in the draft." />}
-              {draft.files.map((file) => (
-                <article key={file.id} className={file.validation === "ready" ? "ready" : "attention"}>
-                  <HardDrive aria-hidden="true" />
-                  <div><b>{file.name}</b><span>{formatBytes(file.sizeBytes)} · {file.validationMessage}</span></div>
-                  <label>Document role
-                    <select value={file.documentRole} onChange={(event) => updateFileRole(file.id, event.target.value)}>
-                      {DOCUMENT_ROLES.map((role) => <option value={role.value} key={role.value}>{role.label}</option>)}
-                    </select>
-                  </label>
-                  <button type="button" onClick={() => removeFile(file.id)} aria-label={`Remove ${file.name}`}><Trash2 aria-hidden="true" /></button>
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {step === 5 && (
-          <section aria-labelledby="review-heading">
-            <div className="eng-section-heading">
-              <span>05</span><div><h3 id="review-heading">Review & confirmation</h3><p>Resolve required inputs before the local workflow can begin.</p></div>
-            </div>
-            <div className="eng-review-grid">
-              <article><span>Project</span><b>{draft.identity.name || "Missing"}</b><p>{draft.identity.customerLabel || "No label"} · {draft.identity.plantSite || "No site"}</p></article>
-              <article><span>Target</span><b>{draft.target.controllerFamily || "Missing"}</b><p>{draft.target.catalogNumber || "No catalog"} · Firmware {draft.target.firmware || "missing"} · Studio {draft.target.studio5000Version || "missing"}</p></article>
-              <article><span>Sources</span><b>{draft.files.length} staged file{draft.files.length === 1 ? "" : "s"}</b><p>{draft.files.filter((file) => file.validation === "ready").length} ready for authoritative backend validation</p></article>
-              <article><span>Restricted scope</span><b>{draft.target.restrictedDomains.length || "None declared"}</b><p>{draft.target.restrictedDomains.join(", ").replaceAll("_", " ") || "Verify this selection before analysis."}</p></article>
-            </div>
-            <div className="eng-provider-notice"><Info aria-hidden="true" /><div><b>Provider boundary</b><p>{providerNotice}</p></div></div>
-            <label className="eng-confirmation">
-              <input type="checkbox" checked={draft.safetyAcknowledged} onChange={(event) => setDraft((current) => ({ ...current, safetyAcknowledged: event.target.checked }))} />
-              <ShieldCheck aria-hidden="true" />
-              <span><b>Engineering responsibility acknowledged</b>AI output is advisory. Safety-related, equipment-damage-related, restricted-domain, and final release decisions require an authorized human reviewer.</span>
-            </label>
-            <label className="eng-confirmation">
-              <input type="checkbox" checked={draft.analysisConfirmed} onChange={(event) => setDraft((current) => ({ ...current, analysisConfirmed: event.target.checked }))} />
-              <Check aria-hidden="true" />
-              <span><b>Inputs reviewed</b>I confirm this intake reflects the available source information and unresolved omissions are visible above.</span>
-            </label>
-            {issues.length > 0 && (
-              <div className="eng-issue-summary" role="alert">
-                <h4><AlertTriangle aria-hidden="true" /> {errors.length} required item{errors.length === 1 ? "" : "s"} remain</h4>
-                <ul>{issues.map((issue) => <li key={`${issue.field}-${issue.message}`} className={issue.severity}>{issue.message}</li>)}</ul>
+            <section>
+              <h4>Standards and templates</h4>
+              <div className="eng-form-grid three">
+                <label>Naming standard<input value={draft.standards.namingStandard} onChange={(event) => updateStandards("namingStandard", event.target.value)} /></label>
+                <label>Alarm philosophy<input value={draft.standards.alarmPhilosophy} onChange={(event) => updateStandards("alarmPhilosophy", event.target.value)} /></label>
+                <label>Controller template<input value={draft.standards.controllerTemplate} onChange={(event) => updateStandards("controllerTemplate", event.target.value)} /></label>
+                <label>AOI / UDT library<input value={draft.standards.aoiUdtLibrary} onChange={(event) => updateStandards("aoiUdtLibrary", event.target.value)} /></label>
+                <label>HMI library<input value={draft.standards.hmiLibrary} onChange={(event) => updateStandards("hmiLibrary", event.target.value)} /></label>
+                <label>Test template set<input value={draft.standards.testTemplateSet} onChange={(event) => updateStandards("testTemplateSet", event.target.value)} /></label>
               </div>
-            )}
-          </section>
-        )}
-
-        {currentIssues.length > 0 && step < 5 && (
-          <div className="eng-stage-issues" aria-live="polite">
-            {currentIssues.map((issue) => <p key={`${issue.field}-${issue.message}`} className={issue.severity}><AlertTriangle aria-hidden="true" />{issue.message}</p>)}
+            </section>
           </div>
-        )}
+        </details>
+
+        <div className="eng-provider-notice"><Info aria-hidden="true" /><div><b>Local workflow</b><p>{providerNotice}</p></div></div>
+        <label className="eng-confirmation eng-launch-confirmation">
+          <input
+            type="checkbox"
+            checked={draft.safetyAcknowledged}
+            onChange={(event) => setDraft((current) => ({
+              ...current,
+              safetyAcknowledged: event.target.checked,
+              analysisConfirmed: event.target.checked
+            }))}
+          />
+          <ShieldCheck aria-hidden="true" />
+          <span><b>Engineering responsibility acknowledged</b>Start analysis with the available inputs. AI output is advisory; safety, restricted-domain, equipment-damage, and final-release decisions require an authorized human reviewer.</span>
+        </label>
       </div>
 
-      <footer className="eng-intake-footer">
-        <button type="button" className="quiet danger" onClick={clearDraft}>Clear local draft</button>
-        <div>
-          <button type="button" className="quiet" disabled={step === 1} onClick={() => goToStep(step - 1)}><ChevronLeft aria-hidden="true" /> Back</button>
-          {step < 5 ? (
-            <button type="button" className="primary" onClick={() => goToStep(step + 1)}>Continue <ChevronRight aria-hidden="true" /></button>
-          ) : (
-            <button
-              type="submit"
-              className="primary"
-              disabled={errors.length > 0 || !onSubmit || submitState === "submitting"}
-              title={!onSubmit ? capability.reason : errors.length > 0 ? "Resolve the required intake items first." : undefined}
-            >
-              {submitState === "submitting" ? "Submitting to local workflow…" : mode === "demo" ? "Create synthetic demo intake" : "Create project & stage files"}
-            </button>
-          )}
+      <footer className="eng-intake-footer eng-launch-footer">
+        <button type="button" className="quiet danger" onClick={clearDraft}>Clear draft</button>
+        <div className={errors.length === 0 ? "eng-launch-readiness ready" : "eng-launch-readiness"} aria-live="polite">
+          {errors.length === 0
+            ? <><Rocket aria-hidden="true" /><span><b>Ready to launch</b>Agents will begin when the project is created.</span></>
+            : <><AlertTriangle aria-hidden="true" /><span><b>{errors.length} required item{errors.length === 1 ? "" : "s"}</b>{errors.map((issue) => issue.message.replace(/ is required\.$/, "")).join(" · ")}</span></>}
         </div>
+        <button
+          type="submit"
+          className="primary eng-launch-button"
+          disabled={errors.length > 0 || !onSubmit || submitState === "submitting"}
+          title={!onSubmit ? capability.reason : errors.length > 0 ? "Complete the required launch fields first." : undefined}
+        >
+          {submitState === "submitting" ? "Starting agents…" : mode === "demo" ? "Start demo project" : "Create project & start agents"}
+          <Cpu aria-hidden="true" />
+        </button>
       </footer>
-      {!onSubmit && step === 5 && <p className="eng-disabled-reason">Submission is disabled: {capability.reason}</p>}
+      {!onSubmit && <p className="eng-disabled-reason">Project launch is disabled: {capability.reason}</p>}
       {submitMessage && <p className={`eng-submit-message ${submitState}`} role="status">{submitMessage}</p>}
     </form>
   );

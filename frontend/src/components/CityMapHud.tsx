@@ -18,7 +18,7 @@ interface ScenicLabel {
 }
 
 export interface CityOperationsSummary {
-  activeReviews: number;
+  activeAgents: number;
   openFindings: number;
   pendingApprovals: number;
   releaseReadiness: number | null;
@@ -90,7 +90,7 @@ const prioritizedScenicLabels = [
 ];
 
 const defaultSummary: CityOperationsSummary = {
-  activeReviews: 31,
+  activeAgents: 5,
   openFindings: 12,
   pendingApprovals: 7,
   releaseReadiness: 68,
@@ -119,7 +119,7 @@ export function CityMapHud({
 }: CityMapHudProps) {
   const operations = dataMode === "demo"
     ? { ...defaultSummary, ...summary }
-    : { activeReviews: 0, openFindings: 0, pendingApprovals: 0, releaseReadiness: null, ...summary };
+    : { activeAgents: 0, openFindings: 0, pendingApprovals: 0, releaseReadiness: null, ...summary };
   const hasProjectData = dataMode !== "unavailable";
   const rootClassName = ["city-map-hud", className].filter(Boolean).join(" ");
   const scenicLabelCount = Math.max(
@@ -194,8 +194,8 @@ export function CityMapHud({
         <p title={projectLabel}>{projectLabel}</p>
         <dl>
           <div>
-            <dt>Active reviews</dt>
-            <dd>{hasProjectData ? operations.activeReviews : "—"}</dd>
+            <dt>Agents deployed</dt>
+            <dd>{hasProjectData ? operations.activeAgents : "—"}</dd>
           </div>
           <div className="is-alert">
             <dt>Open findings</dt>

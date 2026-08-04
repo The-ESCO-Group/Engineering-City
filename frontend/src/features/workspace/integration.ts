@@ -15,6 +15,8 @@ type WorkspaceEngineeringData = Pick<
   | "tasks"
   | "findings"
   | "approvals"
+  | "clarifications"
+  | "requirements"
   | "events"
   | "refresh"
   | "selectProject"
@@ -32,6 +34,8 @@ export function workspaceSourceFromEngineering(data: WorkspaceEngineeringData): 
     tasks: data.tasks,
     findings: data.findings,
     approvals: data.approvals,
+    clarifications: data.clarifications,
+    requirements: data.requirements,
     events: data.events
   };
 }
@@ -59,30 +63,41 @@ export function workspaceOperationsFromEngineering(
     const project = await engineeringApi.createProject({
       ...buildProjectIdentityInput(draft),
       attributes: {
-        esco_product_intake: {
-          version: 1,
-          plant_site: draft.identity.plantSite.trim(),
-          project_type: draft.identity.projectType.trim(),
-          target_profile: {
-            controller_family: draft.target.controllerFamily.trim(),
-            catalog_number: draft.target.catalogNumber.trim(),
-            firmware: draft.target.firmware.trim(),
-            studio_5000_version: draft.target.studio5000Version.trim(),
-            hmi_product: draft.target.hmiProduct.trim(),
-            hmi_version: draft.target.hmiVersion.trim(),
-            terminal_model: draft.target.terminalModel.trim(),
-            resolution: draft.target.resolution.trim(),
-            release_mode: draft.target.releaseMode,
-            restricted_domains: [...draft.target.restrictedDomains]
-          },
-          standards: {
-            naming_standard: draft.standards.namingStandard.trim(),
-            alarm_philosophy: draft.standards.alarmPhilosophy.trim(),
-            controller_template: draft.standards.controllerTemplate.trim(),
-            aoi_udt_library: draft.standards.aoiUdtLibrary.trim(),
-            hmi_library: draft.standards.hmiLibrary.trim(),
-            test_template_set: draft.standards.testTemplateSet.trim()
-          }
+        intake_ui: {
+          version: 2,
+          safety_acknowledged: draft.safetyAcknowledged,
+          analysis_confirmed: draft.analysisConfirmed
+        }
+      },
+      engineering_profile: {
+        project_name: draft.identity.name.trim(),
+        customer_label: draft.identity.customerLabel.trim(),
+        plant_or_site: draft.identity.plantSite.trim(),
+        project_description: draft.identity.description.trim(),
+        project_type: draft.identity.projectType,
+        units: draft.identity.units,
+        locale: draft.identity.locale.trim(),
+        network_architecture: "",
+        release_mode: draft.target.releaseMode,
+        restricted_domains: [...draft.target.restrictedDomains],
+        target: {
+          controller_family: draft.target.controllerFamily,
+          controller_catalog_number: draft.target.catalogNumber.trim(),
+          firmware_revision: draft.target.firmware.trim(),
+          studio_5000_version: draft.target.studio5000Version.trim(),
+          safety_classification: draft.target.safetyClassification,
+          hmi_product: draft.target.hmiProduct,
+          hmi_version: draft.target.hmiVersion.trim(),
+          hmi_terminal_model: draft.target.terminalModel.trim(),
+          hmi_resolution: draft.target.resolution.trim()
+        },
+        standards: {
+          naming_standard_version: draft.standards.namingStandard.trim(),
+          alarm_philosophy_version: draft.standards.alarmPhilosophy.trim(),
+          controller_template: draft.standards.controllerTemplate.trim(),
+          aoi_udt_library: draft.standards.aoiUdtLibrary.trim(),
+          hmi_library: draft.standards.hmiLibrary.trim(),
+          test_template_set: draft.standards.testTemplateSet.trim()
         }
       }
     });
@@ -123,6 +138,15 @@ export function workspaceOperationsFromEngineering(
       throw new Error(`${decision.replaceAll("_", " ")} is not supported by the current local approval endpoint.`);
     }
     await engineeringApi.decideApproval(approval.id, decision === "approve", comment);
+    await data.refresh();
+  };
+  operations.resolveClarification = async (kind, id, answer) => {
+    if (kind === "project_question") await engineeringApi.resolveProjectQuestion(id, answer);
+    else await engineeringApi.resolveClarification(id, answer);
+    await data.refresh();
+  };
+  operations.decideRequirement = async (requirementId, decision, rationale) => {
+    await engineeringApi.decideRequirement(requirementId, decision, rationale);
     await data.refresh();
   };
   return operations;

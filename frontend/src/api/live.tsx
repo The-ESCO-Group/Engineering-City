@@ -27,6 +27,7 @@ import type {
   AgentRunRead,
   ApprovalRead,
   CapabilityStatus,
+  ClarificationInbox,
   CurrentUserResponse,
   EventEnvelope,
   FindingDetail,
@@ -36,7 +37,11 @@ import type {
   ProjectDetail,
   ProjectRead,
   ProviderCapability,
+  ExportArtifactRead,
+  ReleaseCandidateRead,
+  ReleaseReadinessRead,
   ReportRead,
+  RequirementRead,
   TaskRead,
   UploadedFileRead,
   WebSocketHello,
@@ -69,6 +74,11 @@ export interface EngineeringData {
   parsers: ParserCapability[];
   providers: ProviderCapability[];
   capabilities: CapabilityStatus[];
+  clarifications: ClarificationInbox | null;
+  requirements: RequirementRead[];
+  releaseReadiness: ReleaseReadinessRead | null;
+  releaseCandidates: ReleaseCandidateRead[];
+  releaseArtifacts: ExportArtifactRead[];
   files: UploadedFileRead[];
   tasks: TaskRead[];
   workflow: WorkflowStateResponse | null;
@@ -104,6 +114,11 @@ const EMPTY_DATA: EngineeringData = {
   parsers: [],
   providers: [],
   capabilities: [],
+  clarifications: null,
+  requirements: [],
+  releaseReadiness: null,
+  releaseCandidates: [],
+  releaseArtifacts: [],
   files: [],
   tasks: [],
   workflow: null,
@@ -230,6 +245,10 @@ function invalidateForEvent(
     invalidate(["engineering", projectId, "findings"]);
   } else if (prefix === "report") {
     invalidate(["engineering", projectId, "reports"]);
+  } else if (["release", "export", "validation", "gate"].includes(prefix)) {
+    invalidate(["engineering", projectId, "release-readiness"]);
+    invalidate(["engineering", projectId, "release-candidates"]);
+    invalidate(["engineering", projectId, "release-artifacts"]);
   } else if (prefix === "task" || prefix === "workflow") {
     invalidate(["engineering", projectId, "tasks"]);
     invalidate(["engineering", projectId, "agent-runs"]);
@@ -326,6 +345,37 @@ export function EngineeringDataProvider({ children }: { children: ReactNode }) {
     queryKey: ["engineering", projectId, "approvals"],
     queryFn: () => engineeringApi.approvals(projectId!),
     enabled,
+    retry: false
+  });
+  const clarificationsQuery = useQuery({
+    queryKey: ["engineering", projectId, "clarifications"],
+    queryFn: () => engineeringApi.clarifications(projectId!),
+    enabled,
+    retry: false
+  });
+  const requirementsQuery = useQuery({
+    queryKey: ["engineering", projectId, "requirements"],
+    queryFn: () => engineeringApi.requirements(projectId!),
+    enabled,
+    retry: false
+  });
+  const releaseReadinessQuery = useQuery({
+    queryKey: ["engineering", projectId, "release-readiness"],
+    queryFn: () => engineeringApi.releaseReadiness(projectId!),
+    enabled,
+    retry: false
+  });
+  const releaseCandidatesQuery = useQuery({
+    queryKey: ["engineering", projectId, "release-candidates"],
+    queryFn: () => engineeringApi.releaseCandidates(projectId!),
+    enabled,
+    retry: false
+  });
+  const currentReleaseCandidateId = releaseCandidatesQuery.data?.items[0]?.id ?? null;
+  const releaseArtifactsQuery = useQuery({
+    queryKey: ["engineering", projectId, "release-artifacts", currentReleaseCandidateId],
+    queryFn: () => engineeringApi.releaseArtifacts(currentReleaseCandidateId!),
+    enabled: enabled && Boolean(currentReleaseCandidateId),
     retry: false
   });
   const reportsQuery = useQuery({
@@ -547,6 +597,11 @@ export function EngineeringDataProvider({ children }: { children: ReactNode }) {
       parsers: parsersQuery.data || [],
       providers: providersQuery.data || [],
       capabilities: capabilitiesQuery.data || healthQuery.data?.capabilities || [],
+      clarifications: clarificationsQuery.data || null,
+      requirements: requirementsQuery.data || [],
+      releaseReadiness: releaseReadinessQuery.data || null,
+      releaseCandidates: releaseCandidatesQuery.data?.items || [],
+      releaseArtifacts: releaseArtifactsQuery.data?.items || [],
       files: filesQuery.data || [],
       tasks: dataMode === "demo" ? demoTasks : tasksQuery.data || [],
       workflow: dataMode === "demo" ? demoWorkflow : workflowQuery.data || null,
@@ -580,6 +635,11 @@ export function EngineeringDataProvider({ children }: { children: ReactNode }) {
       parsersQuery.data,
       providersQuery.data,
       capabilitiesQuery.data,
+      clarificationsQuery.data,
+      requirementsQuery.data,
+      releaseReadinessQuery.data,
+      releaseCandidatesQuery.data,
+      releaseArtifactsQuery.data,
       filesQuery.data,
       tasksQuery.data,
       workflowQuery.data,

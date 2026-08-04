@@ -30,6 +30,7 @@ const ACTION_ICONS: Record<ReleaseActionId, ComponentType<{ "aria-hidden"?: bool
   generate_artifacts: Boxes,
   request_import_verification: BadgeCheck,
   request_final_approval: Send,
+  finalize_release: BadgeCheck,
   download_release_zip: Download
 };
 
@@ -39,6 +40,7 @@ function operationFor(id: ReleaseActionId, operations?: ReleaseOperations) {
   if (id === "generate_artifacts") return operations?.generateArtifacts;
   if (id === "request_import_verification") return operations?.requestImportVerification;
   if (id === "request_final_approval") return operations?.requestFinalApproval;
+  if (id === "finalize_release") return operations?.finalizeRelease;
   return undefined;
 }
 

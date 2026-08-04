@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 
 import openapiTS, { astToString } from "openapi-typescript";
 
-const EXPECTED_CONTRACT_VERSION = "1.0.0";
+const EXPECTED_CONTRACT_VERSION = "1.1.0";
 const CHECK_MODE = process.argv.slice(2).includes("--check");
 const unsupportedArgs = process.argv.slice(2).filter((arg) => arg !== "--check");
 

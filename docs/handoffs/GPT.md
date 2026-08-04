@@ -2,7 +2,7 @@
 
 ## Status
 
-Work began against bootstrap commit `2f47487`. Backend foundation commit `08c3cfb` subsequently published contract version `1.0.0`; Claude-owned Milestone 1 work is currently active in the shared worktree.
+The product surface is integrated with backend contract `1.1.0`. Live intake now creates the typed engineering profile, stages accepted files, and starts a durable run. Clarifications, requirement decisions, approvals, reports, persisted release candidates, immutable release archives, and authenticated downloads are connected end to end. The offline city demonstration remains a deliberately separate synthetic mode.
 
 ## Completed
 
@@ -11,27 +11,36 @@ Work began against bootstrap commit `2f47487`. Backend foundation commit `08c3cf
 - Deterministic city-life simulation with bidirectional traffic, pedestrian movement and idling, water and route packets, rooftop beacons, and phase-varied window lighting; all ambient motion honors pause, speed, and reduced-motion state.
 - City-first spectator chrome closely matched to the expanded ESCO reference, with a compact icon rail, unified command bar, world-tracked spatial labels, functional minimap controls, clearly labeled synthetic activity strip, compact six-layer dock, and operational summary.
 - Project portfolio, task board, findings, evidence comparison, approvals, reports, activity, and workspace tabs.
+- Checkpointed `engineering_report_delivery` plugin that snapshots only human-accepted findings, generates discrepancy-matrix and test-plan artifacts, stores traceable `Report.finding_ids`, emits `report.created`, and resumes without duplicating completed provider/format pairs.
+- Built-in discrepancy-matrix and test-plan providers with Markdown and HTML export formats. Reports keep facts separate from inferences, carry limitations and confidence, and reproduce evidence `display_location` verbatim.
+- Typed local REST/WebSocket frontend integration for project identity, agent presence, activity messages, findings and citation detail, approvals and decisions, report downloads, parser capabilities, and provider status. The UI reconnects with `since_seq`, invalidates from live events, refetches after truncated replay, and retains an explicit synthetic fallback when no authenticated backend project is available.
+- Typed five-step live intake for project identity, exact controller/HMI target, release mode and restricted domains, pinned engineering standards/templates, source files, and engineering-responsibility confirmation. Project creation sends the profile as a first-class contract object rather than opaque attributes.
+- Clarification Inbox for project-level questions and object/requirement ambiguities, including named answers and automatic refresh after the backend unblocks affected work.
+- Canonical requirements resource in Project Core with explicit accept/reject decisions and rationale; proposed requirements are not presented as approved engineering truth.
+- Persisted Release Center integration for readiness, candidate creation, deterministic artifact generation, current candidate/artifact reload, named finalization, immutable archive metadata, and authenticated `RC-####.zip` download. The adapter prefers persisted resources so a backend restart or empty event replay does not erase release state.
+- Contract-driven feature gating and WebSocket invalidation for clarification, requirement, export, validation, release, and approval changes. Unsupported actions remain disabled with the backend's reason.
 - Clearly labeled offline demo data and real synthetic JSON browser export.
 - Tauri 2 Windows shell with local-only backend URL validation, Windows application resources, and a verified non-blank WebView render.
 - Product PowerShell scripts, synthetic fixture boundary, and product docs.
 
 ## Contract version
 
-Observed: contract version `1.0.0` in `contracts/openapi.yaml`, `contracts/domain.schema.json`, and `contracts/events.schema.json`. No conflicting handwritten API models were created. Generated-client integration remains pending until the actively changing backend endpoint surface is committed.
+Current: contract version `1.1.0` in `contracts/openapi.yaml`, `contracts/domain.schema.json`, and `contracts/events.schema.json`. `frontend/scripts/generate-contracts.mjs` is pinned to the same version and generates the frontend OpenAPI, domain, event, and version consumers. `npm --prefix frontend run contracts:check` fails on drift or a version mismatch.
 
-## Exact backend change requests
+## Integrated autonomous surface
 
-1. Publish versioned OpenAPI and JSON schemas under `contracts/**`, including errors, permissions, `EvidenceAnchor`, reports, and WebSocket envelope.
-2. Provide client generation and contract version commands.
-3. Define event order, duplicate identity, resume cursor, critical acknowledgement, and REST fallback.
-4. Create `ReportProvider` and `ExportFormatProvider` plus artifact storage/download contracts.
-5. Create delivery-agent plugin interfaces and normalized HMI/electrical inputs with structured outputs.
-6. Document health, authentication, development, demo, and test commands in `docs/handoffs/CLAUDE.md`.
-7. Define capabilities for task actions, approvals, reassignment, files, and local directories.
+- Engineering profile REST resources expose completeness, target-platform truth, restrictions, standards/templates, and generation eligibility.
+- File intake safely expands ZIPs and reports per-member acceptance. Installed parsers publish exact evidence plus explicit warnings/unsupported items for L5X, CSV, XLSX, DOCX, PDF, XML, and text.
+- The production task graph persists inventory, parsing, evidence and canonical import, requirements/planning, clarification, design/generation, validation, senior review, approval, delivery, import-verification, package, and finalization stages.
+- Project questions, clarifications, requirements, findings, and six approval gates retain named human decisions. Agents block or ask instead of manufacturing missing engineering authority.
+- Release readiness, candidates, export artifacts, manifests, and archives are backend resources. Finalization re-verifies the approved package and stores deterministic archive bytes, size, SHA-256, approver identity, and download path independently of event retention.
+- Reports use the complete 19-entry catalog and real local HTML, PDF, DOCX, XLSX, CSV, JSON, and Markdown format providers.
 
-## Blocked owned work
+## Cross-owner integration
 
-Delivery agents under `backend/app/agents/delivery/**` and report providers under `backend/app/reporting/**` await the Claude-owned base interfaces. Adding speculative implementations would violate the contract boundary. Real login, upload, API, WebSocket, permission, and artifact integration also await contracts.
+The frontend consumes `contracts/**` read-only and keeps browser state subordinate to persisted backend resources. Product-owned backend integration remains limited to delivery agents/reporting and the corresponding delivery tests; backend domain and API ownership stays documented in the repository layout.
+
+The live browser acceptance path creates a typed project, uploads a synthetic ZIP, observes persisted tasks after reload, records at least one decision through the UI, settles remaining synthetic approvals through the authenticated API, verifies stored report bytes, downloads a report through the browser, and waits for completion. Production release-container behavior is covered separately by backend orchestration, API, persistence, and restart tests.
 
 ## Commands
 
@@ -45,8 +54,12 @@ Delivery agents under `backend/app/agents/delivery/**` and report providers unde
 ## Known limitations
 
 - The city is a procedural Three.js scene built from real meshes, instancing, materials, lights, and shadows. Its daylight digital-twin palette combines a fog-blended block-tiled flat world, cyan infrastructure and water, orange mobility paths, purple district accents, and varied green public space. The former global black grid and visible platform boundary remain removed. City activity is deterministic synthetic demo motion, not a claim of live backend telemetry. The supplied references guide composition and visual language; the implementation retains ESCO branding and uses no external runtime artwork.
-- Desktop backend process coordination awaits a documented backend executable command.
-- Backend report formats await provider interfaces; demo downloads are real JSON artifacts.
+- The packaged Tauri shell still does not bundle or supervise Python; a workstation installation needs a separately administered contract-`1.1.0` loopback backend. The product development script supervises both services locally.
+- The canonical source importer currently promotes explicit current L5X facts and declared I/O-list CSV facts. Other parsed documents contribute evidence and requirements but do not become a universal vendor-project conversion. `.ACD` parsing, OCR, and arbitrary proprietary project import are not implemented.
+- The normal local workflow produces an explicitly labelled offline import-ready candidate. Studio 5000/FactoryTalk import verification requires a configured licensed-workstation adapter and a named authorized job; the unattended workflow does not run that adapter by itself.
+- Restricted safety, motion, burner-management, process-safety, high-energy, electrical-power-distribution, and robotics work is blocked or manual-review-only unless a qualified workflow is deliberately configured. No PLC communication or live-control capability exists.
+- Autonomous work pauses for mandatory clarifications, requirement decisions, findings, approval gates, and final release acceptance. It does not replace the engineer of record, and source quality, registered templates, target-profile completeness, and human review determine deliverable quality.
+- Disconnected demo generation/download remains intentionally disabled. Real reports and release archives exist only in an authenticated live-local project.
 
 ## Commits
 

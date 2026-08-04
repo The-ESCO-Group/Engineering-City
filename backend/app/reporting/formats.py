@@ -322,11 +322,7 @@ def _canonical_zip(data: bytes, *, core_time: datetime | None = None) -> bytes:
                 timestamp = core_time.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ").encode()
                 for field in (b"created", b"modified"):
                     pattern = (
-                        rb"(<dcterms:"
-                        + field
-                        + rb"\b[^>]*>)[^<]*(</dcterms:"
-                        + field
-                        + rb">)"
+                        rb"(<dcterms:" + field + rb"\b[^>]*>)[^<]*(</dcterms:" + field + rb">)"
                     )
                     payload = re.sub(pattern, rb"\g<1>" + timestamp + rb"\g<2>", payload)
             target.writestr(info, payload)

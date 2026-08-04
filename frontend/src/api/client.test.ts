@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-async function loadClient(apiBase?: string) {
+async function loadClient(apiBase?: string, desktop = false) {
   vi.resetModules();
   vi.doMock("../config", () => ({ configuredApiBase: () => apiBase || "/api" }));
+  vi.doMock("@tauri-apps/api/core", () => ({ isTauri: () => desktop }));
   return import("./client");
 }
 
@@ -32,6 +33,7 @@ describe("engineering API client", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.doUnmock("../config");
+    vi.doUnmock("@tauri-apps/api/core");
     vi.resetModules();
   });
 
@@ -69,6 +71,140 @@ describe("engineering API client", () => {
     const [, uploadInit] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(uploadInit.body).toBeInstanceOf(FormData);
     expect(new Headers(uploadInit.headers).has("Content-Type")).toBe(false);
+  });
+
+  it("retains a successful desktop login token in memory for subsequent REST requests", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(responseJson({
+        access_token: "desktop-access-token",
+        token_type: "bearer",
+        expires_at: "2026-08-04T22:00:00Z",
+        user: { id: "user-1", email: "engineer@esco.internal", display_name: "Engineer", roles: [] }
+      }))
+      .mockResolvedValueOnce(responseJson({
+        user: { id: "user-1", email: "engineer@esco.internal", display_name: "Engineer", roles: [] },
+        project_roles: {}
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { engineeringApi } = await loadClient("http://127.0.0.1:8010/api", true);
+
+    await engineeringApi.login("engineer@esco.internal", "password");
+    await engineeringApi.me();
+
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit]>;
+    expect(new Headers(calls[0][1].headers).has("Authorization")).toBe(false);
+    expect(new Headers(calls[1][1].headers).get("Authorization")).toBe(
+      "Bearer desktop-access-token"
+    );
+    expect(calls[1][1].credentials).toBe("include");
+  });
+
+  it("includes the in-memory desktop token in the project WebSocket URL", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(responseJson({
+      access_token: "header.payload.signature",
+      token_type: "bearer",
+      expires_at: "2026-08-04T22:00:00Z",
+      user: { id: "user-1", email: "engineer@esco.internal", display_name: "Engineer", roles: [] }
+    })));
+    const { engineeringApi, projectSocketUrl } = await loadClient(
+      "http://127.0.0.1:8010/api",
+      true
+    );
+
+    await engineeringApi.login("engineer@esco.internal", "password");
+    const socket = new URL(projectSocketUrl("project-1", 42));
+
+    expect(socket.origin).toBe("ws://127.0.0.1:8010");
+    expect(socket.pathname).toBe("/ws/projects/project-1");
+    expect(socket.searchParams.get("since_seq")).toBe("42");
+    expect(socket.searchParams.get("token")).toBe("header.payload.signature");
+  });
+
+  it("uses the desktop bearer for logout and clears it after logout succeeds", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(responseJson({
+        access_token: "desktop-access-token",
+        token_type: "bearer",
+        expires_at: "2026-08-04T22:00:00Z",
+        user: { id: "user-1", email: "engineer@esco.internal", display_name: "Engineer", roles: [] }
+      }))
+      .mockResolvedValueOnce(responseJson({ ok: true }))
+      .mockResolvedValueOnce(responseJson({ status: "ok", contract_version: "1.1.0" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { engineeringApi, projectSocketUrl } = await loadClient(
+      "http://127.0.0.1:8010/api",
+      true
+    );
+
+    await engineeringApi.login("engineer@esco.internal", "password");
+    await engineeringApi.logout();
+    await engineeringApi.health();
+
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit]>;
+    expect(new Headers(calls[1][1].headers).get("Authorization")).toBe(
+      "Bearer desktop-access-token"
+    );
+    expect(new Headers(calls[2][1].headers).has("Authorization")).toBe(false);
+    expect(new URL(projectSocketUrl("project-1", 0)).searchParams.has("token")).toBe(false);
+  });
+
+  it("clears the desktop token when an authenticated request returns 401", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(responseJson({
+        access_token: "expired-desktop-token",
+        token_type: "bearer",
+        expires_at: "2026-08-04T22:00:00Z",
+        user: { id: "user-1", email: "engineer@esco.internal", display_name: "Engineer", roles: [] }
+      }))
+      .mockResolvedValueOnce(responseJson(
+        { error: { code: "authentication_required", message: "Authentication required." } },
+        { status: 401 }
+      ))
+      .mockResolvedValueOnce(responseJson({ status: "ok", contract_version: "1.1.0" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { engineeringApi, projectSocketUrl } = await loadClient(
+      "http://127.0.0.1:8010/api",
+      true
+    );
+
+    await engineeringApi.login("engineer@esco.internal", "password");
+    await expect(engineeringApi.me()).rejects.toMatchObject({ status: 401 });
+    await engineeringApi.health();
+
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit]>;
+    expect(new Headers(calls[1][1].headers).get("Authorization")).toBe(
+      "Bearer expired-desktop-token"
+    );
+    expect(new Headers(calls[2][1].headers).has("Authorization")).toBe(false);
+    expect(new URL(projectSocketUrl("project-1", 0)).searchParams.has("token")).toBe(false);
+  });
+
+  it("keeps browser authentication cookie-only and does not reuse its login token", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(responseJson({
+        access_token: "browser-response-token",
+        token_type: "bearer",
+        expires_at: "2026-08-04T22:00:00Z",
+        user: { id: "user-1", email: "engineer@esco.internal", display_name: "Engineer", roles: [] }
+      }))
+      .mockResolvedValueOnce(responseJson({
+        user: { id: "user-1", email: "engineer@esco.internal", display_name: "Engineer", roles: [] },
+        project_roles: {}
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { engineeringApi, projectSocketUrl } = await loadClient(
+      "http://127.0.0.1:8010/api",
+      false
+    );
+
+    await engineeringApi.login("engineer@esco.internal", "password");
+    await engineeringApi.me();
+
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit]>;
+    expect(new Headers(calls[0][1].headers).has("Authorization")).toBe(false);
+    expect(new Headers(calls[1][1].headers).has("Authorization")).toBe(false);
+    expect(calls[1][1].credentials).toBe("include");
+    expect(new URL(projectSocketUrl("project-1", 42)).searchParams.has("token")).toBe(false);
   });
 
   it("constructs REST, report, and secure WebSocket URLs from an absolute API base", async () => {
@@ -288,6 +424,36 @@ describe("engineering API client", () => {
     ));
     expect(offsets).toEqual(["0", "1000", "2000", "3000", "4000", "5000", "6000", "7000", "8000", "9000"]);
     expect(new Set(offsets).size).toBe(offsets.length);
+  });
+
+  it("uses the persisted release candidate, artifact, and finalization routes", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      responseJson({ items: [], total: 0, limit: 200, offset: 0 })
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const { engineeringApi } = await loadClient();
+
+    await engineeringApi.releaseReadiness("project-1");
+    await engineeringApi.releaseCandidates("project-1");
+    await engineeringApi.releaseArtifacts("candidate-1");
+    await engineeringApi.createReleaseCandidate("project-1");
+    await engineeringApi.generateReleaseArtifacts("candidate-1");
+    await engineeringApi.finalizeRelease("candidate-1");
+
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit]>;
+    expect(calls.map(([url]) => new URL(url).pathname)).toEqual([
+      "/api/projects/project-1/release-readiness",
+      "/api/projects/project-1/release-candidates",
+      "/api/release-candidates/candidate-1/artifacts",
+      "/api/projects/project-1/release-candidates",
+      "/api/release-candidates/candidate-1/artifacts",
+      "/api/release-candidates/candidate-1/finalize"
+    ]);
+    expect(calls.map(([, init]) => init.method || "GET")).toEqual([
+      "GET", "GET", "GET", "POST", "POST", "POST"
+    ]);
+    expect(calls[3][1].body).toBe(JSON.stringify({ force: false }));
+    expect(calls[5][1].body).toBe(JSON.stringify({ confirm: true }));
   });
 
   it("surfaces the stable backend error envelope", async () => {

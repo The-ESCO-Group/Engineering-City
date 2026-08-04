@@ -40,8 +40,9 @@ export function ReleaseCenter({ source, operations, initialView = "overview", on
     generate_artifacts: Boolean(operations?.generateArtifacts),
     request_import_verification: Boolean(operations?.requestImportVerification),
     request_final_approval: Boolean(operations?.requestFinalApproval),
+    finalize_release: Boolean(operations?.finalizeRelease),
     download_release_zip: Boolean(source.releaseZipDownload)
-  }), [operations?.createReleaseCandidate, operations?.generateArtifacts, operations?.requestFinalApproval, operations?.requestImportVerification, operations?.runValidation, source.releaseZipDownload]);
+  }), [operations?.createReleaseCandidate, operations?.finalizeRelease, operations?.generateArtifacts, operations?.requestFinalApproval, operations?.requestImportVerification, operations?.runValidation, source.releaseZipDownload]);
   const model = useMemo(() => buildReleaseModel(source, operationSupport), [operationSupport, source]);
   const passedGates = model.gates.filter((gate) => gate.state === "passed" || gate.state === "ready").length;
   const context = model.project ? {
@@ -65,7 +66,7 @@ export function ReleaseCenter({ source, operations, initialView = "overview", on
         <aside className="release-sidebar">
           <div className="release-candidate-card">
             <span>ACTIVE PACKAGE</span>
-            {model.candidate ? <><PackageCheck aria-hidden="true" /><h2>Candidate {model.candidate.number}</h2><p>{humanize(model.candidate.status)}</p><dl><div><dt>Validation</dt><dd>{humanize(model.candidate.validationLevel)}</dd></div><div><dt>Revision</dt><dd>{model.candidate.revision}</dd></div><div><dt>Expected</dt><dd>{model.candidate.expectedArtifactCount ?? "Not reported"}</dd></div><div><dt>Limitations</dt><dd>{model.candidate.limitationCount}</dd></div></dl></> : <><Archive aria-hidden="true" /><h2>No candidate</h2><p>Awaiting a release.candidate_created event.</p></>}
+            {model.candidate ? <><PackageCheck aria-hidden="true" /><h2>Candidate {model.candidate.number}</h2><p>{humanize(model.candidate.status)}</p><dl><div><dt>Validation</dt><dd>{humanize(model.candidate.validationLevel)}</dd></div><div><dt>Revision</dt><dd>{model.candidate.revision}</dd></div><div><dt>Expected</dt><dd>{model.candidate.expectedArtifactCount ?? "Not reported"}</dd></div><div><dt>Limitations</dt><dd>{model.candidate.limitationCount}</dd></div></dl></> : <><Archive aria-hidden="true" /><h2>No candidate</h2><p>No persisted release candidate exists yet.</p></>}
           </div>
           <nav aria-label="Release Center sections">
             <button type="button" className={view === "overview" ? "active" : ""} onClick={() => setView("overview")} aria-current={view === "overview" ? "page" : undefined}><ShieldCheck aria-hidden="true" /><span>Readiness</span><b>{passedGates}</b></button>

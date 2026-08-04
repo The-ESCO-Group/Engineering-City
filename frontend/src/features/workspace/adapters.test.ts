@@ -22,6 +22,8 @@ const liveSource: WorkspaceSource = {
   tasks: [],
   findings: [],
   approvals: [],
+  clarifications: null,
+  requirements: [],
   events: [
     {
       id: "event-plan",
@@ -105,4 +107,3 @@ describe("workspace contract adapters", () => {
     expect(inferEvidenceSourceKind("Any", "human_decision")).toBe("human_decision");
   });
 });
-

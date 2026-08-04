@@ -36,6 +36,11 @@ export interface ProjectCoreExplorerProps {
   tags: WorkspaceTag[];
   plcPrograms: WorkspaceProgram[];
   onExport?: (view: ProjectCoreView) => Promise<void>;
+  onDecideRequirement?: (
+    requirementId: string,
+    decision: "accept" | "reject",
+    rationale: string
+  ) => Promise<void>;
 }
 
 const VIEW_META: Record<ProjectCoreView, { eyebrow: string; title: string; description: string }> = {
@@ -81,7 +86,7 @@ export function ProjectCoreExplorer(props: ProjectCoreExplorerProps) {
         ><Download aria-hidden="true" /> Export generated view</button>
       </header>
       {props.capability.level !== "available" && <div className="eng-capability-notice"><CircleHelp aria-hidden="true" /><p><b>{humanize(props.capability.level)}</b> · {props.capability.reason}</p></div>}
-      {props.view === "requirements" && <RequirementsView requirements={props.requirements} capability={props.capability} initialRecordId={props.initialRecordId} />}
+      {props.view === "requirements" && <RequirementsView requirements={props.requirements} capability={props.capability} initialRecordId={props.initialRecordId} onDecide={props.onDecideRequirement} />}
       {props.view === "devices" && <DevicesView devices={props.devices} capability={props.capability} initialRecordId={props.initialRecordId} />}
       {props.view === "tags" && <TagsView tags={props.tags} capability={props.capability} initialRecordId={props.initialRecordId} />}
       {props.view === "plc" && <PlcView programs={props.plcPrograms} capability={props.capability} />}
@@ -126,7 +131,7 @@ function Coverage({ value, label }: { value: number | null; label: string }) {
   return <span className={`eng-coverage ${value === 100 ? "complete" : value > 0 ? "partial" : "none"}`}>{value}%</span>;
 }
 
-function RequirementsView({ requirements, capability, initialRecordId }: { requirements: WorkspaceRequirement[]; capability: WorkspaceCapability; initialRecordId?: string }) {
+function RequirementsView({ requirements, capability, initialRecordId, onDecide }: { requirements: WorkspaceRequirement[]; capability: WorkspaceCapability; initialRecordId?: string; onDecide?: ProjectCoreExplorerProps["onDecideRequirement"] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const initialMatch = Boolean(initialRecordId && requirements.some((item) => item.id === initialRecordId));
@@ -170,14 +175,31 @@ function RequirementsView({ requirements, capability, initialRecordId }: { requi
               <td>{requirement.openQuestions.length}</td>
             </tr>
           ))}</tbody></table></div>
-          {selected && <RequirementInspector requirement={selected} />}
+          {selected && <RequirementInspector requirement={selected} onDecide={onDecide} />}
         </div>
       )}
     </>
   );
 }
 
-function RequirementInspector({ requirement }: { requirement: WorkspaceRequirement }) {
+function RequirementInspector({ requirement, onDecide }: { requirement: WorkspaceRequirement; onDecide?: ProjectCoreExplorerProps["onDecideRequirement"] }) {
+  const [rationale, setRationale] = useState("");
+  const [submitting, setSubmitting] = useState<"accept" | "reject" | null>(null);
+  const [message, setMessage] = useState("");
+  const decide = async (decision: "accept" | "reject") => {
+    if (!onDecide || !rationale.trim()) return;
+    setSubmitting(decision);
+    setMessage("");
+    try {
+      await onDecide(requirement.id, decision, rationale.trim());
+      setRationale("");
+      setMessage(`Requirement ${decision === "accept" ? "accepted" : "rejected"} by the authorized local API.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The requirement decision failed.");
+    } finally {
+      setSubmitting(null);
+    }
+  };
   return (
     <aside className="eng-record-inspector">
       <div className="eng-record-icon"><BookOpenCheck aria-hidden="true" /></div>
@@ -193,6 +215,11 @@ function RequirementInspector({ requirement }: { requirement: WorkspaceRequireme
       </dl>
       <RecordList title={`Acceptance criteria (${requirement.acceptanceCriteriaCount})`} items={requirement.acceptanceCriteria} empty="Criteria content is not published in the current event summary." />
       <RecordList title="Open questions" items={requirement.openQuestions} empty="No open question is linked." />
+      {requirement.status === "proposed" && <div className="eng-requirement-decision">
+        <label>Reviewer rationale<textarea rows={4} value={rationale} onChange={(event) => setRationale(event.target.value)} placeholder="State why the extracted wording is accepted as scope or rejected…" /></label>
+        <div><button type="button" className="eng-primary-action" disabled={!onDecide || !rationale.trim() || submitting !== null} onClick={() => void decide("accept")}>{submitting === "accept" ? "Recording…" : "Accept requirement"}</button><button type="button" className="eng-secondary-action" disabled={!onDecide || !rationale.trim() || submitting !== null} onClick={() => void decide("reject")}>{submitting === "reject" ? "Recording…" : "Reject"}</button></div>
+        {message && <p className="eng-alert-block" role="status">{message}</p>}
+      </div>}
       <a className="eng-deep-link" href={`#/workspace/requirements?record=${encodeURIComponent(requirement.id)}`}><Link2 aria-hidden="true" /> Copyable deep link</a>
     </aside>
   );

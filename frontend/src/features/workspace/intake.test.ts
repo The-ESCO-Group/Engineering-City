@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   INTAKE_DRAFT_STORAGE_KEY,
+  QUICK_INTAKE_DEFAULTS,
   buildProjectIdentityInput,
   createEmptyIntakeDraft,
   loadIntakeDraft,
+  prepareIntakeSubmissionDraft,
   restoreIntakeDraft,
   saveIntakeDraft,
   stageIntakeFile,
@@ -20,11 +22,13 @@ function validDraft(): IntakeDraft {
       customerLabel: "Internal demo",
       plantSite: "Synthetic site",
       description: "Review a synthetic conveyor control package.",
-      projectType: "Engineering review"
+      projectType: "upgrade",
+      units: "metric",
+      locale: "en-US"
     },
     target: {
       ...draft.target,
-      controllerFamily: "CompactLogix",
+      controllerFamily: "compactlogix",
       catalogNumber: "Synthetic catalog",
       firmware: "35",
       studio5000Version: "35"
@@ -51,12 +55,39 @@ function validDraft(): IntakeDraft {
 }
 
 describe("intake draft", () => {
-  it("reports required fields by guided step without inventing defaults", () => {
-    const issues = validateIntakeDraft(createEmptyIntakeDraft());
-    expect(issues.some((issue) => issue.step === 1 && issue.field === "identity.name")).toBe(true);
-    expect(issues.some((issue) => issue.step === 2 && issue.field === "target.firmware")).toBe(true);
-    expect(issues.some((issue) => issue.step === 4 && issue.field === "files")).toBe(true);
-    expect(issues.some((issue) => issue.step === 5 && issue.field === "safetyAcknowledged")).toBe(true);
+  it("requires only the quick-launch essentials and supplies safe advanced defaults", () => {
+    const draft = createEmptyIntakeDraft();
+    const fields = validateIntakeDraft(draft).map((issue) => issue.field);
+    expect(fields).toEqual(expect.arrayContaining([
+      "identity.name",
+      "target.controllerFamily",
+      "target.catalogNumber",
+      "target.firmware",
+      "target.studio5000Version",
+      "files",
+      "safetyAcknowledged"
+    ]));
+    expect(fields).not.toEqual(expect.arrayContaining([
+      "identity.customerLabel",
+      "identity.plantSite",
+      "identity.description",
+      "analysisConfirmed",
+      "standards.alarmPhilosophy"
+    ]));
+    expect(draft.identity.projectType).toBe("other");
+    expect(draft.standards.namingStandard).toBe(QUICK_INTAKE_DEFAULTS.namingStandard);
+  });
+
+  it("normalizes optional quick-launch fields before preserving the backend contract", () => {
+    const draft = validDraft();
+    draft.identity.plantSite = "";
+    draft.identity.description = "";
+    draft.analysisConfirmed = false;
+    const prepared = prepareIntakeSubmissionDraft(draft);
+    expect(prepared.identity.plantSite).toBe(QUICK_INTAKE_DEFAULTS.plantSite);
+    expect(prepared.identity.description).toBe(QUICK_INTAKE_DEFAULTS.description);
+    expect(prepared.analysisConfirmed).toBe(true);
+    expect(validateIntakeDraft(prepared)).toEqual([]);
   });
 
   it("accepts a complete synthetic draft and sends identity fields only", () => {
@@ -71,7 +102,7 @@ describe("intake draft", () => {
 
   it("requires the rest of the HMI target profile only when HMI is in scope", () => {
     const draft = validDraft();
-    draft.target.hmiProduct = "FactoryTalk View ME";
+    draft.target.hmiProduct = "factorytalk_view_me";
     const fields = validateIntakeDraft(draft).map((issue) => issue.field);
     expect(fields).toEqual(expect.arrayContaining(["target.hmiVersion", "target.terminalModel", "target.resolution"]));
   });
@@ -88,7 +119,7 @@ describe("intake draft", () => {
     const restored = loadIntakeDraft(storage);
     expect(restored.identity.name).toBe("Synthetic Line Upgrade");
     expect(restored.files[0].validation).toBe("needs_reselection");
-    expect(restored.analysisConfirmed).toBe(false);
+    expect(restored.analysisConfirmed).toBe(true);
   });
 
   it("recovers safely from malformed persisted JSON", () => {
@@ -102,4 +133,3 @@ describe("intake draft", () => {
     expect(unsupported).toMatchObject({ extension: ".exe", validation: "unsupported" });
   });
 });
-

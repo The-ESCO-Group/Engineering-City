@@ -11,6 +11,8 @@ const demoSource: WorkspaceSource = {
   tasks: [],
   findings: [],
   approvals: [],
+  clarifications: null,
+  requirements: [],
   events: []
 };
 
@@ -49,5 +51,33 @@ describe("EngineeringWorkspace", () => {
     fireEvent.change(screen.getByLabelText(/Engineering comment/), { target: { value: "Synthetic review comment only." } });
     fireEvent.click(screen.getByRole("button", { name: "Submit signed decision" }));
     await waitFor(() => expect(screen.getByText(/Approve recorded for Disposition guard reset finding/)).toBeInTheDocument());
+  });
+
+  it("returns to the city as soon as a quick project launch succeeds", async () => {
+    window.localStorage.clear();
+    const submitIntake = vi.fn().mockResolvedValue({ projectId: "project-quick-1" });
+    const onReturnToCity = vi.fn();
+    render(
+      <EngineeringWorkspace
+        source={demoSource}
+        initialView="intake"
+        operations={{ submitIntake }}
+        onReturnToCity={onReturnToCity}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Quick launch" } });
+    fireEvent.change(screen.getByLabelText("Controller family"), { target: { value: "compactlogix" } });
+    fireEvent.change(screen.getByLabelText("Catalog number"), { target: { value: "5069-L306ER" } });
+    fireEvent.change(screen.getByLabelText("Firmware"), { target: { value: "35" } });
+    fireEvent.change(screen.getByLabelText("Studio 5000 version"), { target: { value: "35" } });
+    fireEvent.change(screen.getByLabelText(/Select or drop engineering files/), {
+      target: { files: [new File(["synthetic"], "requirements.pdf", { type: "application/pdf" })] }
+    });
+    fireEvent.click(screen.getByLabelText(/Engineering responsibility acknowledged/));
+    fireEvent.click(screen.getByRole("button", { name: /start demo project/i }));
+
+    await waitFor(() => expect(submitIntake).toHaveBeenCalledOnce());
+    expect(onReturnToCity).toHaveBeenCalledOnce();
   });
 });

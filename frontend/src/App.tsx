@@ -238,12 +238,12 @@ function ReleaseCenterPage({ initialView }: { initialView: ReleaseCenterView }) 
   const navigate = useNavigate();
   const source = useMemo(() => releaseSourceFromEngineering(engineering), [engineering]);
   const operations = useMemo(
-    () => releaseOperationsFromEngineering({
+    () => releaseOperationsFromEngineering(engineering, {
       openCityLocation: (semanticLocation) => {
         navigate(`/?location=${encodeURIComponent(semanticLocation)}`);
       }
     }),
-    [navigate]
+    [engineering, navigate]
   );
   return (
     <Suspense fallback={<FeatureLoading label="Release Center" />}>

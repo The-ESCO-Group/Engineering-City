@@ -180,7 +180,26 @@ function artifactFolder(kind: ExportArtifactCreatedEventPayload["kind"]): Releas
   return "06-audit";
 }
 
-function buildCandidate(events: EventEnvelope[]): ReleaseCandidateSummary | null {
+function buildCandidate(source: ReleaseSource, events: EventEnvelope[]): ReleaseCandidateSummary | null {
+  const persisted = source.releaseCandidates?.[0];
+  if (persisted) {
+    return {
+      id: persisted.id,
+      number: persisted.candidate_number,
+      name: persisted.name,
+      revision: persisted.revision_number,
+      status: persisted.status,
+      validationLevel: persisted.validation_level,
+      artifactCount: persisted.artifact_count,
+      expectedArtifactCount: persisted.manifest?.artifact_count ?? persisted.artifact_count,
+      limitationCount: persisted.limitations.length,
+      unsupportedItemCount: persisted.unsupported_items.length,
+      generatorVersion: persisted.generator_version || "Not reported",
+      packageBytes: persisted.archive?.size_bytes ?? persisted.package_bytes,
+      packageSha256: persisted.archive?.sha256 ?? persisted.package_sha256,
+      createdAt: persisted.created_at
+    };
+  }
   const headEvent = [...events].reverse().find((event) => event.event_type === "release.candidate_created" || event.event_type === "release.ready");
   if (!headEvent) return null;
   const candidateId = headEvent.event_type === "release.ready"
@@ -214,7 +233,17 @@ function buildCandidate(events: EventEnvelope[]): ReleaseCandidateSummary | null
   };
 }
 
-function buildVerification(events: EventEnvelope[], candidate: ReleaseCandidateSummary | null): ReleaseVerificationSummary {
+function buildVerification(source: ReleaseSource, events: EventEnvelope[], candidate: ReleaseCandidateSummary | null): ReleaseVerificationSummary {
+  const persisted = source.releaseCandidates?.find((item) => item.id === candidate?.id);
+  if (persisted) {
+    return {
+      status: persisted.import_verification_status,
+      detail: persisted.import_verification_detail || `Import verification is ${persisted.import_verification_status.replaceAll("_", " ")}.`,
+      candidateOnly: !persisted.archive?.rockwell_import_verified,
+      validationLevel: persisted.validation_level,
+      occurredAt: persisted.archive?.finalized_at ?? persisted.released_at ?? persisted.approved_at
+    };
+  }
   const event = [...events].reverse().find((item) => item.event_type === "release.ready" && (!candidate || payloadAs<ReleaseReadyEventPayload>(item).release_candidate_id === candidate.id)) ?? null;
   if (!event) {
     return {
@@ -239,6 +268,36 @@ function buildVerification(events: EventEnvelope[], candidate: ReleaseCandidateS
 
 function buildArtifacts(source: ReleaseSource, events: EventEnvelope[], candidate: ReleaseCandidateSummary | null): ReleaseArtifact[] {
   const revision = candidate?.revision ?? latestRevision(events);
+  if (source.releaseArtifacts?.length) {
+    return source.releaseArtifacts
+      .filter((artifact) => !candidate || artifact.release_candidate_id === candidate.id)
+      .map((artifact) => ({
+        id: artifact.id,
+        candidateId: artifact.release_candidate_id,
+        folderId: artifactFolder(artifact.kind),
+        filename: artifact.filename,
+        kind: artifact.kind,
+        relativePath: artifact.relative_path || artifact.filename,
+        sizeBytes: artifact.size_bytes,
+        sha256: artifact.sha256,
+        generator: artifact.is_produced_by_plugin
+          ? artifact.plugin_name || "Unidentified plugin"
+          : [artifact.generator_name, artifact.generator_version].filter(Boolean).join(" ") || "ESCO release generator",
+        target: targetProfile(source.project),
+        validationLevel: artifact.validation_level,
+        createdAt: artifact.created_at,
+        sourceRevision: revision,
+        warningCount: artifact.warnings.length,
+        importOrder: artifact.import_order,
+        producedByPlugin: artifact.is_produced_by_plugin,
+        download: source.artifactDownloads?.[artifact.id] ?? null,
+        diagnostics: [
+          ...artifact.warnings.map((warning) => typeof warning === "string" ? warning : JSON.stringify(warning)),
+          ...(source.artifactDownloads?.[artifact.id] ? [] : ["Artifact metadata is available, but the backend does not expose an individual artifact download route."])
+        ]
+      }))
+      .sort((left, right) => left.importOrder - right.importOrder || left.relativePath.localeCompare(right.relativePath));
+  }
   const artifacts = new Map<string, ReleaseArtifact>();
   events.forEach((event) => {
     if (event.event_type !== "export.artifact_created") return;
@@ -453,16 +512,18 @@ function buildGates(
 }
 
 function userPermissions(source: ReleaseSource) {
-  if (source.dataMode === "demo") return { canEngineer: false, canView: true, summary: "Synthetic demo viewer" };
+  if (source.dataMode === "demo") return { canEngineer: false, canReview: false, canView: true, summary: "Synthetic demo viewer" };
   const user = source.currentUser?.user;
-  if (!user || !source.project) return { canEngineer: false, canView: false, summary: "No authorized project role" };
+  if (!user || !source.project) return { canEngineer: false, canReview: false, canView: false, summary: "No authorized project role" };
   const projectRole = source.currentUser?.project_roles[source.project.id] || "none";
   const globalRoles = user.roles;
   const elevated = globalRoles.includes("administrator");
   const canEngineer = elevated || (globalRoles.includes("engineer") && ["owner", "engineer"].includes(projectRole));
+  const canReview = elevated || (globalRoles.includes("reviewer") && ["owner", "reviewer"].includes(projectRole));
   const canView = elevated || ["owner", "engineer", "reviewer", "viewer"].includes(projectRole);
   return {
     canEngineer,
+    canReview,
     canView,
     summary: `${user.display_name} · ${projectRole} · ${globalRoles.join(", ") || "no global role"}`
   };
@@ -503,14 +564,23 @@ function buildActions(
 ): ReleaseActionAvailability[] {
   const permissions = userPermissions(source);
   const revision = candidate?.revision ?? validation?.revision ?? null;
+  const persistedCandidate = source.releaseCandidates?.find((item) => item.id === candidate?.id) ?? null;
   const qaBlocked = gates.some((gate) => ["qa", "critical-findings"].includes(gate.id) && gate.state === "blocked");
   const validationPrerequisite = revision === null ? "A numbered project revision is required before validation." : null;
-  const candidatePrerequisite = !validation
-    ? "Run release-scoped validation before creating a release candidate."
-    : validation.isBlocking
-      ? "The latest validation result is blocking."
+  const candidatePrerequisite = source.releaseReadiness
+    ? source.releaseReadiness.is_ready
+      ? null
+      : source.releaseReadiness.blocking.map((block) => block.summary).join(" · ") || "Release readiness is blocked."
+    : !validation
+      ? "Release readiness has not been reported by the backend."
+      : validation.isBlocking
+        ? "The latest validation result is blocking."
+        : null;
+  const artifactPrerequisite = !candidate
+    ? "Create a release candidate before generating artifacts."
+    : persistedCandidate && !persistedCandidate.actions.generate.available
+      ? persistedCandidate.actions.generate.reason
       : null;
-  const artifactPrerequisite = candidate ? null : "Create a release candidate before generating artifacts.";
   const verificationPrerequisite = !candidate
     ? "Create a release candidate before requesting import verification."
     : VALIDATION_RANK[candidate.validationLevel] < VALIDATION_RANK.round_trip_parsed
@@ -523,17 +593,23 @@ function buildActions(
     : qaBlocked
       ? "QA or critical-finding readiness is blocked."
       : null;
+  const finalizePrerequisite = !candidate
+    ? "Create and approve a release candidate before finalizing delivery."
+    : persistedCandidate && !persistedCandidate.actions.finalize.available
+      ? persistedCandidate.actions.finalize.reason
+      : !persistedCandidate
+        ? "The persisted candidate API has not confirmed that finalization is available."
+        : null;
   const downloadPrerequisite = !source.releaseZipDownload
     ? "The API has not supplied an authorized release ZIP download link."
-    : !verification.occurredAt
-      ? "No release.ready event has confirmed this package for handoff."
-      : null;
+    : null;
   return [
     action("run_validation", "Run Validation", disabledReason(source, Boolean(support.run_validation), permissions.canEngineer, validationPrerequisite, "release validation"), "Validation will run against the current numbered revision."),
     action("create_release_candidate", "Create Release Candidate", disabledReason(source, Boolean(support.create_release_candidate), permissions.canEngineer, candidatePrerequisite, "release candidate creation"), "The latest non-blocking validation can be assembled into a candidate."),
     action("generate_artifacts", "Generate Artifacts", disabledReason(source, Boolean(support.generate_artifacts), permissions.canEngineer, artifactPrerequisite, "artifact generation"), "Generation will target the current candidate."),
     action("request_import_verification", "Request Import Verification", disabledReason(source, Boolean(support.request_import_verification), permissions.canEngineer, verificationPrerequisite, "licensed-workstation import verification"), "The candidate can be queued for an authorized workstation check."),
     action("request_final_approval", "Request Final Approval", disabledReason(source, Boolean(support.request_final_approval), permissions.canEngineer, approvalPrerequisite, "final release approval"), "The candidate can be sent to a named human reviewer."),
+    action("finalize_release", "Finalize Approved Release", disabledReason(source, Boolean(support.finalize_release), permissions.canReview, finalizePrerequisite, "immutable release finalization"), "A named reviewer can finalize the approved candidate into immutable delivery bytes."),
     action("download_release_zip", "Download Release ZIP", disabledReason(source, Boolean(source.releaseZipDownload), permissions.canView, downloadPrerequisite, "release ZIP download"), "The API supplied an authorized package link after release readiness was recorded.")
   ];
 }
@@ -543,14 +619,15 @@ export function buildReleaseModel(
   operationSupport: Partial<Record<ReleaseActionId, boolean>> = {}
 ): ReleaseModel {
   const events = ordered(source.events);
-  const candidate = buildCandidate(events);
-  const verification = buildVerification(events, candidate);
+  const candidate = buildCandidate(source, events);
+  const verification = buildVerification(source, events, candidate);
   const artifacts = buildArtifacts(source, events, candidate);
   const validation = buildValidation(events);
   const gates = buildGates(source, events, candidate, verification, artifacts);
   const revision = candidate?.revision ?? validation?.revision ?? latestRevision(events);
   const reports = buildReports(source, revision);
   const permissions = userPermissions(source);
+  const persistedCandidate = source.releaseCandidates?.find((item) => item.id === candidate?.id) ?? null;
   const releaseEvent = [...events].reverse().find((event) => event.event_type === "release.ready" && (!candidate || payloadAs<ReleaseReadyEventPayload>(event).release_candidate_id === candidate.id)) ?? null;
   return {
     mode: source.dataMode,
@@ -579,6 +656,6 @@ export function buildReleaseModel(
       expected: candidate?.expectedArtifactCount ?? candidate?.artifactCount ?? null,
       hashed: artifacts.filter((artifact) => Boolean(artifact.sha256)).length
     },
-    releaseOccurredAt: releaseEvent?.occurred_at ?? null
+    releaseOccurredAt: persistedCandidate?.archive?.finalized_at ?? persistedCandidate?.released_at ?? releaseEvent?.occurred_at ?? null
   };
 }

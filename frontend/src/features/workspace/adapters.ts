@@ -3,6 +3,7 @@ import type {
   EventEnvelope,
   FindingDetail,
   FindingRead,
+  RequirementRead,
   TaskRead
 } from "../../api/types";
 import { createDemoWorkspaceModel } from "./demo";
@@ -136,6 +137,29 @@ function requirementFromEvent(event: EventEnvelope): WorkspaceRequirement | null
     openQuestions: [],
     inferred: booleanValue(payload.is_inferred),
     confidence: nullableNumber(payload.confidence)
+  };
+}
+
+function requirementFromResource(item: RequirementRead): WorkspaceRequirement {
+  const primary = item.sources.find((source) => source.is_primary) ?? item.sources[0];
+  return {
+    id: item.id,
+    reference: item.reference,
+    title: item.title,
+    text: item.statement,
+    source: primary?.location_label || "Source citation not recorded",
+    kind: item.kind,
+    priority: item.priority,
+    status: item.status,
+    acceptanceCriteria: item.acceptance_criteria
+      .sort((left, right) => left.ordinal - right.ordinal)
+      .map((criterion) => `${criterion.reference} · ${criterion.statement}`),
+    acceptanceCriteriaCount: item.acceptance_criteria.length,
+    implementationCoverage: null,
+    testCoverage: null,
+    openQuestions: [],
+    inferred: item.is_inferred,
+    confidence: item.confidence
   };
 }
 
@@ -422,9 +446,9 @@ export function buildWorkspaceModel(source: WorkspaceSource): WorkspaceModel {
     project,
     capabilities: {
       intakeSubmission: {
-        level: live ? "summary_only" : "unavailable",
+        level: live ? "available" : "unavailable",
         reason: live
-          ? "Project identity and files can be submitted, but the versioned target-profile contract is pending."
+          ? "Project identity, target platform, pinned standards, files, and review boundaries are submitted to the authorized local workflow."
           : source.fallbackReason
       },
       projectCore: { level: live ? "summary_only" : "unavailable", reason: contractPending },
@@ -460,7 +484,9 @@ export function buildWorkspaceModel(source: WorkspaceSource): WorkspaceModel {
       updatedAt: file.updated_at
     })),
     tasks: source.tasks.map((task) => taskToWorkspace(task, locations.get(task.id) ?? null)),
-    requirements: orderedEvents.flatMap((event) => requirementFromEvent(event) ?? []),
+    requirements: source.requirements.length
+      ? source.requirements.map(requirementFromResource)
+      : orderedEvents.flatMap((event) => requirementFromEvent(event) ?? []),
     devices: [],
     tags: [],
     plcPrograms: [],

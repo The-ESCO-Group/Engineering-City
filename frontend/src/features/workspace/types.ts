@@ -1,9 +1,11 @@
 import type {
   ApprovalRead,
+  ClarificationInbox,
   EventEnvelope,
   FindingDetail,
   FindingRead,
   ProjectDetail,
+  RequirementRead,
   TaskRead,
   UploadedFileRead
 } from "../../api/types";
@@ -14,6 +16,7 @@ export type WorkspaceView =
   | "intake"
   | "files"
   | "tasks"
+  | "clarifications"
   | "requirements"
   | "devices"
   | "tags"
@@ -464,6 +467,8 @@ export interface WorkspaceSource {
   tasks: TaskRead[];
   findings: FindingRead[];
   approvals: ApprovalRead[];
+  clarifications: ClarificationInbox | null;
+  requirements: RequirementRead[];
   events: EventEnvelope[];
 }
 
@@ -473,6 +478,8 @@ export interface IntakeIdentity {
   plantSite: string;
   description: string;
   projectType: string;
+  units: string;
+  locale: string;
 }
 
 export interface IntakeTargetProfile {
@@ -480,6 +487,7 @@ export interface IntakeTargetProfile {
   catalogNumber: string;
   firmware: string;
   studio5000Version: string;
+  safetyClassification: string;
   hmiProduct: string;
   hmiVersion: string;
   terminalModel: string;
@@ -539,6 +547,16 @@ export interface WorkspaceOperations {
     approval: WorkspaceApproval,
     decision: WorkspaceApprovalDecision,
     comment: string
+  ) => Promise<void>;
+  resolveClarification?: (
+    kind: "project_question" | "clarification",
+    id: string,
+    answer: string
+  ) => Promise<void>;
+  decideRequirement?: (
+    requirementId: string,
+    decision: "accept" | "reject",
+    rationale: string
   ) => Promise<void>;
   reviewChangeSet?: (
     changeset: WorkspaceChangeSet,

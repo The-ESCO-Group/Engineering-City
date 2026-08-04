@@ -1,6 +1,6 @@
 # Local desktop and Windows operations
 
-The Tauri shell is a local presentation layer for ESCO Engineering City. It does not start a cloud service, embed secrets, or expose controller upload/download, online edit, force, or live-equipment control.
+The Tauri shell is a local presentation layer for ESCO Engineering City contract `1.1.0`. It does not start a cloud service, embed secrets, or expose controller upload/download, online edit, force, or live-equipment control.
 
 ## Setup and daily use
 
@@ -17,9 +17,9 @@ PowerShell 7, Node.js 20+, npm, and Python 3.12+ are required for the complete l
 .\scripts\product\run-demo.ps1
 ```
 
-`dev.ps1` binds both services to `127.0.0.1`, waits for `/api/health`, and then opens the frontend. Use `-BackendPort` or `-FrontendPort` to choose non-default local ports. Use `-DataDirectory data/local-live` to preserve the default database and launch a separate persistent local workspace; the launcher keeps that workspace's SQLite file and project artifacts together and never resets them. It prints every endpoint and stores process output under `logs/product/`. Ctrl+C stops only the child processes that the script created.
+`dev.ps1` binds both services to `127.0.0.1`, waits for `/api/health`, and then opens the frontend. Use `-BackendPort` or `-FrontendPort` to choose non-default local ports. Use `-DataDirectory data/local-live` to preserve the default database and launch a separate persistent local workspace; the launcher keeps that workspace's SQLite file, source artifacts, generated candidate trees, and finalized release archives together and never resets them. It prints every endpoint and stores process output under `logs/product/`. Ctrl+C stops only the child processes that the script created.
 
-The packaged Tauri application does not bundle, install, or supervise the Python backend. `dev.ps1` provides backend/frontend supervision for local development; a packaged workstation needs its separately administered compatible local backend.
+The packaged Tauri application does not bundle, install, or supervise the Python backend. `dev.ps1` provides backend/frontend supervision for local development; a packaged workstation needs its separately administered contract-`1.1.0` local backend. The frontend checks the backend contract at runtime and refuses to present incompatible live data as usable.
 
 Every native command is checked explicitly for a non-zero exit code. A failed prerequisite, health check, frontend build, Rust test, or package step fails the script instead of continuing with a false success message.
 
@@ -74,7 +74,7 @@ Local OS notifications are deliberately narrow: the frontend may request one onl
 
 `setup.ps1 -IncludeDesktop` runs `npm ci --ignore-scripts` in `desktop/`, validates the exact CLI version and lockfile integrity, and fetches locked Rust dependencies. `build-desktop.ps1` executes the CLI entrypoint through the resolved Node executable and refuses to use a global `cargo tauri` fallback. Review changes to `desktop/package-lock.json` before dependency updates.
 
-Desktop packaging is signing-independent by default. Internal release policy must apply any required code-signing step outside the repository without committing certificates or passwords. A packaged installer or ZIP is not a Rockwell import verification, a human approval, or a released engineering deliverable.
+Desktop packaging is signing-independent by default. Internal release policy must apply any required code-signing step outside the repository without committing certificates or passwords. A desktop installer ZIP is unrelated to the authenticated `RC-####.zip` engineering archive: packaging the application is not Rockwell import verification, human approval, or an engineering release.
 
 `package-release.ps1` always invokes a fresh desktop build, requires its requested version to match both Tauri and Cargo metadata, and packages only installers written by that invocation. Its manifest records the source commit, whether tracked changes were present, a hash of that tracked status, the pinned Tauri CLI version, artifact hashes, and the candidate-only verification boundary. `-SkipBuild` is rejected for release packaging.
 

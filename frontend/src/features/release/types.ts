@@ -2,7 +2,10 @@ import type {
   CapabilityStatus,
   CurrentUserResponse,
   EventEnvelope,
+  ExportArtifactRead,
   ProjectDetail,
+  ReleaseCandidateRead,
+  ReleaseReadinessRead,
   ReportRead
 } from "../../api/types";
 import type {
@@ -30,6 +33,9 @@ export interface ReleaseSource {
   events: EventEnvelope[];
   currentUser: CurrentUserResponse | null;
   capabilities: CapabilityStatus[];
+  releaseReadiness?: ReleaseReadinessRead | null;
+  releaseCandidates?: ReleaseCandidateRead[];
+  releaseArtifacts?: ExportArtifactRead[];
   artifactDownloads?: Readonly<Record<string, ReleaseDownloadLink>>;
   releaseZipDownload?: ReleaseDownloadLink | null;
 }
@@ -169,6 +175,7 @@ export type ReleaseActionId =
   | "generate_artifacts"
   | "request_import_verification"
   | "request_final_approval"
+  | "finalize_release"
   | "download_release_zip";
 
 export interface ReleaseActionAvailability {
@@ -224,5 +231,6 @@ export interface ReleaseOperations {
   generateArtifacts?: (context: ReleaseActionContext) => Promise<ReleaseActionResult | void>;
   requestImportVerification?: (context: ReleaseActionContext) => Promise<ReleaseActionResult | void>;
   requestFinalApproval?: (context: ReleaseActionContext) => Promise<ReleaseActionResult | void>;
+  finalizeRelease?: (context: ReleaseActionContext) => Promise<ReleaseActionResult | void>;
   openCityLocation?: (semanticLocation: "release_logistics") => void;
 }

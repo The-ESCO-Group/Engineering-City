@@ -48,6 +48,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.agents.base.presence import provision_workflow_agents
 from app.core.clock import utcnow
 from app.core.config import Settings
 from app.core.enums import (
@@ -382,11 +383,17 @@ def start_run(
             "reason": note or workflow.reason,
         },
     )
+    # The city is the workflow's home screen, so expose the complete role
+    # roster immediately instead of creating one generic-looking worker only
+    # when its turn reaches the CPU.  This also binds each agent-owned task to
+    # the stable instance that will run it.
+    provision_workflow_agents(db, project, created)
     for task in created:
         record_event(
             db,
             project_id=project.id,
             event_type=EventType.TASK_CREATED,
+            agent_id=task.agent_instance_id,
             task_id=task.id,
             payload={
                 "task_id": str(task.id),

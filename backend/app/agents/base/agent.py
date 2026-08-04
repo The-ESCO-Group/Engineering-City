@@ -23,18 +23,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.base.executor import ActionExecutor, ExecutionResult
+from app.agents.base.presence import (
+    instance_for_task,
+    set_agent_status,
+)
 from app.agents.base.provider import ModelProvider
 from app.agents.base.providers import build_provider
 from app.agents.base.registry import AgentSpec, spec_for
 from app.agents.base.runner import AgentRunner, RunOutcome, resolve_model_configuration
 from app.core.config import Settings
-from app.core.enums import ActionType, AgentKind, AgentStatus, EventType, ObjectType
+from app.core.enums import ActionType, AgentKind, AgentStatus, ObjectType
 from app.core.logging import get_logger
 from app.core.services.evidence_graph import EvidenceGraph, build_graph
-from app.models.agent import AgentDefinition, AgentInstance
 from app.models.evidence import EvidenceAnchor
 from app.models.project import Project
-from app.orchestration.events import record_event
 
 logger = get_logger(__name__)
 
@@ -169,7 +171,12 @@ class BaseAgent(ABC):
         *,
         handoff_handlers: Mapping[ActionType, str] | None = None,
     ) -> AgentResult:
-        instance = ensure_agent_instance(context.db, context.project, self.kind)
+        instance = instance_for_task(
+            context.db,
+            context.project,
+            self.kind,
+            context.task_id,
+        )
         set_agent_status(
             context.db,
             instance,
@@ -251,106 +258,6 @@ class BaseAgent(ABC):
             )
         ).all()
         return {key: str(anchor_id) for key, anchor_id in rows if key}
-
-
-# ---------------------------------------------------------------------------
-# Agent instances and presence
-# ---------------------------------------------------------------------------
-def ensure_agent_instance(db: Session, project: Project, kind: AgentKind) -> AgentInstance:
-    """Get or create this project's instance of an agent."""
-    definition = db.execute(
-        select(AgentDefinition).where(AgentDefinition.kind == kind.value)
-    ).scalar_one_or_none()
-    if definition is None:
-        spec = spec_for(kind)
-        definition = AgentDefinition(
-            kind=kind.value,
-            display_name=spec.display_name if spec else kind.value,
-            description=spec.description if spec else "",
-            building=spec.building if spec else "",
-            handles_task_kinds=[k.value for k in spec.handles_task_kinds] if spec else [],
-        )
-        db.add(definition)
-        db.flush()
-
-    instance = db.execute(
-        select(AgentInstance).where(
-            AgentInstance.project_id == project.id,
-            AgentInstance.definition_id == definition.id,
-        )
-    ).scalar_one_or_none()
-    if instance is None:
-        spec = spec_for(kind)
-        instance = AgentInstance(
-            project_id=project.id,
-            definition_id=definition.id,
-            kind=kind.value,
-            display_name=definition.display_name,
-            status=AgentStatus.IDLE,
-            location=spec.home_location if spec else "",
-        )
-        db.add(instance)
-        db.flush()
-    return instance
-
-
-def set_agent_status(
-    db: Session,
-    instance: AgentInstance,
-    status: AgentStatus,
-    *,
-    activity: str = "",
-    task_id: uuid.UUID | None = None,
-) -> None:
-    """Update presence and emit the event the city view renders.
-
-    Presentational only — nothing about correctness depends on it — but it is
-    what makes a long review legible while it runs.
-    """
-    if instance.status is status and instance.current_activity == activity:
-        return
-
-    instance.status = status
-    instance.current_activity = activity[:255]
-    instance.current_task_id = task_id
-    db.flush()
-
-    record_event(
-        db,
-        project_id=instance.project_id,
-        event_type=EventType.AGENT_STATUS_CHANGED,
-        agent_id=instance.id,
-        task_id=task_id,
-        payload={
-            "agent_id": str(instance.id),
-            "agent_kind": instance.kind,
-            "display_name": instance.display_name,
-            "status": status.value,
-            "current_activity": instance.current_activity,
-            "task_id": str(task_id) if task_id else None,
-        },
-    )
-
-
-def move_agent(db: Session, instance: AgentInstance, location: str) -> None:
-    """Move an agent in the city view."""
-    if instance.location == location:
-        return
-    previous = instance.location
-    instance.location = location[:80]
-    db.flush()
-    record_event(
-        db,
-        project_id=instance.project_id,
-        event_type=EventType.AGENT_LOCATION_CHANGED,
-        agent_id=instance.id,
-        payload={
-            "agent_id": str(instance.id),
-            "agent_kind": instance.kind,
-            "location": instance.location,
-            "previous_location": previous,
-        },
-    )
 
 
 def graph_for(context_db: Session, project: Project) -> EvidenceGraph:

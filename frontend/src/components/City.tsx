@@ -16,6 +16,7 @@ import { useEngineeringData } from "../api/live";
 import type { EventEnvelope } from "../api/types";
 import { useUI } from "../store";
 import type { AgentId } from "../world/ids";
+import { buildCityAgentPresence } from "../world/cityAgentPresence";
 import { CITY_LOCATIONS, type CityLocation } from "../world/locations";
 import {
   selectWorldQuality,
@@ -39,6 +40,7 @@ import { WorldQualityControl } from "./WorldQualityControl";
 import { WorkflowAgentDock } from "./WorkflowAgentDock";
 
 const WORLD_QUALITY_STORAGE_KEY = "esco.world-quality";
+const TERMINAL_PROJECT_STATUSES = new Set(["draft", "completed", "failed", "archived"]);
 
 function eventLabel(event: EventEnvelope) {
   const payload = event.payload;
@@ -160,6 +162,29 @@ export function City() {
       afterSequence: Math.max(0, firstSequence - 1)
     });
   }, [orderedEvents, projectId, timelineIndex]);
+  const projectActive = Boolean(
+    engineering.project && !TERMINAL_PROJECT_STATUSES.has(engineering.project.status)
+  );
+  const cityAgents = useMemo(
+    () => buildCityAgentPresence({
+      replayAgents: replayView.agents,
+      tasks: replayView.tasks,
+      liveInstances: engineering.agents,
+      projectId,
+      projectActive,
+      includeLivePresence: playbackState === "live",
+      throughSequence: replayView.state.lastAppliedSequence
+    }),
+    [
+      engineering.agents,
+      playbackState,
+      projectActive,
+      projectId,
+      replayView.agents,
+      replayView.state.lastAppliedSequence,
+      replayView.tasks
+    ]
+  );
   const timelinePoints = useMemo(
     () => orderedEvents.map((event) => ({
       sequence: event.seq,
@@ -199,7 +224,7 @@ export function City() {
     }
     return { state: "ready" };
   }, [engineering.connection, engineering.dataMode, engineering.fallbackReason, orderedEvents, replayView.sync]);
-  const liveActivityAgents = replayView.agents.map((agent) => ({
+  const liveActivityAgents = cityAgents.map((agent) => ({
     id: agent.id,
     name: agent.displayName,
     state: agent.status === "working" || agent.status === "walking" || agent.status === "reviewing"
@@ -209,8 +234,8 @@ export function City() {
         : "complete" as const,
     task: agent.currentActivity || String(agent.locationId ?? "Ready")
   }));
-  const activeReviewCount = liveActivityAgents.filter((agent) => agent.state === "active").length;
-  const selectedAgent = replayView.agents.find((agent) => agent.id === selectedAgentId) ?? null;
+  const activeAgentCount = liveActivityAgents.filter((agent) => agent.state === "active").length;
+  const selectedAgent = cityAgents.find((agent) => agent.id === selectedAgentId) ?? null;
   const selectedAgentTask = selectedAgent?.taskId
     ? replayView.tasks.find((task) => task.id === selectedAgent.taskId) ?? null
     : null;
@@ -237,7 +262,7 @@ export function City() {
       }))
     : [];
   const citySummary = {
-    activeReviews: activeReviewCount,
+    activeAgents: activeAgentCount,
     openFindings: engineering.dataMode === "demo"
       ? engineering.project?.counts.findings_open || 0
       : engineering.findings.filter((finding) => finding.status === "open").length,
@@ -359,7 +384,7 @@ export function City() {
         <div className="city-command-demo" aria-label="Synthetic demonstration status">
           <span>{engineering.dataMode === "live" ? "Local" : engineering.dataMode === "demo" ? "Demo" : "Offline"}</span>
           <i aria-hidden="true" />
-          <b>{paused ? "Workflow paused" : `${activeReviewCount} reviews active`}</b>
+          <b>{paused ? "Workflow paused" : `${activeAgentCount} agents deployed`}</b>
         </div>
         <div className="tool-row">
           {!isWalking && (
@@ -433,7 +458,7 @@ export function City() {
           selectionRequestKey={selectionRequestKey}
           focusLocationId={focusedLocation?.id ?? null}
           focusRequestKey={focusRequestKey}
-          worldAgents={replayView.agents}
+          worldAgents={cityAgents}
           worldTasks={replayView.tasks}
           worldPackages={replayView.packages}
           selectedAgentId={selectedAgentId}
@@ -471,7 +496,7 @@ export function City() {
         )}
         {!isWalking && (
           <WorkflowAgentDock
-            agents={replayView.agents}
+            agents={cityAgents}
             selectedAgentId={selectedAgentId}
             onSelectAgent={setSelectedAgentId}
           />

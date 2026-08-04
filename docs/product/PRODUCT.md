@@ -36,11 +36,39 @@ Windows setup, local-service supervision, filesystem authorization, support logs
 
 ## Engineering Workspace
 
-The workspace is one traceable review surface rather than disconnected PLC, HMI, and alarm applications. It includes guided intake; authorized files and backend tasks; requirements, devices and I/O, tags, and PLC records; plans, structured change proposals, and revisions; findings with fact/inference/limitations separated; exact evidence citations; and explanation-gated human approvals. HMI and alarm concerns appear through cross-discipline findings, evidence, change impact, reports, and release gates. Unsupported backend operations remain visible but unavailable.
+The workspace is one traceable review surface rather than disconnected PLC, HMI, and alarm applications. Live intake creates the project and its canonical engineering profile in one transaction. The profile records the exact controller/HMI target, firmware and Studio 5000 versions, pinned standards and templates, release mode, safety classification, and restricted domains; an incomplete or unsupported profile blocks generation visibly.
+
+Authorized source files and safe ZIP members become backend-owned records. The installed parsers cover L5X, CSV, XLSX, DOCX, PDF, XML, and text and publish exact evidence anchors plus warnings and unsupported-content records. The evidence-building stage imports only explicit, current L5X and declared I/O-list CSV facts into Project Core. It does not infer missing addresses or types, and it does not overwrite human-authored, generated, approved, restricted, or otherwise occupied canonical records.
+
+The resulting workspace includes files and backend tasks; a Clarification Inbox; requirements, devices and I/O, tags, and PLC records; plans, structured change proposals, and revisions; findings with fact/inference/limitations separated; exact evidence citations; and explanation-gated human approvals. Extracted requirements remain proposed until a named user accepts or rejects them. HMI and alarm concerns appear through cross-discipline findings, evidence, change impact, delivery artifacts, reports, and release gates. Unsupported operations remain visible but unavailable.
+
+## Autonomous production workflow
+
+A production run is a persisted dependency graph, not a browser animation. The local worker leases tasks, checkpoints completed work, resumes after restart, and requeues an expired lease without duplicating a completed stage. In order, it:
+
+1. inventories and parses accepted files, builds the evidence graph, and imports eligible canonical facts;
+2. extracts requirements and plans supported specialist reviews in parallel;
+3. stops for mandatory questions and generation-blocking clarifications;
+4. performs initial senior review, then waits at the project-profile approval gate;
+5. designs and validates tags/I/O, waits at the devices/I/O/tags gate, then designs PLC structure and expands approved logic patterns;
+6. validates logic and delivery, waits at that gate, runs installed delivery/report agents, validates across disciplines, and performs final senior review;
+7. waits at the QA/risk gate and all outstanding finding approvals;
+8. generates a release candidate, records licensed-workstation import verification as passed, failed, unavailable, or not attempted without conflating those states, and waits at the import-verification gate;
+9. asks a named engineer to approve and freeze the manifest, waits at the release gate, then finalizes the immutable delivery archive.
+
+Tasks behind an unresolved gate remain queued. Clarification and approval decisions unblock the affected tasks from persisted state; users do not have to restart the project. Review-only runs stop after review/report delivery and do not pretend to produce a controller release.
 
 ## Reports and Release Center
 
-The Release Center conservatively derives 13 readiness checks from API and event facts. It renders the exact seven-folder package structure from `00 Manifest` through `06 Audit`, keeps all 19 required report types visible, and shows HTML, PDF, DOCX, XLSX, CSV, and JSON availability. A download exists only when the authorized API supplied a generated file URL on its own host. Candidate generation does not imply import verification, approval, or release; those states remain separate.
+The Release Center reads persisted readiness, candidate, artifact, manifest, and archive resources first, with events used for live invalidation and audit context. It conservatively presents 13 readiness checks, keeps all 19 required report types visible, and shows real HTML, PDF, DOCX, XLSX, CSV, and JSON outputs supplied by the backend. It renders the exact `00_Manifest`, `01_Controller`, `02_HMI`, `03_Alarms`, `04_Testing`, `05_Reports`, and `06_Audit` tree, including explicit absence notes when an optional delivery discipline produced nothing.
+
+Creating a candidate, generating artifacts, approving its manifest, finalizing the archive, and downloading the archive are distinct authenticated operations. Finalization verifies the frozen manifest, checksums, approval identity, package path, and expected files before storing a deterministic `RC-####.zip` plus its byte count and SHA-256. Those database and filesystem records survive backend and browser restarts; download streams the stored bytes only after verification. A generated candidate does not imply Studio 5000 import verification, human approval, or release, and the UI keeps those states separate.
+
+## Current capability boundary
+
+The autonomous pipeline can turn supported, explicit source facts and approved templates into a traceable review, reports, and an offline import-ready Rockwell package. It is not a universal vendor-project translator. `.ACD` files, OCR-only/scanned PDF text, unsupported XML/vendor structures, ambiguous I/O sheets, and unqualified restricted-domain work are reported or blocked rather than guessed. Quality therefore depends on parseable source material, a complete target profile, registered standards/templates, and the required human decisions.
+
+The default local installation has no controller connection and no licensed Rockwell workstation. Its highest offline technical verification is deterministic generation plus internal semantic checks and L5X round-trip parsing. Actual Studio 5000/FactoryTalk import verification requires a separately configured licensed-workstation adapter and named approval for that job. Human reviewers remain accountable for requirements, findings, approval gates, risk acceptance, and final delivery.
 
 ## Desktop integration
 

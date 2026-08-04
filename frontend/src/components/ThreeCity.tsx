@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { buildings, type BuildingId } from "../domain";
+import { cityAgentPatrolOffset } from "../world/cityAgentPresence";
 import type { AgentId, LocationId, PackageId } from "../world/ids";
 import { CITY_LOCATIONS } from "../world/locations";
 import {
@@ -21,6 +22,7 @@ import {
 } from "../world/sceneLocations";
 import type { WorldAgent, WorldPackage, WorldTask } from "../world/types";
 import type { CityHomeLayer } from "./CityHomeChrome";
+import "./ThreeCityAgents.css";
 
 export interface ThreeCityProps {
   selectedBuilding: BuildingId | null;
@@ -113,6 +115,7 @@ interface BuildingRuntime {
 
 interface AgentRuntime {
   id: AgentId;
+  status: WorldAgent["status"];
   root: THREE.Group;
   halo: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>;
   coreMaterial: THREE.MeshStandardMaterial;
@@ -3215,6 +3218,7 @@ function createAgentMarker(
   scene.add(root);
   return {
     id: agent.id,
+    status: agent.status,
     root,
     halo,
     coreMaterial,
@@ -3366,22 +3370,39 @@ function syncAgentMarkers(
     const destination: WorldPoint = [node[0] + offset[0], node[1] + offset[1]];
     let runtime = runtimes.get(agent.id);
     if (!runtime) {
+      const originLocationId = !instant
+        ? agent.locationId && agent.locationId !== locationId
+          ? agent.locationId
+          : agent.previousLocationId && agent.previousLocationId !== locationId
+            ? agent.previousLocationId
+            : null
+        : null;
+      const originNode = originLocationId
+        ? getSceneLocationNode(originLocationId).position
+        : null;
+      const initialPosition: WorldPoint = originNode
+        ? [originNode[0] + offset[0], originNode[1] + offset[1]]
+        : destination;
       runtime = createAgentMarker(
         scene,
         palette,
         agent,
-        locationId,
-        destination,
+        originLocationId ?? locationId,
+        initialPosition,
         globalIndex,
         agentPickable
       );
       runtimes.set(agent.id, runtime);
+      if (originLocationId) {
+        beginMarkerRoute(runtime, locationId, destination, agent.id, false);
+      }
     } else {
       const rewound = agent.lastEvent.sequence < runtime.lastSequence;
       beginMarkerRoute(runtime, locationId, destination, agent.id, instant || rewound);
       runtime.lastSequence = agent.lastEvent.sequence;
     }
     runtime.root.visible = true;
+    runtime.status = agent.status;
     const color = agentStatusColor(agent.status);
     runtime.coreMaterial.color.setHex(color);
     runtime.coreMaterial.emissive.setHex(color);
@@ -3642,6 +3663,7 @@ export function ThreeCity({
   const selectAgentRef = useRef(onSelectAgent);
   const labelPositionsChangeRef = useRef(onLabelPositionsChange);
   const fpsSampleRef = useRef(onFpsSample);
+  const agentLabelRefs = useRef(new Map<AgentId, HTMLButtonElement>());
   const pressedKeysRef = useRef(new Set<string>());
   const firstPersonLookRef = useRef<FirstPersonLook>({ yaw: 0, pitch: 0 });
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -4042,6 +4064,8 @@ export function ThreeCity({
       const firstPersonForward = new THREE.Vector3();
       const firstPersonRight = new THREE.Vector3();
       const firstPersonMovement = new THREE.Vector3();
+      const agentLabelPoint = new THREE.Vector3();
+      const rendererSize = new THREE.Vector2();
       let workflowAgentSignature = "";
       let workflowPackageSignature = "";
       const render = (timestamp?: number) => {
@@ -4208,13 +4232,22 @@ export function ThreeCity({
               marker.routeTravelled + lifeDelta * 32
             );
           }
-          if (marker.routeLength > 0) {
+          if (marker.routeLength > 0 && marker.routeTravelled < marker.routeLength) {
             const point = pointAlongRoute(
               marker.route,
               marker.routeTravelled / marker.routeLength
             );
             marker.root.position.x = point[0];
             marker.root.position.z = point[1];
+          } else {
+            const patrol = cityAgentPatrolOffset(
+              marker.id,
+              marker.status,
+              animationElapsed,
+              !state.paused && !state.reducedMotion
+            );
+            marker.root.position.x = marker.destination[0] + patrol[0];
+            marker.root.position.z = marker.destination[1] + patrol[1];
           }
           const wave = state.paused || state.reducedMotion
             ? 0
@@ -4252,7 +4285,29 @@ export function ThreeCity({
           marker.halo.material.opacity = 0.34 + (wave + 1) * 0.12;
           marker.root.rotation.y += state.paused || state.reducedMotion ? 0 : lifeDelta * 0.24;
         });
-        renderer.render(scene, firstPersonActive ? firstPersonCamera : camera);
+        const activeCamera = firstPersonActive ? firstPersonCamera : camera;
+        renderer.getSize(rendererSize);
+        agentMarkers.forEach((marker) => {
+          const label = agentLabelRefs.current.get(marker.id);
+          if (!label || !marker.root.visible) {
+            if (label) label.dataset.visible = "false";
+            return;
+          }
+          marker.root.updateMatrixWorld(true);
+          agentLabelPoint.set(0, 1.62, 0);
+          marker.root.localToWorld(agentLabelPoint);
+          agentLabelPoint.project(activeCamera);
+          const visible = agentLabelPoint.z >= -1 && agentLabelPoint.z <= 1 &&
+            agentLabelPoint.x >= -1.08 && agentLabelPoint.x <= 1.08 &&
+            agentLabelPoint.y >= -1.08 && agentLabelPoint.y <= 1.08;
+          label.dataset.visible = String(visible);
+          if (visible) {
+            const x = (agentLabelPoint.x * 0.5 + 0.5) * rendererSize.x;
+            const y = (-agentLabelPoint.y * 0.5 + 0.5) * rendererSize.y;
+            label.style.transform = `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, 0) translate(-50%, -100%)`;
+          }
+        });
+        renderer.render(scene, activeCamera);
       };
       render();
 
@@ -4439,6 +4494,32 @@ export function ThreeCity({
   return (
     <div className="three-city-host pixi-city-host" style={ROOT_STYLE}>
       <div ref={mountRef} style={CANVAS_MOUNT_STYLE} aria-hidden="true" />
+      <div className="three-city-agent-labels" aria-label="Agents working in the city">
+        {worldAgents
+          .filter((agent) => desiredAgentLocation(agent) !== null)
+          .map((agent) => (
+            <button
+              key={agent.id}
+              ref={(element) => {
+                if (element) agentLabelRefs.current.set(agent.id, element);
+                else agentLabelRefs.current.delete(agent.id);
+              }}
+              type="button"
+              className={`three-city-agent-label is-${agent.status}${selectedAgentId === agent.id ? " is-selected" : ""}`}
+              data-visible="false"
+              aria-label={`Inspect ${agent.displayName}, ${agent.agentKind.replaceAll("_", " ")}, ${agent.status.replaceAll("_", " ")}`}
+              aria-pressed={selectedAgentId === agent.id}
+              title={agent.currentActivity || agent.agentKind.replaceAll("_", " ")}
+              onClick={() => onSelectAgent?.(agent.id)}
+            >
+              <i aria-hidden="true" />
+              <span>
+                <strong>{agent.displayName}</strong>
+                <small>{agent.agentKind.replaceAll("_", " ")} · {agent.status.replaceAll("_", " ")}</small>
+              </span>
+            </button>
+          ))}
+      </div>
       <div className="three-city-mode-badge" style={MODE_BADGE_STYLE}>
         {viewMode === "first-person"
           ? "OPS CITY · FIRST PERSON · WASD TO MOVE"
