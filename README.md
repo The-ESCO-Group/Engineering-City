@@ -1,84 +1,264 @@
 # ESCO Engineering City
 
-Local-first engineering review and delivery software for ESCO Group. The homepage is a large, interactive Three.js engineering city: orbit 360°, zoom from the skyline to individual districts, inspect named agents as they move through project work, or enter optional first-person Walk mode. The city, Engineering Workspace, evidence, approvals, reports, and Release Center all derive from one project state.
+Local-first engineering review and delivery software for ESCO Group. Engineering City turns project intake, autonomous agent work, human review, evidence, reports, and release packaging into one visible 3D operating environment.
 
-## What is implemented
+## Architecture Overview
 
-- Engineering City — 23 named operational zones, dense skyline and infrastructure, canals, bridges, utilities, renewables, logistics, moving traffic and pedestrians, semantic district focus, event replay, quality controls, free orbit/zoom, and bounded Walk mode
-- Quick project launch — one screen asks only for the project name, controller target, source files, and engineering-responsibility acknowledgement. Customer/site/objective are optional, while standards, HMI, release, and restricted-domain overrides remain available under Advanced settings
-- Source intake and Project Core — bounded ZIP expansion plus L5X, CSV, XLSX, DOCX, PDF, XML, and text parsing; exact evidence anchors; requirements, devices, I/O, tags, and PLC records; and a conservative canonical import that copies explicit L5X/I/O-list facts without overwriting human, generated, or approved work
-- Autonomous workflow — a durable, resumable task graph inventories and parses files, builds evidence, extracts requirements, plans specialist work, designs tags and PLC structure, expands approved logic patterns, runs delivery agents and cross-discipline validation, and prepares a release candidate. Multiple workers have stable callsigns, visible city locations, task assignments, and honest waiting/blocked states. Agents create questions instead of filling unknown engineering facts with guesses
-- Human control points — a Clarification Inbox, accept/reject decisions for extracted requirements, initial and final senior review, six named approval gates, finding decisions, and a separate named release approval. Settled decisions, comments, identities, and timestamps remain in the audit trail
-- Delivery workspaces — searchable HMI, alarm, test/commissioning, and documentation master/detail views, with explicit live-empty states when the canonical backend resource is not contracted
-- Operations — searchable agent status/location/task inspection plus a read-only, ordered project-event audit stream with gap and payload detail
-- Delivery and reporting — five read-only cross-discipline audit plugins plus a 19-report catalog and real HTML, PDF, DOCX, XLSX, CSV, and JSON generation behind the backend-owned execution boundary
-- Release Center — persisted readiness, candidates, export artifacts, frozen manifests, and immutable `RC-####.zip` archives. The deterministic package contains `00_Manifest`, `01_Controller`, `02_HMI`, `03_Alarms`, `04_Testing`, `05_Reports`, and `06_Audit`; archive bytes, size, SHA-256, approver, and download path survive process restarts
-- Desktop — Windows-first Tauri 2 shell with loopback-only services, canonical authorized paths, a safe artifact allowlist, approval/failure notifications, support logs, and no general shell/opener permission
+```text
+┌─────────────────────────────────────────────────────────────┐
+│                      User Experience                        │
+│  Three.js Engineering City • React Workspace • Tauri Shell │
+└────────────────────────────┬────────────────────────────────┘
+                             │ REST + WebSocket
+                             │ Contract 1.1.0
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       FastAPI Backend                       │
+│  Authentication • Projects • Evidence • Reviews • Reports  │
+└───────────────┬─────────────────────────────┬───────────────┘
+                │                             │
+                ▼                             ▼
+┌────────────────────────────┐   ┌────────────────────────────┐
+│    Autonomous Workflow     │   │      Project Storage       │
+│ Durable tasks and agents   │   │ SQLite • Files • Artifacts │
+│ Clarifications and gates   │   │ Audit • Release archives   │
+└───────────────┬────────────┘   └────────────────────────────┘
+                │
+                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Human Release Control                    │
+│ Requirements • Findings • Approvals • Final ZIP handoff    │
+└─────────────────────────────────────────────────────────────┘
+```
 
-Live REST, authentication, typed Project Core decisions, persisted Release Center operations, event replay, and WebSocket updates are integrated against contract `1.1.0`. OpenAPI and event/domain schemas in `contracts/` generate checked frontend consumers; the UI refuses a mismatched backend and never substitutes demo success for an unavailable operation.
+The city is not a separate animation layered over the product. Its districts, named agents, task activity, alerts, and release state are visual representations of the same project data used by the Engineering Workspace.
 
-## Run the synthetic demo
+## Safety & Design Principles
 
-Requirements: PowerShell 7, Node.js 20+, and npm.
+> **Critical: Engineering City does not control live industrial equipment.**
+
+- No PLC upload, download, online edit, mode change, force, or equipment command
+- AI output is advisory; restricted and release decisions require an authorized human record
+- Agents ask clarification questions instead of inventing missing engineering facts
+- No telemetry, silent cloud fallback, or automatic external-provider connection
+- Project and artifact paths are restricted to configured local storage roots
+- Desktop and browser services use explicitly validated loopback URLs
+- Demo data is visibly labelled and cannot produce a fabricated release download
+
+## Current State
+
+### Implemented
+
+- **Engineering City** — 23 named zones, dense infrastructure, free 360° orbit, zoom, optional bounded Walk mode, moving traffic and pedestrians, district focus, and event replay
+- **Quick Project Launch** — project name, controller target, source files, and engineering acknowledgement on one screen; specialist settings remain optional
+- **Source Intake** — bounded ZIP expansion and parsing for L5X, CSV, XLSX, DOCX, PDF, XML, and text sources
+- **Project Core** — evidence-backed requirements, devices, I/O, tags, and PLC records with explicit accept/reject decisions
+- **Autonomous Workflow** — durable, resumable task graph for intake, evidence, requirements, planning, delivery, validation, reporting, and release preparation
+- **Visible Agents** — multiple workers with stable callsigns, city locations, task assignments, and honest active, waiting, blocked, or completed states
+- **Human Control Points** — clarification inbox, requirement decisions, findings, six approval gates, senior review, and final release authorization
+- **Delivery Workspaces** — HMI, alarms, testing, commissioning, documentation, planning, change sets, and revisions
+- **Reporting** — five cross-discipline audit plugins and a 19-report catalog with HTML, PDF, DOCX, XLSX, CSV, and JSON output
+- **Release Center** — persisted readiness, frozen manifests, immutable archives, SHA-256 verification, named approval, and authenticated downloads
+- **Desktop Application** — Windows-first Tauri 2 shell with supervised loopback services, safe artifact handling, notifications, and support logs
+
+### Integration Status
+
+| Component | Status | Notes |
+|---|---|---|
+| 3D city and workspace | Ready | Both derive from the active project state |
+| Local authentication | Ready | Development users are seeded by default |
+| Agent orchestration | Ready | Durable work resumes from the database |
+| Human decisions | Ready | Clarifications, requirements, findings, approvals, and release gates persist |
+| Reports and artifacts | Ready | Generated by the backend, never fabricated in the browser |
+| Release archive | Ready | Deterministic seven-folder ZIP with stored hash and provenance |
+| Desktop shell | Ready | Windows-first Tauri application |
+| External AI providers | Optional | Disabled unless explicitly configured |
+| Rockwell workstation adapter | Optional | Disabled unless a licensed workstation and named authorization are configured |
+
+## Quick Start
+
+### Requirements
+
+| Tool | Minimum | Required For |
+|---|---:|---|
+| PowerShell | 7 | Setup, launch, and validation scripts |
+| Node.js | 20 | Frontend and desktop tooling |
+| npm | Current with Node 20+ | JavaScript dependencies |
+| Python | 3.12 | Local backend and autonomous workflow |
+| Rust | Current stable | Desktop checks and builds only |
+
+### 1. Clone the Repository
+
+```powershell
+git clone https://github.com/The-ESCO-Group/Engineering-City.git
+Set-Location Engineering-City
+```
+
+### 2. Install Dependencies
+
+```powershell
+.\scripts\product\setup.ps1
+```
+
+Add `-IncludeDesktop` when preparing a workstation for Tauri development.
+
+### 3. Start Engineering City
+
+```powershell
+.\scripts\product\dev.ps1
+```
+
+The launcher starts the backend, verifies its health, starts the frontend, and opens the city.
+
+| Service | Local Address |
+|---|---|
+| Engineering City | `http://127.0.0.1:4173` |
+| Backend health | `http://127.0.0.1:8000/api/health` |
+
+### 4. Sign In
+
+The development-only seeded administrator is:
+
+```text
+Email:    admin@esco.internal
+Password: esco-demo-admin
+```
+
+These are repository-known development credentials. Replace them and disable demo-user seeding for any administered deployment.
+
+### Synthetic Demo
+
+To explore the city without the backend:
 
 ```powershell
 .\scripts\product\setup.ps1 -SkipBackend
 .\scripts\product\run-demo.ps1
 ```
 
-Open `http://127.0.0.1:4173/?demo=1`. Every synthetic record is labelled `DEMO DATA`. Demo report generation and downloads stay disabled: the catalog and release state are inspectable, but no browser-fabricated file is offered.
+Open `http://127.0.0.1:4173/?demo=1`. Synthetic records are labelled `DEMO DATA`, and report or release downloads remain disabled.
 
-## Run the complete local stack
+## Project Workflow
 
-Python 3.12+ is also required.
+1. **Create a project** — enter the project name and controller target, attach source files, acknowledge the engineering boundary, and select **Create project & start agents**.
+2. **Watch the city activate** — the app returns to the 3D city, where named agents move to their assigned districts and expose live task status.
+3. **Review extracted facts** — inspect requirements, devices, I/O, tags, PLC records, and their exact evidence anchors.
+4. **Resolve questions** — answer mandatory clarifications and accept or reject extracted requirements. Blocked downstream work resumes after the decision is stored.
+5. **Inspect agent output** — review task results, findings, change sets, reports, HMI, alarms, testing, and documentation in their dedicated workspaces.
+6. **Approve engineering gates** — each request shows its evidence, limitations, and validation state. A rejection or unresolved error remains a visible block.
+7. **Release the project** — inspect the candidate manifest, record the final named approval, finalize the archive, and download the verified ZIP from the authenticated local API.
 
-```powershell
-.\scripts\product\setup.ps1
-.\scripts\product\dev.ps1
+The workflow is autonomous between gates, not unconditionally autonomous. Human engineering authority remains mandatory wherever the system requests clarification, accepts a requirement, resolves a finding, approves a gate, or releases the customer handoff.
+
+## Supported Project Inputs
+
+| Format | Treatment |
+|---|---|
+| `.zip` | Bounded expansion followed by supported-file discovery |
+| `.l5x` | Parsed evidence plus conservative canonical import of explicit controller facts |
+| `.csv` | Parsed tabular evidence; declared I/O facts can enter the canonical project core |
+| `.xlsx` | Parsed workbook evidence |
+| `.docx` | Parsed document evidence |
+| `.pdf` | Parsed text evidence when the PDF contains extractable text |
+| `.xml`, `.txt` | Parsed structured or plain-text evidence |
+
+Unknown or unsupported formats remain visible as source evidence; they are never silently treated as successfully imported engineering data.
+
+## Release Package
+
+Every finalized release uses the same deterministic structure:
+
+```text
+RC-####.zip
+├── 00_Manifest/
+├── 01_Controller/
+├── 02_HMI/
+├── 03_Alarms/
+├── 04_Testing/
+├── 05_Reports/
+└── 06_Audit/
 ```
 
-The development script starts and supervises the loopback backend first, validates `/api/health`, configures explicit local CORS origins, then starts the frontend. It refuses to reuse an unknown process already occupying either port.
+Archive bytes, size, SHA-256, candidate manifest, approver, provenance, and download path persist across process restarts.
 
-Open `http://127.0.0.1:4173` and sign in with the development-only seeded administrator, `admin@esco.internal` / `esco-demo-admin`. Set `ESCO_BOOTSTRAP_ADMIN_EMAIL`, `ESCO_BOOTSTRAP_ADMIN_PASSWORD`, and `ESCO_BOOTSTRAP_DEMO_USERS=false` for an administered deployment; the defaults are repository-known demo credentials, not production secrets.
+## Runtime Configuration
 
-To preserve an existing database while starting a separate local workspace, pass an explicit repository-relative or absolute data directory, for example `./scripts/product/dev.ps1 -DataDirectory data/local-live`. The selected directory contains both the SQLite database and project artifacts; it is never reset by the launcher.
+The product launcher configures safe local defaults. Common overrides are:
 
-## Run an engineering project
+| Variable | Development Default | Purpose |
+|---|---|---|
+| `ESCO_BOOTSTRAP_ADMIN_EMAIL` | `admin@esco.internal` | Seeded local administrator |
+| `ESCO_BOOTSTRAP_ADMIN_PASSWORD` | `esco-demo-admin` | Seeded development password |
+| `ESCO_BOOTSTRAP_DEMO_USERS` | `true` | Enables development user seeding |
+| `ESCO_DATA_DIR` | `data` | SQLite database and local product data |
+| `ESCO_PROJECTS_DIR` | `data/projects` | Authorized project and artifact root |
+| `ESCO_WORKER_ENABLED` | `true` | Runs the autonomous workflow worker |
+| `VITE_ESCO_API_BASE` | Set by launcher | Browser API endpoint |
+| `VITE_DEMO_MODE` | `false` | Enables explicitly labelled synthetic mode |
 
-1. Open **Project intake**, enter the project name and controller target, add the requirements/project files, acknowledge the engineering boundary, and select **Create project & start agents**.
-2. The app returns directly to the city. Follow the named agents, task locations, and live activity before opening **Tasks**, **Clarifications**, or **Project Core** for detail.
-3. Answer mandatory questions and explicitly accept or reject extracted requirements. Downstream tasks resume from the database after those decisions.
-4. Review each approval request and its evidence, limitations, and validation result. A rejection or unresolved error remains a named block; the workflow does not convert it into success.
-5. For a production run, inspect the candidate in **Release Center**. After the candidate manifest and release gate have a current named approval, finalization stores an immutable ZIP under the project's release storage. Download is served only from the authenticated local API and re-verifies the stored archive.
+Use a separate local workspace without resetting the normal database:
 
-The workflow is autonomous between gates, not unconditionally autonomous. Human engineering authority remains mandatory wherever the system asks a question, accepts a requirement, approves findings or a gate, or accepts the final customer handoff.
+```powershell
+.\scripts\product\dev.ps1 -DataDirectory data\local-live
+```
 
-## Validate the product
+External providers and the licensed workstation adapter require separate, explicit configuration. The normal launcher does not contact either one.
+
+## Repository Layout
+
+```text
+Engineering-City/
+├── backend/                 FastAPI services, orchestration, agents, and reports
+├── frontend/                React, Three.js city, and Engineering Workspace
+├── desktop/                 Tauri 2 Windows desktop shell
+├── contracts/               Versioned API, event, and domain contracts
+├── fixtures/                Synthetic project fixtures
+├── infra/                   Backend and product infrastructure
+├── scripts/                 Setup, launch, build, smoke, and validation scripts
+├── docs/                    Product, backend, and handoff documentation
+└── README.md
+```
+
+## Validation
+
+### Product Checks
 
 ```powershell
 .\scripts\product\test.ps1
 .\scripts\product\test.ps1 -IncludeE2E
 .\scripts\product\test.ps1 -IncludeLiveE2E
+```
+
+The live end-to-end suite launches isolated frontend, backend, and SQLite instances. It proves login, typed project creation, ZIP intake, reload persistence, workflow execution, human decisions, stored report bytes, download behavior, and completion without touching the normal development database.
+
+### Additional Checks
+
+```powershell
 pwsh -NoProfile -File .\scripts\product\tests\common.tests.ps1
 .venv\Scripts\python.exe -m pytest backend\tests_delivery -q
 cargo test --locked --manifest-path desktop\src-tauri\Cargo.toml
 cargo clippy --locked --all-targets --manifest-path desktop\src-tauri\Cargo.toml -- -D warnings
 ```
 
-Rust is required for desktop checks and builds. Tauri CLI 2 is pinned in `desktop/package.json` and installed repository-locally by `setup.ps1 -IncludeDesktop`; no global CLI install is required.
+## Known Limitations
 
-`-IncludeLiveE2E` launches a fresh isolated SQLite backend and separate Vite server, then proves login, typed project creation, ZIP intake, reload persistence, workflow execution, human decisions, stored report bytes, browser download, and completion. It never touches the normal development database. Backend production-workflow and release-container tests separately cover the persisted seven-folder archive path.
+- `.ACD` project parsing is not supported
+- Scanned PDF OCR is not supported
+- Physical-behavior simulation is not a substitute for commissioning or field validation
+- Controller communications and automatic engineering approval are intentionally unavailable
+- Formats without a dedicated, tested canonical importer remain evidence only
+- FactoryTalk or Studio 5000 import verification requires a separately configured licensed workstation and named authorization
+- The normal offline result is an **import-ready** candidate, not an **import-verified** controller project
 
-## Safety boundary
+## Documentation
 
-- No telemetry, silent cloud fallback, or automatic external-provider connection
-- No secrets in frontend bundles
-- No PLC/controller upload, download, online edit, mode change, force, or live equipment control
-- AI output remains advisory; restricted and release decisions require an authorized human record
-- Desktop URLs are structurally validated loopback URLs; redirects are not followed outside that boundary
-- Project and artifact paths are canonicalized, limited to configured local roots, and reject UNC/device namespaces
-- Report downloads must remain on the configured API host
+- [Product guide](docs/product/PRODUCT.md)
+- [Windows and desktop guide](docs/product/DESKTOP.md)
+- [Backend documentation](docs/backend/)
+- [Current Sol handoff](docs/handoffs/SOL.md)
 
-Supported parsers, report providers, and workstation-adapter status are backend-reported. `.ACD` parsing, OCR of scanned PDFs, physical-behavior simulation, controller communications, and automatic engineering approval are unsupported. L5X and declared I/O CSV facts have a canonical importer; other vendor project formats remain evidence until a dedicated, tested importer exists. FactoryTalk/Studio 5000 import verification requires a separately configured licensed workstation and named authorization, so the normal offline result is an explicitly labelled import-ready candidate, not an import-verified controller project.
+## Support
 
-See the [product guide](docs/product/PRODUCT.md), [Windows and desktop guide](docs/product/DESKTOP.md), and [current Sol handoff](docs/handoffs/SOL.md).
+- The product launcher prints the support-log location when it starts
+- Check backend health at `http://127.0.0.1:8000/api/health`
+- Review the guides in `docs/` before enabling providers or workstation integrations
+- Report reproducible problems in [GitHub Issues](https://github.com/The-ESCO-Group/Engineering-City/issues)
