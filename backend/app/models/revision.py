@@ -366,9 +366,13 @@ class ImpactReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: quietly, so they are listed separately rather than folded into the total.
     unresolved_references: Mapped[list[Any]] = mapped_column(JSONList, default=list, nullable=False)
 
-    highest_severity: Mapped[ValidationSeverity] = mapped_column(
-        default=ValidationSeverity.INFORMATION, nullable=False
-    )
+    #: No default. ``INFORMATION`` is the "this breaks nothing" end of the
+    #: scale, and a report that has not been computed must not be able to
+    #: present itself there by omission. ``app.engineering.impact`` builds the
+    #: row only after the sweeps have run and always states this, so requiring
+    #: it costs nothing and makes any future writer that forgets fail at the
+    #: flush rather than in front of a reviewer.
+    highest_severity: Mapped[ValidationSeverity] = mapped_column(nullable=False)
     requires_human_approval: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     #: Written to be read aloud in a review: what breaks, and what must be done.
     summary: Mapped[str] = mapped_column(Text, default="", nullable=False)

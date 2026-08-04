@@ -923,6 +923,60 @@ def test_whitespace_only_file_raises_a_parser_error(tmp_path: Path, settings: Se
         _parse(document, settings)
 
 
+#: Built rather than written as an escape in a literal, so what these cases feed
+#: the parser is unambiguously the character the database cannot store.
+NUL = chr(0)
+
+
+@pytest.mark.parametrize(
+    ("case", "document"),
+    [
+        ("element text", f"<root><item>pump{NUL} station</item></root>"),
+        ("attribute value", f'<root attr="a{NUL}b"><item>x</item></root>'),
+        ("character reference", "<root><item>a&#0;b</item></root>"),
+        ("cdata section", f"<root><item><![CDATA[a{NUL}b]]></item></root>"),
+        ("tail text", f"<root><item>x</item>{NUL}tail</root>"),
+        ("comment", f"<root><!-- a{NUL} b --><item>x</item></root>"),
+        ("before the root", f"{NUL}<root><item>x</item></root>"),
+    ],
+)
+def test_a_document_carrying_a_nul_is_refused_rather_than_recorded(
+    case: str, document: str, tmp_path: Path, settings: Settings
+) -> None:
+    """Why this parser needs no NUL sanitiser, asserted rather than assumed.
+
+    A NUL cannot be stored in a PostgreSQL text column or a jsonb document, so
+    the text and CSV parsers replace it. This one does not, and must not be
+    "made consistent" with them without re-checking this: XML 1.0 forbids the
+    character outright and the expat parser underneath
+    :func:`app.security.xml_safety.parse_xml_file` refuses every route into a
+    document, including a numeric character reference and a CDATA section. A
+    sanitiser here would be unreachable code standing in for a guarantee.
+
+    If this test ever starts failing, the parser has been changed to a
+    recovering one and the sanitiser is now required.
+    """
+    path = _write(tmp_path, "nul.xml", document)
+
+    with pytest.raises(ParserError) as excinfo:
+        _parse(path, settings)
+
+    assert "Malformed XML" in excinfo.value.message, case
+
+
+def test_a_wide_encoded_document_is_still_read(tmp_path: Path, settings: Settings) -> None:
+    """The counterweight: NUL *bytes* are ordinary in UTF-16 and must not refuse a file."""
+    path = tmp_path / "utf16.xml"
+    path.write_bytes(
+        '<?xml version="1.0" encoding="utf-16"?><root><item>ok</item></root>'.encode("utf-16")
+    )
+
+    result = _parse(path, settings)
+
+    assert _element(result, "/root/item")["text"] == "ok"
+    assert NUL not in json.dumps(result.content)
+
+
 def test_nesting_beyond_the_depth_limit_is_refused(tmp_path: Path, settings: Settings) -> None:
     levels = 10
     document = _write(tmp_path, "deep.xml", "<n>" * levels + "leaf" + "</n>" * levels)

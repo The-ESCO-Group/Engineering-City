@@ -24,11 +24,13 @@ Three columns exist purely so that expense stays visible rather than surprising:
 
 from __future__ import annotations
 
+import hashlib
 import uuid
+from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint, event, select
+from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from app.core.enums import (
     BaseDataType,
@@ -58,11 +60,16 @@ class Tag(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Base):
         # Logix identity is (scope, name): the same name may legitimately exist
         # controller-scoped and once per program.
         #
-        # Note the SQL NULL semantics. ``scope_program_id`` is NULL for
-        # controller-scoped tags and NULL never equals NULL, so this constraint
-        # does *not* catch a duplicate controller-scoped name on PostgreSQL.
-        # The tag validator raises ``TagValidationCode.DUPLICATE_NAME`` for that
-        # case; the constraint is the backstop for the program-scoped half.
+        # Note the SQL NULL semantics, which SQLite and PostgreSQL share.
+        # ``scope_program_id`` is NULL for controller-scoped tags and NULL never
+        # equals NULL, so this constraint does *not* catch a duplicate
+        # controller-scoped name on either backend. A test that inserts two
+        # controller-scoped ``Motor_Run`` tags passes in demo mode because the
+        # constraint is inert there too, not because SQLite is the permissive
+        # one; do not read a green SQLite run as evidence that the constraint
+        # works. The tag validator raises ``TagValidationCode.DUPLICATE_NAME``
+        # for that case, which is an advisory finding rather than a write
+        # barrier; the constraint is the backstop for the program-scoped half.
         UniqueConstraint(
             "project_id",
             "scope",
@@ -110,7 +117,16 @@ class Tag(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Base):
     #: string on purpose: it is a value we round-trip into the export unchanged,
     #: and an enum here would force us to reject an export we can otherwise
     #: reproduce faithfully.
-    external_access: Mapped[str] = mapped_column(String(20), default="Read/Write", nullable=False)
+    #:
+    #: Empty means the source did not state it, matching
+    #: :attr:`UDTMember.external_access`. Not defaulted to ``Read/Write``: that
+    #: is the most permissive setting Logix offers, it would be written verbatim
+    #: onto every generated tag — interlock and permissive status bits included —
+    #: by the L5X and CSV writers, and it would arrive in the customer's package
+    #: indistinguishable from a value they actually chose. Round-tripping a value
+    #: unchanged only means something if an unstated one stays unstated; both
+    #: generators already omit the attribute when this is empty.
+    external_access: Mapped[str] = mapped_column(String(20), default="", nullable=False)
     is_constant: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     is_alias: Mapped[bool] = mapped_column(default=False, nullable=False)
@@ -297,6 +313,62 @@ class DataTypeDefinition(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampM
     source: Mapped[str] = mapped_column(String(40), default="", nullable=False)
 
 
+#: Separates the fields of one member, and one member from the next, inside the
+#: string a UDT checksum is taken over. Unit/record separators rather than
+#: something typeable, so no member name, type name or dimension can contain one
+#: and shift a field boundary — ``("A", "B_C")`` and ``("A_B", "C")`` must not
+#: canonicalise to the same bytes.
+_UDT_FIELD_SEPARATOR = "\x1f"
+_UDT_MEMBER_SEPARATOR = "\x1e"
+
+
+def udt_checksum(members: Iterable[UDTMember]) -> str:
+    """SHA-256 over a normalised member list: name, type, dimensions, order.
+
+    This is the function :attr:`UDTDefinition.checksum` documents. Two types that
+    claim to be the same standard type but hash differently have diverged, and a
+    divergent ``ESCO_Motor`` between two controllers is exactly the defect that
+    surfaces as a broken faceplate months later.
+
+    What is in it, and why:
+
+    * **name, base type, concrete type name, dimensions** — the four things that
+      decide the member's meaning and its memory layout. A nested UDT member is
+      identified by ``data_type_name``, so ``Motor`` and ``Valve`` at the same
+      ordinal do not collide.
+    * **position, not the stored ordinal.** Order is part of the type's identity
+      because it determines BOOL bit packing, but the ordinal *numbers* are not:
+      renumbering ``0, 1, 2`` to ``10, 20, 30`` without moving anything is not a
+      divergence and must not read as one.
+    * **not description, not external_access, not the ``hidden`` flag.** A
+      re-worded member comment is not a change to the shape a faceplate binds
+      against, and reporting it as one would train people to ignore the check.
+      A Logix hidden backing member still appears here as a member with a name
+      and a type, so a difference in the packed set is caught by the list itself.
+
+    Soft-deleted members are excluded: a member with a ``deleted_at`` is not part
+    of the type any more, and a checksum that still counted it would report two
+    types as divergent after one of them had a member removed and re-added.
+    """
+    live = sorted(
+        (member for member in members if member.deleted_at is None),
+        key=lambda member: (member.ordinal or 0, member.name or ""),
+    )
+    canonical = _UDT_MEMBER_SEPARATOR.join(
+        _UDT_FIELD_SEPARATOR.join(
+            (
+                str(position),
+                (member.name or "").strip(),
+                str(member.base_data_type or ""),
+                (member.data_type_name or "").strip(),
+                (member.dimensions or "").strip(),
+            )
+        )
+        for position, member in enumerate(live)
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 class UDTDefinition(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Base):
     """A user-defined type and the shape it imposes on every tag of that type.
 
@@ -318,11 +390,19 @@ class UDTDefinition(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin,
     member_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     #: The library template this type was instantiated from, when it was.
     template_id: Mapped[str] = mapped_column(String(120), default="", nullable=False)
-    #: sha256 of the normalised member list (name, type, dimensions, order).
-    #: Two types that claim to be the same standard type but hash differently
-    #: have diverged, which is a comparison you cannot make on the name alone —
-    #: and a divergent ``ESCO_Motor`` between two controllers is exactly the
-    #: defect that surfaces as a broken faceplate months later.
+    #: sha256 of the normalised member list (name, type, dimensions, order), as
+    #: computed by :func:`udt_checksum`. Two types that claim to be the same
+    #: standard type but hash differently have diverged, which is a comparison
+    #: you cannot make on the name alone — and a divergent ``ESCO_Motor`` between
+    #: two controllers is exactly the defect that surfaces as a broken faceplate
+    #: months later.
+    #:
+    #: Maintained by :func:`_refresh_udt_checksums` on every flush that touches
+    #: a type or one of its members, rather than by whichever code path happens
+    #: to write the rows. A field that documents an integrity guarantee and is
+    #: left at ``""`` by one writer is worse than no field: two divergent types
+    #: then read as two identical empty strings, and the comparison that was
+    #: supposed to make the divergence obvious silently agrees.
     checksum: Mapped[str] = mapped_column(String(64), default="", nullable=False)
 
     members: Mapped[list[UDTMember]] = relationship(
@@ -362,6 +442,93 @@ class UDTMember(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Bas
     hidden: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     udt: Mapped[UDTDefinition] = relationship(back_populates="members")
+
+
+def _owns(member: UDTMember, udt: UDTDefinition) -> bool:
+    """Whether ``member`` will belong to ``udt`` once the flush completes.
+
+    Both spellings are checked because both happen. The changeset engine builds
+    a row as ``UDTMember(**fields)`` from column values, so it sets ``udt_id``
+    and never touches the relationship; a parser or a test appending to
+    ``udt.members`` sets the relationship and leaves ``udt_id`` for the flush.
+    """
+    if member.udt is udt:
+        return True
+    return udt.id is not None and member.udt_id == udt.id
+
+
+def _members_after_flush(session: Session, udt: UDTDefinition) -> list[UDTMember]:
+    """Every member ``udt`` will have once this flush completes.
+
+    Deliberately not ``udt.members``. That collection is loaded once and is not
+    refreshed by a flush, so after the changeset engine has written members one
+    operation at a time — each with its own ``flush()`` — it is stale by however
+    many members were added since it was first read. Querying inside
+    ``before_flush`` is safe and current: autoflush is suppressed during a flush,
+    so the query returns exactly what is already in the transaction, and the rows
+    still pending are the ones in ``session.new``.
+    """
+    doomed = set(session.deleted)
+    members: list[UDTMember] = []
+    if udt.id is not None:
+        members.extend(
+            member
+            for member in session.execute(
+                select(UDTMember).where(UDTMember.udt_id == udt.id)
+            ).scalars()
+            if member not in doomed
+        )
+    known = set(members)
+    members.extend(
+        obj
+        for obj in session.new
+        if isinstance(obj, UDTMember) and obj not in known and _owns(obj, udt)
+    )
+    return members
+
+
+@event.listens_for(Session, "before_flush")
+def _refresh_udt_checksums(session: Session, flush_context: Any, instances: Any) -> None:
+    """Recompute :attr:`UDTDefinition.checksum` for every type this flush touches.
+
+    Placed here, on the model, rather than in whichever service writes the rows,
+    because there is more than one such writer — the changeset engine creates
+    UDTs and members generically from column values, an L5X import will create
+    them from a parsed export — and a guarantee that each writer has to remember
+    to uphold is a guarantee that one of them will not.
+
+    ``before_flush`` is the documented hook for deriving column values: anything
+    set here joins the flush that is about to run, so the checksum is written in
+    the same transaction as the members it describes and there is no window in
+    which the two disagree.
+    """
+    affected: list[UDTDefinition] = []
+    seen: set[int] = set()
+    doomed = set(session.deleted)
+
+    def consider(udt: UDTDefinition | None) -> None:
+        if udt is None or udt in doomed or id(udt) in seen:
+            return
+        seen.add(id(udt))
+        affected.append(udt)
+
+    for obj in (*session.new, *session.dirty, *session.deleted):
+        if isinstance(obj, UDTDefinition):
+            consider(obj)
+        elif isinstance(obj, UDTMember):
+            # A pending member carries no loaded relationship, so fall back to
+            # the foreign key. ``Session.get`` reads the identity map first and
+            # only queries when it has to.
+            parent = obj.udt
+            if parent is None and obj.udt_id is not None:
+                parent = session.get(UDTDefinition, obj.udt_id)
+            consider(parent)
+
+    for udt in affected:
+        members = _members_after_flush(session, udt)
+        digest = udt_checksum(members)
+        if udt.checksum != digest:
+            udt.checksum = digest
 
 
 class AOIDefinitionReference(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Base):

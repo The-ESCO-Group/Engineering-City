@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.enums import (
@@ -122,14 +122,57 @@ class ObjectEvidenceLink(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "object_evidence_links"
     __table_args__ = (
-        UniqueConstraint(
+        # One link per (object, basis). A single UNIQUE over the four basis
+        # columns cannot express that: three of them are NULL on every row the
+        # application can produce, NULL never equals NULL, so such a constraint
+        # can never be violated and the table would have no uniqueness at all.
+        # Because exactly one basis column is set per row, the rule decomposes
+        # into one partial unique index per basis kind, each covering only the
+        # rows where that basis is present, which is a predicate both
+        # PostgreSQL and SQLite enforce.
+        #
+        # ``basis_kind`` is deliberately absent from all four: citing the same
+        # anchor for the same object twice is a duplicate however the second
+        # copy classifies itself. That matches the check-then-insert in
+        # ``engineering/merge.py``, which these indexes now backstop under
+        # concurrent merges.
+        Index(
+            "uq_object_evidence_links_anchor",
             "object_type",
             "object_id",
             "anchor_id",
+            unique=True,
+            sqlite_where=text("anchor_id IS NOT NULL"),
+            postgresql_where=text("anchor_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_object_evidence_links_requirement",
+            "object_type",
+            "object_id",
             "requirement_id",
+            unique=True,
+            sqlite_where=text("requirement_id IS NOT NULL"),
+            postgresql_where=text("requirement_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_object_evidence_links_decision",
+            "object_type",
+            "object_id",
             "decision_id",
+            unique=True,
+            sqlite_where=text("decision_id IS NOT NULL"),
+            postgresql_where=text("decision_id IS NOT NULL"),
+        ),
+        # ``template_id`` is NOT NULL with an empty-string default rather than
+        # nullable, so "no template basis" is '' and the predicate excludes it.
+        Index(
+            "uq_object_evidence_links_template",
+            "object_type",
+            "object_id",
             "template_id",
-            name="uq_object_evidence_links_object_id_anchor_id",
+            unique=True,
+            sqlite_where=text("template_id != ''"),
+            postgresql_where=text("template_id != ''"),
         ),
         Index("ix_object_evidence_links_object", "object_type", "object_id"),
     )
@@ -142,8 +185,21 @@ class ObjectEvidenceLink(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     object_id: Mapped[uuid.UUID] = mapped_column(GUID, nullable=False)
 
     #: Exactly one of these four is set, matching ``basis_kind``.
+    #:
+    #: ``SET NULL`` rather than ``CASCADE``, and the difference is the whole
+    #: point of the table. Anchors are hard-deleted on every re-parse — anchor
+    #: keys are positional, so a routine rename or a parser-version bump makes
+    #: the old keys disappear and
+    #: :func:`app.core.services.parsing._persist_anchors` removes the rows. A
+    #: cascade here would take the citation with them, so an object an engineer
+    #: had already approved would be left with no basis *and* nothing recording
+    #: that it ever had one. With ``SET NULL`` the link survives: ``basis_kind``
+    #: and ``note`` still say what the object was built on and why, and
+    #: :attr:`satisfies_traceability` turns False, which is a reportable state
+    #: rather than a silent disappearance. Mirrors
+    #: :attr:`app.models.requirements.RequirementSource.anchor_id`.
     anchor_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID, ForeignKey("evidence_anchors.id", ondelete="CASCADE"), nullable=True, index=True
+        GUID, ForeignKey("evidence_anchors.id", ondelete="SET NULL"), nullable=True, index=True
     )
     requirement_id: Mapped[uuid.UUID | None] = mapped_column(GUID, nullable=True, index=True)
     decision_id: Mapped[uuid.UUID | None] = mapped_column(GUID, nullable=True, index=True)

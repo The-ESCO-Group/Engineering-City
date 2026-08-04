@@ -57,6 +57,7 @@ from app.core.enums import (
     RecommendationStatus,
     ReleaseCandidateStatus,
     ReleaseMode,
+    RequirementStatus,
     RestrictedDomain,
     RestrictedDomainMode,
     RoutineLanguage,
@@ -94,6 +95,7 @@ from app.models.release import (
     ValidationRun,
     WorkstationVerificationJob,
 )
+from app.models.requirements import Requirement
 from app.models.revision import ApprovalGate
 from app.models.tags import Tag
 from app.models.user import User
@@ -165,6 +167,26 @@ def _platform(db: Session, project: Project, **overrides: object) -> TargetPlatf
     db.add(platform)
     db.flush()
     return platform
+
+
+def _requirement(
+    db: Session,
+    project: Project,
+    *,
+    status: RequirementStatus = RequirementStatus.ACCEPTED,
+    reference: str = "REQ-001",
+) -> Requirement:
+    requirement = Requirement(
+        project_id=project.id,
+        reference=reference,
+        title="Conveyor stops when the guard opens",
+        statement="The conveyor shall stop when the guard door opens.",
+        source_text="The conveyor stops when the guard door opens.",
+        status=status,
+    )
+    db.add(requirement)
+    db.flush()
+    return requirement
 
 
 def _plant(db: Session, project: Project) -> Device:
@@ -310,6 +332,7 @@ def _ready_project(db: Session, project: Project) -> None:
     """Everything the five reachable gates need, and nothing they do not."""
     _profile(db, project)
     _platform(db, project)
+    _requirement(db, project)
     _plant(db, project)
     _tag(db, project)
     _logic(db, project)
@@ -492,6 +515,29 @@ def test_each_gate_reports_its_own_failure_precisely(
     gate = _gate(db, project, key)
     assert criterion in _keys(gate)
     assert detail_fragment in _details(gate)
+
+
+def test_qa_gate_refuses_a_human_decision_over_an_unreviewed_serious_finding(
+    db: Session, project: Project
+) -> None:
+    """A disposition cannot substitute for the independent review that had to precede it."""
+    _ready_project(db, project)
+    db.add(
+        Finding(
+            project_id=project.id,
+            title="Guard interlock is accepted but not independently reviewed",
+            severity=FindingSeverity.HIGH,
+            status=FindingStatus.ACCEPTED,
+            is_reviewed=False,
+            dedupe_key="synthetic-unreviewed-high",
+        )
+    )
+    db.flush()
+
+    gate = _gate(db, project, ApprovalGateKey.QA_AND_RISK)
+
+    assert "serious_findings_senior_reviewed" in _keys(gate)
+    assert "independent senior review" in _details(gate)
 
 
 # ---------------------------------------------------------------------------
@@ -677,6 +723,8 @@ def test_approving_a_gate_over_serious_findings_requires_a_comment(
             title="Guard interlock is not implemented in logic",
             severity=FindingSeverity.HIGH,
             status=FindingStatus.ACCEPTED,
+            is_reviewed=True,
+            review_verdict="supported",
             dedupe_key="synthetic-high",
         )
     )
@@ -1204,6 +1252,48 @@ def test_a_status_change_broadcasts_the_unmet_criteria_in_its_published_shape(
 # ---------------------------------------------------------------------------
 # Criteria that read the rest of the model
 # ---------------------------------------------------------------------------
+def test_proposed_requirements_hold_the_profile_gate_for_a_human_decision(
+    db: Session, project: Project
+) -> None:
+    _profile(db, project)
+    _platform(db, project)
+    _requirement(db, project, status=RequirementStatus.PROPOSED, reference="REQ-014")
+
+    gate = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+
+    assert "requirements_human_decided" in _keys(gate)
+    assert "REQ-014" in _details(gate)
+    assert "Accept or reject" in _details(gate)
+
+
+def test_generation_requires_at_least_one_human_accepted_requirement(
+    db: Session, project: Project
+) -> None:
+    _profile(db, project)
+    _platform(db, project)
+    _requirement(db, project, status=RequirementStatus.REJECTED)
+
+    gate = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+
+    assert "requirements_human_decided" not in _keys(gate)
+    assert "accepted_requirement_for_generation" in _keys(gate)
+    assert "at least one requirement accepted by a human" in _details(gate)
+
+
+def test_review_only_profile_does_not_invent_an_accepted_requirement(
+    db: Session, project: Project
+) -> None:
+    _profile(db, project, release_mode=ReleaseMode.REVIEW_ONLY)
+    _platform(db, project)
+    _requirement(db, project, status=RequirementStatus.REJECTED)
+
+    gate = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+
+    assert "requirements_human_decided" not in _keys(gate)
+    assert "accepted_requirement_for_generation" not in _keys(gate)
+    assert gate.status is GateStatus.READY
+
+
 def test_a_restricted_domain_without_a_qualified_workflow_holds_the_profile_gate(
     db: Session, project: Project
 ) -> None:

@@ -35,14 +35,27 @@ class Approval(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     task_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    #: All three subject references are ``SET NULL``, never ``CASCADE``, for the
+    #: same reason ``task_id`` above is: this row *is* the record that a named
+    #: person accepted responsibility, and deleting the thing the decision was
+    #: about must not delete the decision. Findings are hard-deleted in normal
+    #: operation — :meth:`app.agents.base.executor.AgentExecutor._create_finding`
+    #: discards a re-run finding whose evidence links no longer resolve — so a
+    #: cascade here would take ``decision``, ``decision_notes``, ``decided_by_id``
+    #: and ``decided_at`` with it. That is precisely the distinction
+    #: :attr:`~app.core.enums.ApprovalStatus.RISK_ACCEPTED` exists to preserve:
+    #: a release that proceeded on knowingly accepted risk must not become
+    #: indistinguishable afterwards from one with no risk at all. An approval
+    #: whose subject is gone is an orphan that still reads; ``title``,
+    #: ``question`` and ``context`` say what it was about.
     finding_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID, ForeignKey("findings.id", ondelete="CASCADE"), nullable=True, index=True
+        GUID, ForeignKey("findings.id", ondelete="SET NULL"), nullable=True, index=True
     )
     recommendation_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID, ForeignKey("recommendations.id", ondelete="CASCADE"), nullable=True, index=True
+        GUID, ForeignKey("recommendations.id", ondelete="SET NULL"), nullable=True, index=True
     )
     report_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID, ForeignKey("reports.id", ondelete="CASCADE"), nullable=True
+        GUID, ForeignKey("reports.id", ondelete="SET NULL"), nullable=True
     )
     #: Set when the decision is about merging a proposed change to the canonical
     #: engineering model rather than about a finding.

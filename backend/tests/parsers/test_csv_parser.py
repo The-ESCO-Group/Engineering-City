@@ -590,6 +590,53 @@ def test_reaching_the_cell_anchor_limit_leaves_every_row_still_anchored(
     assert result.summary["truncated"] is True
 
 
+#: Built rather than written as an escape in a literal, so what these tests feed
+#: the parser is unambiguously the character the database cannot store.
+NUL = chr(0)
+
+
+def test_a_nul_inside_a_field_is_replaced_with_a_space(parse_bytes: ParseBytes) -> None:
+    """``errors="replace"`` does not catch this one, and PostgreSQL cannot hold it.
+
+    A NUL byte decodes cleanly in every codec, so it arrives in the text intact
+    and travels into ``ParsedArtifact.content`` (jsonb) and every row and cell
+    excerpt (text). Neither can hold it: the flush raises, the parse
+    transaction aborts, and the upload lands in ``parse_failed`` with a
+    driver-level message. SQLite stores it happily, which is why nothing else
+    in this suite notices.
+    """
+    result = parse_bytes("nul.csv", f"Tag,Description\r\nMTR_101,pump{NUL} station\r\n".encode())
+
+    assert _row(result, "Tag", "MTR_101")["record"]["Description"] == "pump  station"
+    assert not [anchor for anchor in result.anchors if NUL in anchor.excerpt]
+    assert NUL not in str(result.content)
+
+
+def test_the_nul_substitution_is_reported_as_an_error_level_warning(
+    parse_bytes: ParseBytes,
+) -> None:
+    """Recorded text that is not the file's text has to say so."""
+    result = parse_bytes("nul.csv", f"Tag\r\nA{NUL}B{NUL}\r\n".encode())
+
+    replaced = [
+        warning
+        for warning in result.warnings
+        if warning.code == WarningCode.ENCODING_GUESSED
+        and "NUL character(s) were replaced" in warning.message
+    ]
+    assert len(replaced) == 1
+    assert replaced[0].severity == "error"
+    assert "2 NUL character(s)" in replaced[0].message
+
+
+def test_an_ordinary_file_reports_no_nul_substitution(io_list: ParseResult) -> None:
+    assert not [
+        message
+        for message in _messages(io_list, WarningCode.ENCODING_GUESSED)
+        if "NUL character(s) were replaced" in message
+    ]
+
+
 def test_an_unreadable_file_raises_a_parser_error_without_leaking_the_path(
     tmp_path: Path, settings: Settings
 ) -> None:

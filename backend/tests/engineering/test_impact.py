@@ -1002,7 +1002,17 @@ def test_a_changeset_rename_produces_a_linked_report(db: Session, project: Proje
 
 
 def test_an_update_of_the_name_field_is_analysed_as_a_rename(db: Session, project: Project) -> None:
-    """An operation that renames without saying "rename" renames just as thoroughly."""
+    """An operation that renames without saying "rename" renames just as thoroughly.
+
+    An agent can no longer *propose* this shape: ``ChangeOperationProposal``
+    refuses ``update_field`` on a tag's ``name`` and names ``rename_tag`` as the
+    form to use, so the approval gate and the impact report cannot be stepped
+    around at the action boundary. This rule is the layer behind that one and
+    still has to hold — a change set can reach the merge from the API, from a
+    human editor, or from a proposal recorded before that refusal existed. The
+    operation is therefore written directly onto the change set here, which is
+    exactly how one arrives by any of those routes.
+    """
     tag = _tag(db, project)
     _binding(db, project, tag_name=TAG_NAME, tag=tag)
     payload = ProposeChangesetPayload(
@@ -1015,14 +1025,19 @@ def test_an_update_of_the_name_field_is_analysed_as_a_rename(db: Session, projec
                 object_type=ObjectType.TAG,
                 object_id=tag.id,
                 based_on_object_revision=tag.object_revision,
-                field_name="name",
-                values={"name": "MTR_101_Cmd_Run"},
+                field_name="description",
+                values={"description": "Run command."},
             )
         ],
     )
     changeset = changesets.build_changeset(
         db, project=project, payload=payload, author_agent="tag_architecture"
     )
+    db.flush()
+
+    operation = changeset.operations[0]
+    operation.field_name = "name"
+    operation.after = {"name": "MTR_101_Cmd_Run"}
     db.flush()
 
     reports = impact.analyse_changeset(db, changeset=changeset)

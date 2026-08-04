@@ -109,6 +109,7 @@ from app.models.release import (
     ValidationRun,
     WorkstationVerificationJob,
 )
+from app.models.release_archive import ReleaseArchive
 from app.models.report import Report
 from app.models.requirements import (
     AcceptanceCriterion,
@@ -218,6 +219,7 @@ __all__ = [
     "ProjectQuestion",
     "ProjectRevision",
     "Recommendation",
+    "ReleaseArchive",
     "ReleaseCandidate",
     "ReleaseManifest",
     "Report",

@@ -1,7 +1,7 @@
 # Standard across-the-line motor start/stop.
 # See templates/README.md for the file format and the versioning rule.
 id: esco.motor.standard
-version: 1.0.0
+version: 2.0.0
 category: motor_control
 display_name: Standard motor start/stop
 description: >
@@ -42,7 +42,17 @@ required_tags:
   - role: command
     suffix: _Cmd_Start
     data_type: BOOL
-    description: Operator or sequence start request, momentary
+    description: >
+      Operator or sequence start request. Acted on as a RISING EDGE, so a
+      requester that holds it true gets one start and not a standing request to
+      run.
+  - role: status
+    suffix: _Start_OneShot
+    data_type: BOOL
+    description: >
+      One-shot storage bit for the start request. It is what makes this
+      three-wire control rather than two-wire: without it a held start command
+      re-seals the motor the instant a stop, an interlock or a fault goes away.
   - role: command
     suffix: _Cmd_Stop
     data_type: BOOL
@@ -116,9 +126,22 @@ generated_objects:
         that is already sealed in. The interlock and the fault are in the common
         leg, so either one drops the motor immediately. Cmd_Stop is examined
         if-open so a stop request always wins.
+
+        The one-shot is what makes this three-wire. Without it the start branch
+        is a standing request: a sequence step or an HMI bit that holds
+        _Cmd_Start true re-seals the motor by itself the moment the thing that
+        dropped it — a stop, an interlock trip, a latched fault — goes away, and
+        the motor starts under the hands of whoever went to look at it. The
+        one-shot is placed AHEAD of the permissive on purpose: a start pressed
+        while the permissive is false is spent and refused, rather than held
+        pending until the permissive returns and then starting the motor
+        unattended.
       elements:
         - branch:
             - - {instruction: XIC, operand: "{device_tag}_Cmd_Start", kind: condition}
+              - instruction: ONS
+                operand: "{device_tag}_Start_OneShot"
+                kind: condition
               - {instruction: XIC, operand: "{device_tag}_Permissive", kind: condition}
             - - {instruction: XIC, operand: "{device_tag}_Cmd_Run", kind: condition}
         - {instruction: XIO, operand: "{device_tag}_Cmd_Stop", kind: condition}
@@ -178,13 +201,18 @@ generated_objects:
         Latches the fault, which drops the run command on the first rung. The
         latch is deliberate: a motor that failed to start must stay stopped and
         visible until somebody resets it, not retry on the next scan.
+
+        The alarm is latched too, and it has to be. Latching the fault drops
+        _Cmd_Run, which makes the timer rung above false and resets the timer,
+        so an energised alarm bit would clear on the very next scan — leaving a
+        motor stopped on a latched fault with no alarm anywhere saying why.
       when_parameter: has_run_feedback
       when_value: true
       elements:
         - {instruction: XIC, operand: "{device_tag}_Tmr_FailToStart.DN", kind: condition}
         - branch:
             - - {instruction: OTL, operand: "{device_tag}_Sts_Faulted", kind: output}
-            - - {instruction: OTE, operand: "{device_tag}_Alm_FailToStart", kind: output}
+            - - {instruction: OTL, operand: "{device_tag}_Alm_FailToStart", kind: output}
 
     - routine: R_Devices
       title: "{device_tag} fail to stop timer"
@@ -214,9 +242,36 @@ generated_objects:
         - {instruction: XIC, operand: "{device_tag}_Tmr_FailToStop.DN", kind: condition}
         - branch:
             - - {instruction: OTL, operand: "{device_tag}_Sts_Faulted", kind: output}
-            - - {instruction: OTE, operand: "{device_tag}_Alm_FailToStop", kind: output}
+            - - {instruction: OTL, operand: "{device_tag}_Alm_FailToStop", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} clear the motor alarms with the fault"
+      comment: >
+        The two alarm bits live exactly as long as the fault they belong to.
+        Clearing them here rather than in the reset pattern keeps the alarm and
+        the latch from ever disagreeing: esco.fault.reset unlatches
+        _Sts_Faulted, and this rung follows on the next scan. Scanned after both
+        detection rungs, so an alarm raised this scan is not cleared by it.
+      when_parameter: has_run_feedback
+      when_value: true
+      elements:
+        - {instruction: XIO, operand: "{device_tag}_Sts_Faulted", kind: condition}
+        - branch:
+            - - {instruction: OTU, operand: "{device_tag}_Alm_FailToStart", kind: output}
+            - - {instruction: OTU, operand: "{device_tag}_Alm_FailToStop", kind: output}
 
 engineering_notes: >
+  Version 2.0.0 made the start edge-triggered and latched the two alarms. In
+  1.0.0 the start branch was XIC _Cmd_Start with no one-shot, which is two-wire
+  control wearing a three-wire layout: a sequence step or an HMI bit that holds
+  the start request true re-sealed the motor by itself as soon as the stop, the
+  interlock trip or the fault that dropped it went away — including on the scan
+  a fault reset was accepted, with an operator standing at the machine. Also in
+  1.0.0 _Alm_FailToStart was energised, and latching the fault drops _Cmd_Run,
+  which resets the timer that was driving it: the alarm cleared one scan after it
+  appeared and the motor sat faulted with no stated cause. Anything expanded from
+  1.0.0 must be re-expanded; both defects are in generated rungs.
+
   Permissive and interlock are not synonyms and this template treats them
   differently on purpose. A permissive is a condition for STARTING — lube
   pressure established, upstream conveyor running — and appears only in the
@@ -250,6 +305,19 @@ restrictions:
     thermistor trips are the responsibility of the overload relay or the motor
     protection device; this pattern only consumes the resulting contact through
     _Interlock_OK.
+  - >
+    A start is taken on the RISING EDGE of _Cmd_Start and nowhere else. A
+    sequence step or an HMI bit that holds the request true gets one start, not
+    a standing request: once the motor has been stopped by a stop command, an
+    interlock or a fault, the held request will not restart it and whatever
+    issued it has to drop and re-assert it. Sequence steps must be written to
+    pulse the command; a step that simply asserts it for its duration will look
+    as though the motor started once and then refused to restart.
+  - >
+    A start pressed while the permissive is false is spent, not remembered. The
+    one-shot is ahead of the permissive so a held request cannot start the motor
+    at the moment the permissive returns, which means an operator who starts too
+    early has to press start again.
   - Does not clear its own fault. Use esco.fault.reset, which will not clear a condition that is still true.
   - Does not include a start warning horn or a pre-start delay.
   - Does not count starts per hour or enforce an anti-recycle time.
@@ -274,13 +342,33 @@ tests:
   - name: Stop wins over a held start
     given: _Cmd_Start is held true
     when: _Cmd_Stop is pulsed
-    then: _Cmd_Run goes false and does not re-seal while _Cmd_Stop is true.
+    then: >
+      _Cmd_Run goes false and does not re-seal — not while _Cmd_Stop is true and
+      not after it is released — until _Cmd_Start is dropped and asserted again.
+  - name: A held start does not restart the motor after a fault reset
+    given: >
+      _Cmd_Start is held true by a sequence step, the motor is faulted and
+      stopped, and the fault condition has cleared
+    when: The reset is accepted and _Sts_Faulted goes false
+    then: >
+      _Cmd_Run stays false. The motor restarts only after _Cmd_Start goes false
+      and true again.
+  - name: A held start does not restart the motor when an interlock clears
+    given: _Cmd_Start is held true and the motor was stopped by an interlock
+    when: _Interlock_OK returns true
+    then: _Cmd_Run stays false.
   - name: Fail to start is detected and latched
     given: has_run_feedback is true and the motor is commanded to run
     when: _In_Run_Fbk stays false for longer than fail_to_start_ms
     then: >
       _Sts_Faulted latches, _Alm_FailToStart is set, _Cmd_Run drops, and neither
       clears when the timer is reset.
+  - name: The fail-to-start alarm outlives the timer that raised it
+    given: A latched fail-to-start fault
+    when: The motor is left faulted for a minute and the HMI alarm list is read
+    then: >
+      _Alm_FailToStart is still true, and it clears only once _Sts_Faulted is
+      reset.
   - name: Fail to stop is detected
     given: The motor is running and _Cmd_Run is removed
     when: _In_Run_Fbk stays true for longer than fail_to_stop_ms

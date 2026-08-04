@@ -27,7 +27,9 @@ from app.api.schemas.project import (
     ProjectRead as ProjectReadSchema,
 )
 from app.core.enums import ProjectStatus, RoleName
+from app.core.services import engineering_intake
 from app.core.services import projects as project_service
+from app.core.storage import ProjectStorage
 from app.security import permissions
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -68,6 +70,21 @@ def create_project(
         source_ip=provenance.source_ip,
         user_agent=provenance.user_agent,
     )
+    if payload.engineering_profile is not None:
+        try:
+            engineering_intake.configure_project(
+                db,
+                project=project,
+                payload=payload.engineering_profile,
+                actor=user,
+            )
+        except Exception:
+            # Project creation and canonical intake are one operation.  The
+            # storage directory is the only non-database side effect, so remove
+            # that exact project-scoped path when profile validation refuses.
+            db.rollback()
+            ProjectStorage(project.id, settings).purge()
+            raise
     db.commit()
 
     detail = ProjectDetail.model_validate(project)

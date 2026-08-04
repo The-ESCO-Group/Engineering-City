@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import (
@@ -132,13 +132,41 @@ class FindingEvidence(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "finding_evidence"
     __table_args__ = (
         UniqueConstraint("finding_id", "anchor_id", "role", name="uq_finding_evidence_link"),
+        # The constraint above became inert when ``anchor_id`` was made nullable
+        # for the SET NULL cascade: NULL never equals NULL, so it no longer
+        # rejects anything at all. A *full* unique index cannot replace it
+        # either, and must not be used here -- once several stranded citations
+        # of one finding have had their anchors re-parsed away they all hold
+        # NULL in the same role, and that is the state the SET NULL change
+        # exists to preserve. Partial, so the rule applies to exactly the rows
+        # that still name an anchor.
+        Index(
+            "uq_finding_evidence_anchored_link",
+            "finding_id",
+            "anchor_id",
+            "role",
+            unique=True,
+            sqlite_where=text("anchor_id IS NOT NULL"),
+            postgresql_where=text("anchor_id IS NOT NULL"),
+        ),
     )
 
     finding_id: Mapped[uuid.UUID] = mapped_column(
         GUID, ForeignKey("findings.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    anchor_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("evidence_anchors.id", ondelete="CASCADE"), nullable=False, index=True
+    #: Nullable, and ``SET NULL`` rather than ``CASCADE``. Anchors are
+    #: hard-deleted whenever a file is re-parsed — the keys are positional, so a
+    #: renamed routine or a parser-version bump strands the old ones — and a
+    #: cascade took the citation row with them. That silently broke the
+    #: :class:`Finding` invariant that every finding carries at least one
+    #: evidence row, at a moment nothing re-checks it: a CRITICAL finding
+    #: already reviewed, approved and delivered would be re-rendered as a claim
+    #: with no evidence at all, with nothing recording that it ever had any.
+    #: With ``SET NULL`` the row survives and ``evidence_kind``, ``role`` and
+    #: ``note`` still say what the finding rested on and how it was used. Every
+    #: reader of :attr:`anchor` already guards for ``None``.
+    anchor_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("evidence_anchors.id", ondelete="SET NULL"), nullable=True, index=True
     )
     evidence_kind: Mapped[EvidenceKind] = mapped_column(default=EvidenceKind.DIRECT, nullable=False)
     #: ``requirement`` | ``logic`` | ``context`` — which side of a comparison
@@ -147,7 +175,8 @@ class FindingEvidence(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     note: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     finding: Mapped[Finding] = relationship(back_populates="evidence_links")
-    anchor: Mapped[EvidenceAnchor] = relationship(lazy="selectin")
+    #: ``None`` once the anchor has been re-parsed away; see :attr:`anchor_id`.
+    anchor: Mapped[EvidenceAnchor | None] = relationship(lazy="selectin")
 
 
 class FindingComment(UUIDPrimaryKeyMixin, TimestampMixin, Base):

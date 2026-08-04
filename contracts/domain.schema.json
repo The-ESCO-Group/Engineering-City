@@ -3,7 +3,7 @@
   "$id": "https://esco.local/contracts/domain.schema.json",
   "title": "ESCO Engineering City domain schema",
   "description": "Domain vocabulary and entity shapes for the ESCO Engineering City API. Generated from the backend Pydantic models; do not edit by hand.",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "1.1.0",
   "x-enums": [
     "ActionType",
     "AgentKind",
@@ -109,13 +109,23 @@
     ],
     "project": [
       "AddProjectMemberRequest",
+      "ControllerFamily",
       "CreateProjectRequest",
+      "EngineeringProfileInput",
+      "EngineeringStandardsInput",
+      "HmiProduct",
       "ProjectCounts",
       "ProjectDetail",
       "ProjectMemberRead",
       "ProjectRead",
       "ProjectRole",
       "ProjectStatus",
+      "ProjectType",
+      "ReleaseMode",
+      "RestrictedDomain",
+      "SafetyClassification",
+      "TargetPlatformInput",
+      "UnitSystem",
       "UpdateProjectRequest"
     ],
     "report": [
@@ -190,6 +200,7 @@
         "target_type": {
           "default": "",
           "description": "Entity kind this action concerns (project, file, finding, task).",
+          "maxLength": 120,
           "title": "Target Type",
           "type": "string"
         },
@@ -212,6 +223,7 @@
             "format": "uuid",
             "type": "string"
           },
+          "maxItems": 100,
           "title": "Evidence Anchor Ids",
           "type": "array"
         },
@@ -235,8 +247,10 @@
         "warnings": {
           "description": "Caveats the agent wants a human to see. Never suppressed.",
           "items": {
+            "maxLength": 4000,
             "type": "string"
           },
+          "maxItems": 100,
           "title": "Warnings",
           "type": "array"
         }
@@ -1070,6 +1084,16 @@
           "title": "Decision Notes",
           "type": "string"
         },
+        "decision_allowed": {
+          "default": true,
+          "title": "Decision Allowed",
+          "type": "boolean"
+        },
+        "decision_disabled_reason": {
+          "default": "",
+          "title": "Decision Disabled Reason",
+          "type": "string"
+        },
         "created_at": {
           "format": "date-time",
           "title": "Created At",
@@ -1150,6 +1174,20 @@
       ],
       "description": "Auditable operations. Every member must be written by exactly one call"
     },
+    "ControllerFamily": {
+      "enum": [
+        "compactlogix",
+        "controllogix",
+        "guardlogix",
+        "compact_guardlogix",
+        "micro800",
+        "slc500",
+        "plc5",
+        "other"
+      ],
+      "title": "ControllerFamily",
+      "type": "string"
+    },
     "CreateFindingCommentRequest": {
       "properties": {
         "body": {
@@ -1214,6 +1252,7 @@
           "items": {
             "$ref": "#/$defs/EvidenceRef"
           },
+          "maxItems": 50,
           "title": "Evidence",
           "type": "array"
         },
@@ -1224,6 +1263,7 @@
         },
         "dedupe_key": {
           "default": "",
+          "maxLength": 120,
           "title": "Dedupe Key",
           "type": "string"
         }
@@ -1258,6 +1298,17 @@
           "additionalProperties": true,
           "title": "Attributes",
           "type": "object"
+        },
+        "engineering_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EngineeringProfileInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1300,6 +1351,7 @@
         },
         "effort_estimate": {
           "default": "",
+          "maxLength": 120,
           "title": "Effort Estimate",
           "type": "string"
         },
@@ -1334,6 +1386,7 @@
       "description": "Body of a ``create_task`` action (Project Manager Agent only).",
       "properties": {
         "kind": {
+          "maxLength": 120,
           "title": "Kind",
           "type": "string"
         },
@@ -1345,11 +1398,13 @@
         },
         "description": {
           "default": "",
+          "maxLength": 4000,
           "title": "Description",
           "type": "string"
         },
         "agent_kind": {
           "default": "",
+          "maxLength": 120,
           "title": "Agent Kind",
           "type": "string"
         },
@@ -1357,6 +1412,7 @@
           "items": {
             "type": "integer"
           },
+          "maxItems": 100,
           "title": "Depends On Indices",
           "type": "array"
         },
@@ -1513,6 +1569,127 @@
         "unclassified"
       ],
       "description": "The engineering purpose a file serves, as declared by the uploader or"
+    },
+    "EngineeringProfileInput": {
+      "properties": {
+        "project_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Name",
+          "type": "string"
+        },
+        "customer_label": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Customer Label",
+          "type": "string"
+        },
+        "plant_or_site": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Plant Or Site",
+          "type": "string"
+        },
+        "project_description": {
+          "minLength": 1,
+          "title": "Project Description",
+          "type": "string"
+        },
+        "project_type": {
+          "$ref": "#/$defs/ProjectType"
+        },
+        "units": {
+          "$ref": "#/$defs/UnitSystem",
+          "default": "metric"
+        },
+        "locale": {
+          "default": "en-US",
+          "maxLength": 35,
+          "minLength": 2,
+          "title": "Locale",
+          "type": "string"
+        },
+        "network_architecture": {
+          "default": "",
+          "title": "Network Architecture",
+          "type": "string"
+        },
+        "release_mode": {
+          "$ref": "#/$defs/ReleaseMode",
+          "default": "import_package_only"
+        },
+        "restricted_domains": {
+          "items": {
+            "$ref": "#/$defs/RestrictedDomain"
+          },
+          "title": "Restricted Domains",
+          "type": "array"
+        },
+        "target": {
+          "$ref": "#/$defs/TargetPlatformInput"
+        },
+        "standards": {
+          "$ref": "#/$defs/EngineeringStandardsInput"
+        }
+      },
+      "required": [
+        "project_name",
+        "plant_or_site",
+        "project_description",
+        "project_type",
+        "target",
+        "standards"
+      ],
+      "title": "EngineeringProfileInput",
+      "type": "object"
+    },
+    "EngineeringStandardsInput": {
+      "properties": {
+        "naming_standard_version": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Naming Standard Version",
+          "type": "string"
+        },
+        "alarm_philosophy_version": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Alarm Philosophy Version",
+          "type": "string"
+        },
+        "controller_template": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Controller Template",
+          "type": "string"
+        },
+        "aoi_udt_library": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Aoi Udt Library",
+          "type": "string"
+        },
+        "hmi_library": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Hmi Library",
+          "type": "string"
+        },
+        "test_template_set": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Test Template Set",
+          "type": "string"
+        }
+      },
+      "required": [
+        "naming_standard_version",
+        "alarm_philosophy_version",
+        "controller_template",
+        "test_template_set"
+      ],
+      "title": "EngineeringStandardsInput",
+      "type": "object"
     },
     "EventType": {
       "title": "EventType",
@@ -1682,6 +1859,7 @@
         },
         "note": {
           "default": "",
+          "maxLength": 4000,
           "title": "Note",
           "type": "string"
         }
@@ -2418,6 +2596,18 @@
       ],
       "description": ""
     },
+    "HmiProduct": {
+      "enum": [
+        "factorytalk_view_me",
+        "factorytalk_view_se",
+        "factorytalk_optix",
+        "panelview_800",
+        "none",
+        "other"
+      ],
+      "title": "HmiProduct",
+      "type": "string"
+    },
     "LoginRequest": {
       "properties": {
         "email": {
@@ -3078,6 +3268,18 @@
       ],
       "description": "Project lifecycle."
     },
+    "ProjectType": {
+      "enum": [
+        "new_installation",
+        "upgrade",
+        "retrofit",
+        "migration",
+        "expansion",
+        "other"
+      ],
+      "title": "ProjectType",
+      "type": "string"
+    },
     "ProviderKind": {
       "title": "ProviderKind",
       "type": "string",
@@ -3193,6 +3395,16 @@
       ],
       "description": ""
     },
+    "ReleaseMode": {
+      "description": "How far this project intends to take generation.",
+      "enum": [
+        "import_package_only",
+        "rockwell_workstation_assembly",
+        "review_only"
+      ],
+      "title": "ReleaseMode",
+      "type": "string"
+    },
     "ReportBlockerPayload": {
       "additionalProperties": false,
       "description": "Body of a ``report_blocker`` action: work cannot proceed, and why.",
@@ -3205,8 +3417,10 @@
         },
         "missing_inputs": {
           "items": {
+            "maxLength": 500,
             "type": "string"
           },
+          "maxItems": 100,
           "title": "Missing Inputs",
           "type": "array"
         },
@@ -3234,6 +3448,7 @@
         },
         "limitations": {
           "default": "",
+          "maxLength": 4000,
           "title": "Limitations",
           "type": "string"
         }
@@ -3429,6 +3644,20 @@
       "title": "RequestApprovalPayload",
       "type": "object"
     },
+    "RestrictedDomain": {
+      "description": "Engineering domains this platform will not generate for by default.\n\nEach is a domain where a plausible-looking generated artifact could cause\ninjury or major equipment damage, and where the competence to review it is\na formal qualification rather than general controls experience.",
+      "enum": [
+        "motion",
+        "safety_logic",
+        "burner_management",
+        "process_safety",
+        "high_energy",
+        "electrical_power_distribution",
+        "robotics"
+      ],
+      "title": "RestrictedDomain",
+      "type": "string"
+    },
     "RoleName": {
       "title": "RoleName",
       "type": "string",
@@ -3483,6 +3712,17 @@
       "title": "RunRead",
       "type": "object"
     },
+    "SafetyClassification": {
+      "description": "How a controller is classified for safety purposes.\n\nAnything other than ``STANDARD`` puts the project into manual-review-only\nmode unless an administrator has enabled a qualified workflow.",
+      "enum": [
+        "standard",
+        "safety_rated",
+        "mixed_standard_and_safety",
+        "unknown"
+      ],
+      "title": "SafetyClassification",
+      "type": "string"
+    },
     "StartRunRequest": {
       "description": "Starts a workflow run over the project's current files.",
       "properties": {
@@ -3506,6 +3746,81 @@
         }
       },
       "title": "StartRunRequest",
+      "type": "object"
+    },
+    "TargetPlatformInput": {
+      "properties": {
+        "controller_family": {
+          "$ref": "#/$defs/ControllerFamily"
+        },
+        "controller_catalog_number": {
+          "maxLength": 60,
+          "minLength": 1,
+          "title": "Controller Catalog Number",
+          "type": "string"
+        },
+        "firmware_revision": {
+          "maxLength": 20,
+          "minLength": 1,
+          "title": "Firmware Revision",
+          "type": "string"
+        },
+        "studio_5000_version": {
+          "maxLength": 20,
+          "minLength": 1,
+          "title": "Studio 5000 Version",
+          "type": "string"
+        },
+        "safety_classification": {
+          "$ref": "#/$defs/SafetyClassification",
+          "default": "unknown"
+        },
+        "hmi_product": {
+          "$ref": "#/$defs/HmiProduct",
+          "default": "none"
+        },
+        "hmi_version": {
+          "default": "",
+          "maxLength": 20,
+          "title": "Hmi Version",
+          "type": "string"
+        },
+        "hmi_terminal_model": {
+          "default": "",
+          "maxLength": 80,
+          "title": "Hmi Terminal Model",
+          "type": "string"
+        },
+        "hmi_resolution": {
+          "default": "",
+          "maxLength": 40,
+          "title": "Hmi Resolution",
+          "type": "string"
+        },
+        "factorytalk_architecture": {
+          "default": "",
+          "title": "Factorytalk Architecture",
+          "type": "string"
+        },
+        "supported_instruction_set_key": {
+          "default": "",
+          "maxLength": 80,
+          "title": "Supported Instruction Set Key",
+          "type": "string"
+        },
+        "known_limitations": {
+          "items": {},
+          "title": "Known Limitations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "controller_family",
+        "controller_catalog_number",
+        "firmware_revision",
+        "studio_5000_version"
+      ],
+      "title": "TargetPlatformInput",
       "type": "object"
     },
     "TaskDetail": {
@@ -3890,6 +4205,15 @@
       ],
       "description": ""
     },
+    "UnitSystem": {
+      "enum": [
+        "metric",
+        "imperial",
+        "mixed"
+      ],
+      "title": "UnitSystem",
+      "type": "string"
+    },
     "UpdateFindingRequest": {
       "description": "Human disposition of a finding.\n\nOnly ``status`` and reviewer notes are editable. The agent-produced content\n(fact, inference, evidence) is immutable so the record of what the platform\nactually said cannot be rewritten after the fact.",
       "properties": {
@@ -3974,8 +4298,10 @@
         },
         "parser_limitations": {
           "items": {
+            "maxLength": 500,
             "type": "string"
           },
+          "maxItems": 100,
           "title": "Parser Limitations",
           "type": "array"
         }

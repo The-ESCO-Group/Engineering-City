@@ -826,3 +826,70 @@ def test_a_missing_file_raises_a_parser_error_without_leaking_the_path(
     assert excinfo.value.details["filename"] == "not_uploaded.txt"
     assert str(tmp_path) not in excinfo.value.message
     assert "not_uploaded.txt" in excinfo.value.message
+
+
+# ---------------------------------------------------------------------------
+# NUL characters
+# ---------------------------------------------------------------------------
+
+#: Built rather than written as an escape in a literal, so what these tests feed
+#: the parser is unambiguously the character the database cannot store.
+NUL = chr(0)
+
+
+def test_a_nul_in_the_decoded_text_is_replaced_with_a_space(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """PostgreSQL cannot hold one, and SQLite hides that from the whole suite.
+
+    A truncated log, a UTF-16 fragment or a mislabelled upload decodes as valid
+    UTF-8 and still carries a NUL. Recorded as-is it reaches
+    ``EvidenceAnchor.excerpt`` (a text column) and ``ParsedArtifact.content``
+    (jsonb), neither of which can hold a NUL: the flush raises, the parse
+    transaction aborts, and the file lands in ``parse_failed`` carrying a
+    driver-level message no engineer can act on.
+    """
+    result = parse_bytes(
+        tmp_path, settings, f"Line one{NUL} with an embedded NUL\nLine two\n".encode()
+    )
+
+    assert NUL not in json.dumps(result.content)
+    assert not [anchor for anchor in result.anchors if NUL in anchor.excerpt]
+    assert result.content["lines"][0]["text"] == "Line one  with an embedded NUL"
+
+
+def test_the_nul_substitution_is_reported_rather_than_made_quietly(
+    tmp_path: Path, settings: Settings
+) -> None:
+    """The one edit this parser makes has to be visible in the record.
+
+    Both halves are reported: the unsupported item says the file held NUL and
+    was not interpreted as a binary format, and the warning says the recorded
+    text is therefore not what the file holds.
+    """
+    result = parse_bytes(tmp_path, settings, f"pump{NUL} station{NUL}\n".encode())
+
+    warning = next(w for w in result.warnings if "NUL character(s) were replaced" in w.message)
+    assert warning.severity == "error"
+    assert "2 NUL character(s)" in warning.message
+
+    item = next(entry for entry in result.unsupported if entry.kind == "binary_content")
+    assert "2 NUL character(s)" in item.detail
+
+
+def test_replacing_a_nul_moves_no_recorded_position(tmp_path: Path, settings: Settings) -> None:
+    """A space, not a deletion, so every offset still names its own character."""
+    body = f"CHECKLIST\n=========\nvalve {NUL} shut\nsecond line\n"
+    result = parse_bytes(tmp_path, settings, body.encode())
+
+    assert result.content["character_count"] == len(body)
+    assert result.content["line_count"] == 4
+    assert result.anchors_by_key["line:3"].excerpt == "valve   shut"
+
+
+def test_a_file_without_nuls_reports_no_substitution(tmp_path: Path, settings: Settings) -> None:
+    """The warning is evidence about the text, so an ordinary file must not carry it."""
+    result = parse_bytes(tmp_path, settings, b"valve shut\nsecond line\n")
+
+    assert not [w for w in result.warnings if "NUL character(s) were replaced" in w.message]
+    assert not [entry for entry in result.unsupported if entry.kind == "binary_content"]

@@ -111,6 +111,28 @@ newer template lands. To ship a new version, add a new file (e.g.
 registry indexes by id *and* version and `get(id)` with no version returns the
 highest.
 
+### Withdrawing a version, which is different from superseding one
+
+**A version that turns out to be defective is replaced in place, not kept
+alongside its replacement.** The rule above exists so that a *correct* pattern
+somebody approved keeps meaning what it meant. It does not apply to a pattern
+that was wrong: leaving a sequence engine that deadlocks at step 1, or an
+interlock trip nothing can clear, in the tree as a pinnable version means the
+next project can pin it — and the registry gives no signal that one version of
+an id is withdrawn and another is not.
+
+So: edit the file, bump the version, and say in `engineering_notes` what the
+defect was, what it did on a machine, and that expansions of the old version
+must be re-expanded rather than patched in the project. The note is the whole
+record — the old file is gone, and a reviewer holding a project pinned to the
+withdrawn version needs to be able to read what was wrong with it.
+
+Eleven of the twelve templates here are at **2.0.0** for this reason: the 1.0.0
+set was reviewed rung by rung as ladder rather than as YAML, and each of those
+files carries at the top of its `engineering_notes` what the review found and
+what it did on a machine. `esco.diagnostic.controller` is the one that came
+through unchanged, and is still at 1.0.0.
+
 ---
 
 ## File format
@@ -318,7 +340,16 @@ patterns/valve_standard.yaml: rung 'XV_305 open request' targets routine
 6. **Write `tests` as behaviour.** `given` / `when` / `then`, with a `then` that
    is checkable. These become the generated test plan, so a vague `then` costs
    somebody a commissioning day.
-7. **Run the checks.**
+7. **Read your own rungs as ladder, in scan order.** The load errors above catch
+   a file that does not parse; they say nothing about whether the logic works.
+   The questions that have actually caught defects here: does the rung driving
+   this OTE stay true, or is it true for one scan? Is every OTL matched by an
+   OTU somebody can reach? Does latching a fault remove the condition that was
+   driving its own alarm? Does a held command re-seal equipment on its own? Is
+   any bit written by two OTEs? `test_template_registry.py` asserts each of
+   those over every shipped template — a new pattern that gets one wrong fails
+   the suite with the reason.
+8. **Run the checks.**
 
    ```
    .venv\Scripts\python -m ruff check backend/app/generators backend/tests/generators
@@ -328,14 +359,16 @@ patterns/valve_standard.yaml: rung 'XV_305 open request' targets routine
    The suite loads every shipped template and fails on any load error, so a
    template that does not parse fails the build rather than disappearing quietly
    at runtime.
-8. **Add it to the table at the top of this file.**
+9. **Add it to the table at the top of this file.**
 
 ### Changing an existing template
 
 Bump the version per the table above, and remember that the checksum changes on
-its own — you cannot and need not touch it. If the change is MAJOR, add the new
-version as a new file and leave the old one in place: projects pin versions, and
-an approved expansion has to keep meaning what it meant when it was approved.
+its own — you cannot and need not touch it. If the change is MAJOR *and the old
+version was correct*, add the new version as a new file and leave the old one in
+place: projects pin versions, and an approved expansion has to keep meaning what
+it meant when it was approved. If the change is MAJOR because the old version
+was **wrong**, edit the file in place and follow the withdrawal rule above.
 
 ---
 

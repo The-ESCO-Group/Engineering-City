@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import AgentKind, AgentRunStatus, AgentStatus, MessageRole
@@ -184,7 +184,23 @@ class ModelConfiguration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "model_configurations"
     __table_args__ = (
+        # Bites for project-scoped rows, where ``project_id`` is NOT NULL.
         UniqueConstraint("project_id", "agent_kind", name="uq_model_configurations_scope"),
+        # ...and not for the global defaults, which are exactly the rows with
+        # ``project_id IS NULL``: NULL never equals NULL, so the constraint
+        # above permits any number of global rows for one agent kind. The
+        # upsert in ``api/routes/model_config.py`` is a select-then-insert with
+        # no lock and reads with ``scalar_one_or_none()``, so two concurrent
+        # saves of the same global default leave a pair of rows that makes
+        # every later read of that scope raise. This partial index is the half
+        # the constraint cannot express; both backends enforce it.
+        Index(
+            "uq_model_configurations_global_scope",
+            "agent_kind",
+            unique=True,
+            sqlite_where=text("project_id IS NULL"),
+            postgresql_where=text("project_id IS NULL"),
+        ),
     )
 
     #: ``None`` means the global default.

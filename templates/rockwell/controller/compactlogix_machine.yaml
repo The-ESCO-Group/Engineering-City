@@ -1,16 +1,16 @@
 # CompactLogix machine-control project layout.
 # See templates/README.md for the file format and the versioning rule.
 id: esco.controller.compactlogix.machine
-version: 1.0.0
+version: 2.0.0
 category: controller_project
 display_name: CompactLogix machine-control project layout
 description: >
   Task, program and routine skeleton for a single-machine CompactLogix
-  application. One continuous MainTask carries five programs — Safety_Monitor,
-  Machine_Control, Alarms, HMI_Interface and Diagnostics — and each program's
-  MainRoutine calls that program's routines with JSR, so execution order is
-  written down in ladder rather than left to the order routines happen to sit
-  in the tree.
+  application. One continuous MainTask carries five programs —
+  Safety_Device_Status, Machine_Control, Alarms, HMI_Interface and Diagnostics —
+  and each program's MainRoutine calls that program's routines with JSR, so
+  execution order is written down in ladder rather than left to the order
+  routines happen to sit in the tree.
 supported_families: [compactlogix]
 approval_level: standard
 restricted_domains: []
@@ -24,11 +24,6 @@ parameters:
     type: string
     required: true
     description: Machine or line this controller runs; used in program descriptions
-  - name: main_task_watchdog_ms
-    type: integer
-    required: false
-    default: 500
-    description: MainTask watchdog in milliseconds
 
 required_tags:
   - role: status
@@ -60,31 +55,38 @@ generated_objects:
   tasks:
     - name: MainTask
       type: continuous
-      description: The single continuous task; everything in this layout runs in it
+      description: >
+        The single continuous task; everything in this layout runs in it. The
+        watchdog is a fixed 500 ms in this layout and is not a parameter; see
+        the restrictions.
       watchdog_ms: 500
       programs:
-        - Safety_Monitor
+        - Safety_Device_Status
         - Machine_Control
         - Alarms
         - HMI_Interface
         - Diagnostics
 
   programs:
-    - name: Safety_Monitor
+    - name: Safety_Device_Status
       type: normal
       description: >
         Reads the STATUS of safety devices — E-stop relay contacts, guard
-        switches, light-curtain outputs — so machine logic can decide whether it
-        is allowed to run. It executes first so that everything downstream sees
-        a settled picture. It is NOT safety logic; see restrictions.
+        switches, light-curtain outputs — and publishes it for the interlock
+        gate to consume. It executes first so that everything downstream sees a
+        settled picture. It is NOT safety logic and it stops nothing by itself;
+        see restrictions. The program was called Safety_Monitor until 2.0.0,
+        which read as a promise this program cannot keep.
       main_routine: MainRoutine
       routines: [R_EStop_Status, R_Guard_Status]
 
     - name: Machine_Control
       type: normal
-      description: Modes, the machine sequence, and the device control blocks
+      description: >
+        Permissives and interlocks, modes, the machine sequence, and the device
+        control blocks, in that order.
       main_routine: MainRoutine
-      routines: [R_Mode_Select, R_Sequence, R_Devices]
+      routines: [R_Permissives, R_Interlocks, R_Mode_Select, R_Sequence, R_Devices]
 
     - name: Alarms
       type: normal
@@ -108,27 +110,46 @@ generated_objects:
       routines: [R_Scan_Diagnostics, R_Comms_Diagnostics]
 
   routines:
-    # -- Safety_Monitor ----------------------------------------------------
+    # -- Safety_Device_Status ----------------------------------------------
     - name: MainRoutine
-      program: Safety_Monitor
+      program: Safety_Device_Status
       language: ladder
       description: Calls the safety-device status routines in order
       is_main: true
     - name: R_EStop_Status
-      program: Safety_Monitor
+      program: Safety_Device_Status
       language: ladder
-      description: E-stop relay contact status, for use as a machine permissive
+      description: >
+        E-stop relay contact status, published for use as a machine INTERLOCK
+        source (_Ilk_Sources_OK). Never as a permissive: a permissive gates
+        starting and does not stop equipment that is already running.
     - name: R_Guard_Status
-      program: Safety_Monitor
+      program: Safety_Device_Status
       language: ladder
-      description: Guard-switch and light-curtain status, for use as a machine permissive
+      description: >
+        Guard-switch and light-curtain status, published for use as a machine
+        INTERLOCK source (_Ilk_Sources_OK), on the same terms as the E-stop
+        status and for the same reason: an open guard has to stop a conveyor
+        that is running, and a permissive cannot do that.
 
     # -- Machine_Control ---------------------------------------------------
     - name: MainRoutine
       program: Machine_Control
       language: ladder
-      description: Calls mode selection, then the sequence, then the device blocks
+      description: >
+        Calls permissives and interlocks, then mode selection, then the
+        sequence, then the device blocks
       is_main: true
+    - name: R_Permissives
+      program: Machine_Control
+      language: ladder
+      description: Conditions that must be true before equipment may be started
+    - name: R_Interlocks
+      program: Machine_Control
+      language: ladder
+      description: >
+        Conditions that stop running equipment, and the first-out capture. This
+        is where the safety-device status read by the program above is consumed.
     - name: R_Mode_Select
       program: Machine_Control
       language: ladder
@@ -188,19 +209,35 @@ generated_objects:
       description: Connection status for every remote node
 
   rungs:
-    - routine: Safety_Monitor/MainRoutine
+    - routine: Safety_Device_Status/MainRoutine
       title: Call E-stop status
       comment: >
         Safety-device status is read before anything else in the scan so that
         machine logic downstream sees one settled picture per scan.
       elements:
         - {instruction: JSR, operand: R_EStop_Status, kind: output}
-    - routine: Safety_Monitor/MainRoutine
+    - routine: Safety_Device_Status/MainRoutine
       title: Call guard status
       comment: Guard and light-curtain status, on the same terms as the E-stop status.
       elements:
         - {instruction: JSR, operand: R_Guard_Status, kind: output}
 
+    - routine: Machine_Control/MainRoutine
+      title: Call permissive evaluation
+      comment: >
+        Permissives and interlocks are evaluated before the sequence and the
+        device blocks, so a trip takes effect on the scan it is detected rather
+        than the next one.
+      elements:
+        - {instruction: JSR, operand: R_Permissives, kind: output}
+    - routine: Machine_Control/MainRoutine
+      title: Call interlock evaluation
+      comment: >
+        Where the E-stop and guard status read by Safety_Device_Status is
+        consumed. An interlock stops running equipment; that is what makes this
+        routine, and not the permissive routine above, the right home for it.
+      elements:
+        - {instruction: JSR, operand: R_Interlocks, kind: output}
     - routine: Machine_Control/MainRoutine
       title: Call mode selection
       comment: >
@@ -257,6 +294,25 @@ generated_objects:
         - {instruction: JSR, operand: R_Comms_Diagnostics, kind: output}
 
 engineering_notes: >
+  Version 2.0.0 renamed a program and corrected what two routine descriptions
+  told every project to do with their contents. Until 2.0.0 the E-stop and guard
+  status routines were described as being "for use as a machine permissive". In
+  this template set a permissive has a precise meaning — it appears in the START
+  branch only, and esco.motor.standard says in as many words that losing it does
+  not stop a running motor — so the layout was directing every project to put
+  guard and E-stop status into the one classification guaranteed not to stop
+  machinery. An operator opening a guard door on a running conveyor would have
+  found the conveyor still running. Both descriptions now say INTERLOCK, the
+  routines that build the interlock gate exist in this layout, and the program
+  is called Safety_Device_Status rather than Safety_Monitor, because a program
+  named for monitoring safety invites exactly the reliance its restriction
+  disclaims.
+
+  Also in 2.0.0, main_task_watchdog_ms was removed. It was a declared parameter
+  that could not reach the task specification — the watchdog is a literal in
+  this layout — so an engineer could state 250 ms, have it accepted and recorded
+  against the requirement, and get a controller with 500 ms.
+
   JSR calls a routine inside the same program. There is no cross-program JSR in
   Logix, so "one MainRoutine that calls everything" is not expressible: each
   program has its own MainRoutine, the task calls those, and program order in
@@ -276,17 +332,35 @@ engineering_notes: >
 
 restrictions:
   - >
-    Safety_Monitor is a STANDARD program that reads the status of safety
-    devices. It is not safety logic, it is not safety-rated, and it must never
-    be used to implement a safety function. E-stop, guard interlocking and
-    light-curtain muting belong in a safety controller with safety-rated
-    instructions, assessed against the machine's risk assessment by a qualified
-    person.
+    Safety_Device_Status is a STANDARD program that reads the status of safety
+    devices. It is not safety logic, it is not safety-rated, it stops nothing by
+    itself, and it must never be used to implement a safety function. E-stop,
+    guard interlocking and light-curtain muting belong in a safety controller
+    with safety-rated instructions, assessed against the machine's risk
+    assessment by a qualified person. What this program produces is a standard
+    status bit, and what a standard status bit is worth is a question for that
+    assessment.
+  - >
+    A condition that must STOP running equipment is never a permissive in this
+    template set. A permissive appears in the start branch of the device
+    patterns and nothing else, so equipment already sealed in keeps running when
+    it goes false — by design, and stated as such in esco.motor.standard. E-stop
+    relay status, guard status and light-curtain status therefore belong in
+    _Ilk_Sources_OK, which drops the seal. Putting one of them in
+    _Perm_Sources_OK produces a conveyor that keeps running with the guard open,
+    and no validator in this platform can tell that the wrong classification was
+    chosen.
   - >
     This template creates an empty skeleton. Every routine it creates contains
     no logic other than the JSR calls listed above; the machine sequence, the
-    alarms and the device blocks are still to be written.
-  - Does not create tasks other than MainTask, and does not size the watchdog for you.
+    permissives and interlocks, the alarms and the device blocks are still to be
+    written.
+  - >
+    Does not create tasks other than MainTask, and does not size the watchdog
+    for you. The MainTask watchdog is a fixed 500 ms in this layout: there is no
+    parameter for it, because a parameter this template cannot apply is worse
+    than none — it records a number nobody's controller will run. Change it in
+    the generated project, or add a layout that states a different one.
   - Does not create I/O modules, a controller path, or any communication configuration.
   - Does not apply to GuardLogix or Compact GuardLogix; the safety task and safety programs are out of scope.
   - Does not decide program execution order for you beyond the order listed here; changing it changes behaviour.
@@ -308,8 +382,21 @@ tests:
     given: The layout has been expanded
     when: MainTask's program list is read
     then: >
-      The order is Safety_Monitor, Machine_Control, Alarms, HMI_Interface,
+      The order is Safety_Device_Status, Machine_Control, Alarms, HMI_Interface,
       Diagnostics.
+  - name: The interlock routine exists for the safety-device status to feed
+    given: The layout has been expanded
+    when: Machine_Control is examined
+    then: >
+      R_Permissives and R_Interlocks both exist and are called from
+      Machine_Control's MainRoutine before R_Sequence and R_Devices, so
+      esco.permissive.interlock has somewhere to expand into.
+  - name: No routine description offers safety-device status as a permissive
+    given: The expanded layout
+    when: The routine descriptions are read
+    then: >
+      R_EStop_Status and R_Guard_Status both say their status is consumed as an
+      interlock, and neither offers it as a permissive.
   - name: The skeleton imports
     given: The generated L5X artifacts
     when: They are imported into Studio 5000 in the stated order

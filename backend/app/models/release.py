@@ -27,7 +27,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import utcnow
@@ -329,8 +329,18 @@ class ReleaseCandidate(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMix
     #: The candidate that replaced this one. Distinct from the mixin's generic
     #: ``superseded_by_id`` because this one is a real foreign key: the release
     #: chain has to be walkable and must not point at a row that never existed.
+    #: Named explicitly: the convention would compose
+    #: ``fk_release_candidates_superseded_by_candidate_id_release_candidates``,
+    #: which is 67 bytes and would be truncated to a different name on
+    #: PostgreSQL than the one SQLite keeps.
     superseded_by_candidate_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID, ForeignKey("release_candidates.id", ondelete="SET NULL"), nullable=True
+        GUID,
+        ForeignKey(
+            "release_candidates.id",
+            ondelete="SET NULL",
+            name="fk_release_candidates_superseded_by_candidate_id",
+        ),
+        nullable=True,
     )
 
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -451,19 +461,51 @@ class ImportDependency(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "import_dependencies"
     __table_args__ = (
-        UniqueConstraint(
+        # An edge is identified by what it points at, and that is a different
+        # column depending on whether the prerequisite is inside the package.
+        # One UNIQUE over ``depends_on_artifact_id`` deduplicates neither half:
+        # it is NULL for every external prerequisite and NULL never equals
+        # NULL, so the rows a customer sees repeated in the import
+        # instructions are exactly the rows it cannot reject. Two partial
+        # unique indexes instead, each over the column that identifies its
+        # half. Both predicates are enforced by PostgreSQL and by SQLite.
+        Index(
+            "uq_import_dependencies_internal_edge",
             "artifact_id",
             "depends_on_artifact_id",
             "kind",
-            name="uq_import_dependencies_artifact_id_depends_on_artifact_id_kind",
+            unique=True,
+            sqlite_where=text("depends_on_artifact_id IS NOT NULL"),
+            postgresql_where=text("depends_on_artifact_id IS NOT NULL"),
+        ),
+        # ``depends_on_label`` rather than the null foreign key: it is the only
+        # column that says which external prerequisite an edge names.
+        Index(
+            "uq_import_dependencies_external_edge",
+            "artifact_id",
+            "depends_on_label",
+            "kind",
+            unique=True,
+            sqlite_where=text("depends_on_artifact_id IS NULL"),
+            postgresql_where=text("depends_on_artifact_id IS NULL"),
         ),
     )
 
     project_id: Mapped[uuid.UUID] = mapped_column(
         GUID, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    #: Named explicitly: the convention composes
+    #: ``fk_import_dependencies_release_candidate_id_release_candidates``, 62
+    #: bytes, which PostgreSQL truncates to a name SQLite does not hold.
     release_candidate_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("release_candidates.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID,
+        ForeignKey(
+            "release_candidates.id",
+            ondelete="CASCADE",
+            name="fk_import_dependencies_release_candidate_id",
+        ),
+        nullable=False,
+        index=True,
     )
 
     artifact_id: Mapped[uuid.UUID] = mapped_column(
@@ -471,8 +513,16 @@ class ImportDependency(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     #: Null when the prerequisite is not in this package — an AOI the customer
     #: already has, a module defined in a controller file we did not generate.
+    #: Named explicitly for the same reason as ``release_candidate_id``.
     depends_on_artifact_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID, ForeignKey("export_artifacts.id", ondelete="CASCADE"), nullable=True, index=True
+        GUID,
+        ForeignKey(
+            "export_artifacts.id",
+            ondelete="CASCADE",
+            name="fk_import_dependencies_depends_on_artifact_id",
+        ),
+        nullable=True,
+        index=True,
     )
     #: Always written, even when ``depends_on_artifact_id`` resolves. Kept as
     #: text so a dependency on something outside the package is still stated
@@ -516,8 +566,18 @@ class ReleaseManifest(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixi
         ),
     )
 
+    #: Named explicitly: the convention composes
+    #: ``fk_release_manifests_release_candidate_id_release_candidates``, 60
+    #: bytes, which PostgreSQL truncates to a name SQLite does not hold.
     release_candidate_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("release_candidates.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID,
+        ForeignKey(
+            "release_candidates.id",
+            ondelete="CASCADE",
+            name="fk_release_manifests_release_candidate_id",
+        ),
+        nullable=False,
+        index=True,
     )
 
     #: Schema version of the manifest document itself, so a reader written for
@@ -566,8 +626,18 @@ class WorkstationVerificationJob(UUIDPrimaryKeyMixin, EngineeringObjectMixin, Ti
 
     __tablename__ = "workstation_verification_jobs"
 
+    #: Named explicitly: the convention composes
+    #: ``fk_workstation_verification_jobs_release_candidate_id_release_candidates``,
+    #: 72 bytes, which PostgreSQL truncates to a name SQLite does not hold.
     release_candidate_id: Mapped[uuid.UUID] = mapped_column(
-        GUID, ForeignKey("release_candidates.id", ondelete="CASCADE"), nullable=False, index=True
+        GUID,
+        ForeignKey(
+            "release_candidates.id",
+            ondelete="CASCADE",
+            name="fk_workstation_verification_jobs_release_candidate_id",
+        ),
+        nullable=False,
+        index=True,
     )
 
     #: Which configured adapter this job is for. A site may have more than one

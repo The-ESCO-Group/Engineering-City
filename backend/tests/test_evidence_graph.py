@@ -13,12 +13,20 @@ to disprove.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings
+from app.core.enums import FileKind, FileStatus, ProjectRole
 from app.core.services import evidence_graph
+from app.core.services import projects as project_service
 from app.core.services.evidence_graph import EvidenceGraph, build_graph
+from app.models.file import ParsedArtifact, UploadedFile
 from app.models.project import Project
+from app.models.user import User
 from app.parsers.base import normalise_tag_name
 
 
@@ -444,3 +452,152 @@ def test_every_current_interlock_can_cite_its_schedule_row(
         assert requirement.sources[0].anchor_key.startswith("range:"), (
             f"{requirement.identifier} cites {requirement.sources[0].anchor_key}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Determinism: a ZIP upload writes every member in one transaction, so a whole
+# project's files routinely share a created_at to the microsecond. The graph
+# builder is order-sensitive — the first spelling of a tag name wins, and so do
+# the first non-empty data type, scope and description — so a tie that fell
+# through to whatever row order the database returned made a review
+# irreproducible over byte-identical uploads.
+# ---------------------------------------------------------------------------
+#: Two L5X exports declaring the same signal under two spellings, two data
+#: types, two scopes and two descriptions. Whichever the builder reaches first
+#: is the one the review agents are told about.
+_TIED_DECLARATIONS = {
+    "A": ("LineA.L5X", "CV101_Status", "DINT", "controller", "from A"),
+    "B": ("LineB.L5X", "cv101_status", "INT", "program", "from B"),
+}
+
+#: One timestamp for both files, exactly as ``files.py`` writes ZIP members.
+_TIED_AT = datetime(2026, 2, 3, 9, 15, 0, tzinfo=UTC)
+
+
+def _add_l5x_row(db: Session, project: Project, key: str) -> None:
+    filename, tag_name, data_type, scope, description = _TIED_DECLARATIONS[key]
+    record = UploadedFile(
+        project_id=project.id,
+        original_filename=filename,
+        stored_filename=filename,
+        relative_path=f"raw/{filename}",
+        file_kind=FileKind.L5X,
+        status=FileStatus.PARSED,
+        created_at=_TIED_AT,
+    )
+    db.add(record)
+    db.flush()
+    db.add(
+        ParsedArtifact(
+            project_id=project.id,
+            file_id=record.id,
+            artifact_kind=FileKind.L5X.value,
+            parser_name="l5x_parser",
+            parser_version="1.0.0",
+            created_at=_TIED_AT,
+            content={
+                "tags": [
+                    {
+                        "name": tag_name,
+                        "data_type": data_type,
+                        "scope": scope,
+                        "description": description,
+                        "anchor_key": f"tag:{scope}/{tag_name}",
+                    }
+                ],
+                "rungs": [
+                    {
+                        "program": "MainProgram",
+                        "routine": "R_Main",
+                        "number": 0,
+                        "comment": "",
+                        "text": "",
+                        "referenced_tags": [tag_name],
+                        "instructions": [],
+                        "anchor_key": f"rung:{key}/0",
+                    }
+                ],
+            },
+        )
+    )
+    db.flush()
+
+
+def _without_identifiers(value: Any) -> Any:
+    """The graph with the two ids that legitimately differ between projects removed."""
+    if isinstance(value, dict):
+        return {
+            key: _without_identifiers(item)
+            for key, item in value.items()
+            if key not in {"file_id", "project_id"}
+        }
+    if isinstance(value, list):
+        return [_without_identifiers(item) for item in value]
+    return value
+
+
+def test_two_files_sharing_a_timestamp_build_the_same_graph_either_way_round(
+    db: Session,
+    project: Project,
+    seeded: dict[str, User],
+    settings: Settings,
+) -> None:
+    """The same two uploads, written in the opposite order, are the same evidence.
+
+    The two projects hold byte-identical parsed content and differ only in the
+    order the rows were inserted, which is the order an ``ORDER BY created_at``
+    with no tiebreaker hands back. If that leaks into the graph then the tag data
+    type, the tag spelling and the rung order the review agents are given depend
+    on it, and no review over this project is reproducible.
+    """
+    mirror = project_service.create_project(
+        db,
+        name="Synthetic Conveyor Line 3 (mirror)",
+        description="Same two uploads, inserted the other way round.",
+        client_reference="TEST-002",
+        attributes={},
+        creator=seeded["engineer"],
+        settings=settings,
+    )
+    project_service.add_member(
+        db,
+        mirror,
+        user_id=seeded["reviewer"].id,
+        role=ProjectRole.REVIEWER,
+        actor=seeded["engineer"],
+    )
+
+    for key in ("A", "B"):
+        _add_l5x_row(db, project, key)
+    for key in ("B", "A"):
+        _add_l5x_row(db, mirror, key)
+    db.flush()
+
+    first = _without_identifiers(build_graph(db, project.id).as_dict())
+    second = _without_identifiers(build_graph(db, mirror.id).as_dict())
+
+    assert first == second
+
+
+def test_a_tied_timestamp_resolves_by_filename_not_by_insertion_order(
+    db: Session, project: Project
+) -> None:
+    """And the winner is stated, not incidental.
+
+    ``LineA.L5X`` sorts before ``LineB.L5X``, so its declaration is the one the
+    graph keeps — whichever row the database happened to return first.
+    """
+    for key in ("B", "A"):
+        _add_l5x_row(db, project, key)
+    db.flush()
+
+    graph = build_graph(db, project.id)
+    fact = graph.tag("CV101_Status")
+
+    assert fact is not None
+    assert fact.name == "CV101_Status"
+    assert fact.data_type == "DINT"
+    assert fact.scope == "controller"
+    assert fact.description == "from A"
+    assert fact.rung_keys == ["rung:A/0", "rung:B/0"]
+    assert [item.anchor_key for item in graph.logic] == ["rung:A/0", "rung:B/0"]

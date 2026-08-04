@@ -11,7 +11,7 @@ info:
     \ be released\n  without a recorded human approval.\n* Model output is never presented as approved\
     \ engineering, and raw model\n  reasoning is never stored or returned.\n"
   version: 0.1.0
-  x-contract-version: 1.0.0
+  x-contract-version: 1.1.0
   license:
     name: ESCO Group internal
 paths:
@@ -422,6 +422,485 @@ paths:
                 items:
                   $ref: '#/components/schemas/ProjectMemberRead'
                 title: Response Add Member Api Projects  Project Id  Members Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/engineering-profile:
+    get:
+      tags:
+      - engineering
+      summary: Canonical engineering profile and exact target platform
+      operationId: get_engineering_profile_api_projects__project_id__engineering_profile_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineeringProfileRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - engineering
+      summary: Record engineering intake before workflow work begins
+      operationId: put_engineering_profile_api_projects__project_id__engineering_profile_put
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EngineeringProfileInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineeringProfileRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/clarifications:
+    get:
+      tags:
+      - engineering
+      summary: Questions and ambiguities that need a named human answer
+      operationId: list_clarifications_api_projects__project_id__clarifications_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClarificationInbox'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/project-questions/{question_id}/resolve:
+    post:
+      tags:
+      - engineering
+      summary: Resolve a project-level question as a named human decision
+      operationId: resolve_project_question_api_project_questions__question_id__resolve_post
+      parameters:
+      - name: question_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Question Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveClarificationRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClarificationResolutionRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/clarifications/{clarification_id}/resolve:
+    post:
+      tags:
+      - engineering
+      summary: Resolve a requirement or object ambiguity as a named human decision
+      operationId: resolve_clarification_api_clarifications__clarification_id__resolve_post
+      parameters:
+      - name: clarification_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Clarification Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveClarificationRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClarificationResolutionRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/requirements:
+    get:
+      tags:
+      - requirements
+      summary: Canonical requirements and their exact source citations
+      operationId: list_requirements_api_projects__project_id__requirements_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RequirementRead'
+                title: Response List Requirements Api Projects  Project Id  Requirements Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/requirements/{requirement_id}/decision:
+    post:
+      tags:
+      - requirements
+      summary: Accept or reject an extracted requirement as a named reviewer
+      operationId: decide_requirement_api_requirements__requirement_id__decision_post
+      parameters:
+      - name: requirement_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Requirement Id
+      - name: User-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User-Agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementDecisionRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementDecisionRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/release-readiness:
+    get:
+      tags:
+      - releases
+      summary: Explain whether the current project revision can produce a release candidate
+      operationId: release_readiness_api_projects__project_id__release_readiness_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseReadinessRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/release-candidates:
+    post:
+      tags:
+      - releases
+      summary: Reserve a release candidate at the current project revision
+      operationId: create_release_candidate_api_projects__project_id__release_candidates_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReleaseCandidateRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseCandidateRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - releases
+      summary: List release candidates for a project
+      operationId: list_release_candidates_api_projects__project_id__release_candidates_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_ReleaseCandidateRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/release-candidates/{candidate_id}:
+    get:
+      tags:
+      - releases
+      summary: Read one release candidate and its available actions
+      operationId: get_release_candidate_api_release_candidates__candidate_id__get
+      parameters:
+      - name: candidate_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Candidate Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseCandidateRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/release-candidates/{candidate_id}/artifacts:
+    post:
+      tags:
+      - releases
+      summary: Generate or regenerate the candidate's verified package artifacts
+      operationId: generate_release_artifacts_api_release_candidates__candidate_id__artifacts_post
+      parameters:
+      - name: candidate_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Candidate Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseCandidateRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - releases
+      summary: List the exact artifact rows in a release candidate
+      operationId: list_release_artifacts_api_release_candidates__candidate_id__artifacts_get
+      parameters:
+      - name: candidate_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Candidate Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 100
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Page_ExportArtifactRead_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/release-candidates/{candidate_id}/finalize:
+    post:
+      tags:
+      - releases
+      summary: Finalize an approved candidate into an immutable deterministic ZIP
+      operationId: finalize_release_candidate_api_release_candidates__candidate_id__finalize_post
+      parameters:
+      - name: candidate_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Candidate Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinalizeReleaseRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseArchiveRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/release-candidates/{candidate_id}/download:
+    get:
+      tags:
+      - releases
+      summary: Download a pre-verified immutable release ZIP
+      operationId: download_release_candidate_api_release_candidates__candidate_id__download_get
+      parameters:
+      - name: candidate_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Candidate Id
+      responses:
+        '200':
+          description: Successful Response
         '422':
           description: Validation Error
           content:
@@ -1815,6 +2294,42 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    AcceptanceCriterionRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        reference:
+          type: string
+          title: Reference
+        statement:
+          type: string
+          title: Statement
+        ordinal:
+          type: integer
+          title: Ordinal
+        is_testable:
+          type: boolean
+          title: Is Testable
+        test_notes:
+          type: string
+          title: Test Notes
+        status:
+          $ref: '#/components/schemas/RequirementStatus'
+        approval_state:
+          $ref: '#/components/schemas/ObjectApprovalState'
+      type: object
+      required:
+      - id
+      - reference
+      - statement
+      - ordinal
+      - is_testable
+      - test_notes
+      - status
+      - approval_state
+      title: AcceptanceCriterionRead
     AddProjectMemberRequest:
       properties:
         user_id:
@@ -2400,6 +2915,14 @@ components:
           type: string
           title: Decision Notes
           default: ''
+        decision_allowed:
+          type: boolean
+          title: Decision Allowed
+          default: true
+        decision_disabled_reason:
+          type: string
+          title: Decision Disabled Reason
+          default: ''
         created_at:
           type: string
           format: date-time
@@ -2475,6 +2998,162 @@ components:
         Reported rather than crashed on: a missing delivery plugin degrades the
 
         product, it does not break it.'
+    ClarificationInbox:
+      properties:
+        project_questions:
+          items:
+            $ref: '#/components/schemas/ProjectQuestionRead'
+          type: array
+          title: Project Questions
+        clarifications:
+          items:
+            $ref: '#/components/schemas/ClarificationRead'
+          type: array
+          title: Clarifications
+        blocking_count:
+          type: integer
+          title: Blocking Count
+          default: 0
+      type: object
+      title: ClarificationInbox
+    ClarificationRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        requirement_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Requirement Id
+        object_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Object Type
+        object_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Object Id
+        question:
+          type: string
+          title: Question
+        ambiguity:
+          type: string
+          title: Ambiguity
+        status:
+          $ref: '#/components/schemas/ClarificationStatus'
+        resolution:
+          type: string
+          title: Resolution
+        resolved_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Resolved By Id
+        resolved_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Resolved At
+        blocks_generation:
+          type: boolean
+          title: Blocks Generation
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - project_id
+      - question
+      - ambiguity
+      - status
+      - resolution
+      - blocks_generation
+      - created_at
+      - updated_at
+      title: ClarificationRead
+    ClarificationResolutionRead:
+      properties:
+        kind:
+          type: string
+          enum:
+          - project_question
+          - clarification
+          title: Kind
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        status:
+          $ref: '#/components/schemas/ClarificationStatus'
+        decision_id:
+          type: string
+          format: uuid
+          title: Decision Id
+        answered_by_id:
+          type: string
+          format: uuid
+          title: Answered By Id
+        answered_at:
+          type: string
+          format: date-time
+          title: Answered At
+        unblocked_task_count:
+          type: integer
+          title: Unblocked Task Count
+          default: 0
+      type: object
+      required:
+      - kind
+      - id
+      - project_id
+      - status
+      - decision_id
+      - answered_by_id
+      - answered_at
+      title: ClarificationResolutionRead
+    ClarificationStatus:
+      type: string
+      enum:
+      - open
+      - answered
+      - deferred
+      - dismissed
+      - obsolete
+      title: ClarificationStatus
+    ControllerFamily:
+      type: string
+      enum:
+      - compactlogix
+      - controllogix
+      - guardlogix
+      - compact_guardlogix
+      - micro800
+      - slc500
+      - plc5
+      - other
+      title: ControllerFamily
     CreateFindingCommentRequest:
       properties:
         body:
@@ -2506,10 +3185,29 @@ components:
           additionalProperties: true
           type: object
           title: Attributes
+        engineering_profile:
+          anyOf:
+          - $ref: '#/components/schemas/EngineeringProfileInput'
+          - type: 'null'
       type: object
       required:
       - name
       title: CreateProjectRequest
+    CreateReleaseCandidateRequest:
+      properties:
+        export_profile_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Export Profile Id
+        force:
+          type: boolean
+          title: Force
+          description: Record explicit permission to continue if this candidate later becomes stale.
+          default: false
+      type: object
+      title: CreateReleaseCandidateRequest
     CreateUserRequest:
       properties:
         email:
@@ -2567,6 +3265,208 @@ components:
       description: 'The engineering purpose a file serves, as declared by the uploader or
 
         inferred during intake. Drives which agents care about the file.'
+    EngineeringProfileInput:
+      properties:
+        project_name:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Project Name
+        customer_label:
+          type: string
+          maxLength: 200
+          title: Customer Label
+          default: ''
+        plant_or_site:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Plant Or Site
+        project_description:
+          type: string
+          minLength: 1
+          title: Project Description
+        project_type:
+          $ref: '#/components/schemas/ProjectType'
+        units:
+          $ref: '#/components/schemas/UnitSystem'
+          default: metric
+        locale:
+          type: string
+          maxLength: 35
+          minLength: 2
+          title: Locale
+          default: en-US
+        network_architecture:
+          type: string
+          title: Network Architecture
+          default: ''
+        release_mode:
+          $ref: '#/components/schemas/ReleaseMode'
+          default: import_package_only
+        restricted_domains:
+          items:
+            $ref: '#/components/schemas/RestrictedDomain'
+          type: array
+          title: Restricted Domains
+        target:
+          $ref: '#/components/schemas/TargetPlatformInput'
+        standards:
+          $ref: '#/components/schemas/EngineeringStandardsInput'
+      type: object
+      required:
+      - project_name
+      - plant_or_site
+      - project_description
+      - project_type
+      - target
+      - standards
+      title: EngineeringProfileInput
+    EngineeringProfileRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        project_name:
+          type: string
+          title: Project Name
+        customer_label:
+          type: string
+          title: Customer Label
+        plant_or_site:
+          type: string
+          title: Plant Or Site
+        project_description:
+          type: string
+          title: Project Description
+        project_type:
+          $ref: '#/components/schemas/ProjectType'
+        naming_standard_version:
+          type: string
+          title: Naming Standard Version
+        alarm_philosophy_version:
+          type: string
+          title: Alarm Philosophy Version
+        template_set_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Template Set Id
+        engineering_standard_set_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Engineering Standard Set Id
+        units:
+          $ref: '#/components/schemas/UnitSystem'
+        locale:
+          type: string
+          title: Locale
+        network_architecture:
+          type: string
+          title: Network Architecture
+        release_mode:
+          $ref: '#/components/schemas/ReleaseMode'
+        restricted_domains:
+          items: {}
+          type: array
+          title: Restricted Domains
+        restricted_domain_mode:
+          $ref: '#/components/schemas/RestrictedDomainMode'
+        completeness:
+          additionalProperties:
+            $ref: '#/components/schemas/ProfileFieldStatus'
+          type: object
+          title: Completeness
+        missing_required_fields:
+          items: {}
+          type: array
+          title: Missing Required Fields
+        is_complete_for_generation:
+          type: boolean
+          title: Is Complete For Generation
+        blocks_generation:
+          type: boolean
+          title: Blocks Generation
+        target:
+          $ref: '#/components/schemas/TargetPlatformRead'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - project_id
+      - project_name
+      - customer_label
+      - plant_or_site
+      - project_description
+      - project_type
+      - naming_standard_version
+      - alarm_philosophy_version
+      - units
+      - locale
+      - network_architecture
+      - release_mode
+      - restricted_domain_mode
+      - completeness
+      - is_complete_for_generation
+      - blocks_generation
+      - target
+      - created_at
+      - updated_at
+      title: EngineeringProfileRead
+    EngineeringStandardsInput:
+      properties:
+        naming_standard_version:
+          type: string
+          maxLength: 40
+          minLength: 1
+          title: Naming Standard Version
+        alarm_philosophy_version:
+          type: string
+          maxLength: 40
+          minLength: 1
+          title: Alarm Philosophy Version
+        controller_template:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Controller Template
+        aoi_udt_library:
+          type: string
+          maxLength: 200
+          title: Aoi Udt Library
+          default: ''
+        hmi_library:
+          type: string
+          maxLength: 200
+          title: Hmi Library
+          default: ''
+        test_template_set:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Test Template Set
+      type: object
+      required:
+      - naming_standard_version
+      - alarm_philosophy_version
+      - controller_template
+      - test_template_set
+      title: EngineeringStandardsInput
     EventEnvelope:
       properties:
         id:
@@ -2756,6 +3656,102 @@ components:
         The product must never blur these together: an inference drawn from partial
 
         data is not the same as a direct quotation from a source file.'
+    ExportArtifactKind:
+      type: string
+      enum:
+      - controller_project_l5x
+      - program_l5x
+      - routine_l5x
+      - udt_l5x
+      - aoi_l5x
+      - tag_csv
+      - comment_csv
+      - cross_reference_csv
+      - import_order
+      - limitations
+      - target_profile
+      - validation_summary
+      - manifest
+      - checksums
+      - change_log
+      - approval_log
+      - evidence_index
+      - hmi_display_xml
+      - hmi_tag_csv
+      - alarm_import
+      - test_plan
+      - report
+      title: ExportArtifactKind
+    ExportArtifactRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        release_candidate_id:
+          type: string
+          format: uuid
+          title: Release Candidate Id
+        kind:
+          $ref: '#/components/schemas/ExportArtifactKind'
+        relative_path:
+          type: string
+          title: Relative Path
+        filename:
+          type: string
+          title: Filename
+        media_type:
+          type: string
+          title: Media Type
+          default: ''
+        size_bytes:
+          type: integer
+          title: Size Bytes
+        sha256:
+          type: string
+          title: Sha256
+        validation_level:
+          $ref: '#/components/schemas/ValidationLevel'
+        generator_name:
+          type: string
+          title: Generator Name
+          default: ''
+        generator_version:
+          type: string
+          title: Generator Version
+          default: ''
+        import_order:
+          type: integer
+          title: Import Order
+          default: 0
+        is_produced_by_plugin:
+          type: boolean
+          title: Is Produced By Plugin
+          default: false
+        plugin_name:
+          type: string
+          title: Plugin Name
+          default: ''
+        warnings:
+          items: {}
+          type: array
+          title: Warnings
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - release_candidate_id
+      - kind
+      - relative_path
+      - filename
+      - size_bytes
+      - sha256
+      - validation_level
+      - created_at
+      title: ExportArtifactRead
     FileDetail:
       properties:
         id:
@@ -2868,6 +3864,17 @@ components:
       - rejected
       - deleted
       title: FileStatus
+    FinalizeReleaseRequest:
+      properties:
+        confirm:
+          type: boolean
+          const: true
+          title: Confirm
+          description: Explicit acknowledgement that finalization creates immutable delivery bytes.
+      type: object
+      required:
+      - confirm
+      title: FinalizeReleaseRequest
     FindingCategory:
       type: string
       enum:
@@ -3302,6 +4309,27 @@ components:
       - environment
       - database
       title: HealthResponse
+    HmiProduct:
+      type: string
+      enum:
+      - factorytalk_view_me
+      - factorytalk_view_se
+      - factorytalk_optix
+      - panelview_800
+      - none
+      - other
+      title: HmiProduct
+    ImportVerificationStatus:
+      type: string
+      enum:
+      - not_attempted
+      - unavailable
+      - queued
+      - running
+      - passed
+      - failed
+      - error
+      title: ImportVerificationStatus
     LoginRequest:
       properties:
         email:
@@ -3394,6 +4422,23 @@ components:
       - provider
       - model
       title: ModelConfigurationRead
+    ObjectApprovalState:
+      type: string
+      enum:
+      - draft
+      - proposed
+      - approved
+      - rejected
+      - superseded
+      title: ObjectApprovalState
+      description: 'How settled a canonical object is.
+
+
+        ``APPROVED`` is what makes an object protected: changing it afterwards
+
+        requires an explicit supersede path and a fresh approval, so an agent
+
+        cannot quietly edit something an engineer signed off.'
     OkResponse:
       properties:
         ok:
@@ -3407,6 +4452,30 @@ components:
       type: object
       title: OkResponse
       description: Acknowledgement for operations with no meaningful body.
+    Page_ExportArtifactRead_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ExportArtifactRead'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+          description: Total matching rows, ignoring limit/offset.
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: Page[ExportArtifactRead]
     Page_FindingRead_:
       properties:
         items:
@@ -3455,6 +4524,30 @@ components:
       - limit
       - offset
       title: Page[ProjectRead]
+    Page_ReleaseCandidateRead_:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ReleaseCandidateRead'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+          description: Total matching rows, ignoring limit/offset.
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: Page[ReleaseCandidateRead]
     ParsedArtifactRead:
       properties:
         id:
@@ -3503,6 +4596,15 @@ components:
       - parser_version
       - created_at
       title: ParsedArtifactRead
+    ProfileFieldStatus:
+      type: string
+      enum:
+      - present
+      - missing
+      - ambiguous
+      - unsupported
+      title: ProfileFieldStatus
+      description: Why a required profile field is not usable yet.
     ProjectCounts:
       properties:
         files:
@@ -3652,6 +4754,87 @@ components:
       - user_id
       - role
       title: ProjectMemberRead
+    ProjectQuestionRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        reference:
+          type: string
+          title: Reference
+        category:
+          $ref: '#/components/schemas/QuestionCategory'
+        question:
+          type: string
+          title: Question
+        why_it_matters:
+          type: string
+          title: Why It Matters
+        status:
+          $ref: '#/components/schemas/ClarificationStatus'
+        is_mandatory:
+          type: boolean
+          title: Is Mandatory
+        is_blocking:
+          type: boolean
+          title: Is Blocking
+        blocks_task_kinds:
+          items: {}
+          type: array
+          title: Blocks Task Kinds
+        answer:
+          type: string
+          title: Answer
+        answered_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Answered By Id
+        answered_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Answered At
+        asked_by_agent:
+          type: string
+          title: Asked By Agent
+        raised_in_task_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Raised In Task Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - project_id
+      - reference
+      - category
+      - question
+      - why_it_matters
+      - status
+      - is_mandatory
+      - is_blocking
+      - answer
+      - asked_by_agent
+      - created_at
+      - updated_at
+      title: ProjectQuestionRead
     ProjectRead:
       properties:
         id:
@@ -3780,6 +4963,35 @@ components:
         Renaming either would break every stored row and the frontend, so the
 
         remaining phases are added alongside instead.'
+    ProjectType:
+      type: string
+      enum:
+      - new_installation
+      - upgrade
+      - retrofit
+      - migration
+      - expansion
+      - other
+      title: ProjectType
+    QuestionCategory:
+      type: string
+      enum:
+      - target_platform
+      - requirement_ambiguity
+      - scope
+      - device_or_equipment
+      - io_assignment
+      - tag_naming
+      - interlock
+      - sequence_or_mode
+      - alarm
+      - hmi
+      - testing
+      - template_selection
+      - restricted_domain
+      - other
+      title: QuestionCategory
+      description: What a clarification is about. Drives who should answer it.
     RecommendationRead:
       properties:
         id:
@@ -3857,6 +5069,403 @@ components:
       - rejected
       - superseded
       title: RecommendationStatus
+    ReleaseActionRead:
+      properties:
+        available:
+          type: boolean
+          title: Available
+        path:
+          type: string
+          title: Path
+        reason:
+          type: string
+          title: Reason
+          default: ''
+      type: object
+      required:
+      - available
+      - path
+      title: ReleaseActionRead
+    ReleaseActionsRead:
+      properties:
+        generate:
+          $ref: '#/components/schemas/ReleaseActionRead'
+        finalize:
+          $ref: '#/components/schemas/ReleaseActionRead'
+        download:
+          $ref: '#/components/schemas/ReleaseActionRead'
+      type: object
+      required:
+      - generate
+      - finalize
+      - download
+      title: ReleaseActionsRead
+    ReleaseArchiveRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        release_candidate_id:
+          type: string
+          format: uuid
+          title: Release Candidate Id
+        release_manifest_id:
+          type: string
+          format: uuid
+          title: Release Manifest Id
+        approved_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Approved By Id
+        approved_by_display_name:
+          type: string
+          title: Approved By Display Name
+        finalized_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Finalized By Id
+        relative_path:
+          type: string
+          title: Relative Path
+        filename:
+          type: string
+          title: Filename
+        media_type:
+          type: string
+          title: Media Type
+        size_bytes:
+          type: integer
+          title: Size Bytes
+        sha256:
+          type: string
+          maxLength: 64
+          minLength: 64
+          title: Sha256
+        file_count:
+          type: integer
+          title: File Count
+        source_revision:
+          type: integer
+          title: Source Revision
+        validation_level:
+          $ref: '#/components/schemas/ValidationLevel'
+        import_verification_status:
+          $ref: '#/components/schemas/ImportVerificationStatus'
+        import_verification_detail:
+          type: string
+          title: Import Verification Detail
+          default: ''
+        rockwell_import_verified:
+          type: boolean
+          title: Rockwell Import Verified
+        manifest_sha256:
+          type: string
+          maxLength: 64
+          minLength: 64
+          title: Manifest Sha256
+        checksum_file_sha256:
+          type: string
+          maxLength: 64
+          minLength: 64
+          title: Checksum File Sha256
+        frozen_at:
+          type: string
+          format: date-time
+          title: Frozen At
+        finalized_at:
+          type: string
+          format: date-time
+          title: Finalized At
+        download_path:
+          type: string
+          title: Download Path
+          default: ''
+      type: object
+      required:
+      - id
+      - project_id
+      - release_candidate_id
+      - release_manifest_id
+      - approved_by_display_name
+      - relative_path
+      - filename
+      - media_type
+      - size_bytes
+      - sha256
+      - file_count
+      - source_revision
+      - validation_level
+      - import_verification_status
+      - rockwell_import_verified
+      - manifest_sha256
+      - checksum_file_sha256
+      - frozen_at
+      - finalized_at
+      title: ReleaseArchiveRead
+    ReleaseBlockRead:
+      properties:
+        code:
+          type: string
+          title: Code
+        summary:
+          type: string
+          title: Summary
+        detail:
+          type: string
+          title: Detail
+      type: object
+      required:
+      - code
+      - summary
+      - detail
+      title: ReleaseBlockRead
+    ReleaseCandidateRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        revision_number:
+          type: integer
+          title: Revision Number
+        candidate_number:
+          type: integer
+          title: Candidate Number
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/ReleaseCandidateStatus'
+        approval_state:
+          $ref: '#/components/schemas/ObjectApprovalState'
+        export_profile_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Export Profile Id
+        validation_run_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Validation Run Id
+        validation_level:
+          $ref: '#/components/schemas/ValidationLevel'
+        import_verification_status:
+          $ref: '#/components/schemas/ImportVerificationStatus'
+        import_verification_detail:
+          type: string
+          title: Import Verification Detail
+          default: ''
+        generator_version:
+          type: string
+          title: Generator Version
+          default: ''
+        package_path:
+          type: string
+          title: Package Path
+          default: ''
+        package_sha256:
+          type: string
+          title: Package Sha256
+          default: ''
+        package_bytes:
+          type: integer
+          title: Package Bytes
+          default: 0
+        limitations:
+          items: {}
+          type: array
+          title: Limitations
+        unsupported_items:
+          items: {}
+          type: array
+          title: Unsupported Items
+        approved_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Approved By Id
+        approved_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Approved At
+        released_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Released At
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        artifact_count:
+          type: integer
+          title: Artifact Count
+          default: 0
+        manifest:
+          anyOf:
+          - $ref: '#/components/schemas/ReleaseManifestRead'
+          - type: 'null'
+        archive:
+          anyOf:
+          - $ref: '#/components/schemas/ReleaseArchiveRead'
+          - type: 'null'
+        actions:
+          $ref: '#/components/schemas/ReleaseActionsRead'
+      type: object
+      required:
+      - id
+      - project_id
+      - revision_number
+      - candidate_number
+      - name
+      - status
+      - approval_state
+      - validation_level
+      - import_verification_status
+      - created_at
+      - updated_at
+      - actions
+      title: ReleaseCandidateRead
+    ReleaseCandidateStatus:
+      type: string
+      enum:
+      - draft
+      - generating
+      - generated
+      - validation_failed
+      - awaiting_approval
+      - approved
+      - released
+      - superseded
+      - failed
+      title: ReleaseCandidateStatus
+    ReleaseManifestRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        release_candidate_id:
+          type: string
+          format: uuid
+          title: Release Candidate Id
+        manifest_version:
+          type: string
+          title: Manifest Version
+        content_sha256:
+          type: string
+          title: Content Sha256
+        artifact_count:
+          type: integer
+          title: Artifact Count
+        checksum_file_sha256:
+          type: string
+          title: Checksum File Sha256
+        evidence_index_sha256:
+          type: string
+          title: Evidence Index Sha256
+        frozen_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Frozen At
+        frozen_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Frozen By Id
+        approved_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Approved By Id
+        approval_summary:
+          additionalProperties: true
+          type: object
+          title: Approval Summary
+      type: object
+      required:
+      - id
+      - release_candidate_id
+      - manifest_version
+      - content_sha256
+      - artifact_count
+      - checksum_file_sha256
+      - evidence_index_sha256
+      title: ReleaseManifestRead
+    ReleaseMode:
+      type: string
+      enum:
+      - import_package_only
+      - rockwell_workstation_assembly
+      - review_only
+      title: ReleaseMode
+      description: How far this project intends to take generation.
+    ReleaseReadinessRead:
+      properties:
+        revision_number:
+          type: integer
+          title: Revision Number
+        is_ready:
+          type: boolean
+          title: Is Ready
+        blocking:
+          items:
+            $ref: '#/components/schemas/ReleaseBlockRead'
+          type: array
+          title: Blocking
+        outstanding_gates:
+          items:
+            type: string
+          type: array
+          title: Outstanding Gates
+        validation_error_count:
+          type: integer
+          title: Validation Error Count
+          default: 0
+        highest_attainable_validation_level:
+          $ref: '#/components/schemas/ValidationLevel'
+        import_verification_possible:
+          type: boolean
+          title: Import Verification Possible
+        import_verification_detail:
+          type: string
+          title: Import Verification Detail
+          default: ''
+      type: object
+      required:
+      - revision_number
+      - is_ready
+      - highest_attainable_validation_level
+      - import_verification_possible
+      title: ReleaseReadinessRead
     ReportRead:
       properties:
         id:
@@ -3947,6 +5556,238 @@ components:
       - generated
       - failed
       title: ReportStatus
+    RequirementDecisionRead:
+      properties:
+        requirement:
+          $ref: '#/components/schemas/RequirementRead'
+        decision_id:
+          type: string
+          format: uuid
+          title: Decision Id
+        decided_by_id:
+          type: string
+          format: uuid
+          title: Decided By Id
+        decided_at:
+          type: string
+          format: date-time
+          title: Decided At
+        unblocked_task_count:
+          type: integer
+          title: Unblocked Task Count
+          default: 0
+      type: object
+      required:
+      - requirement
+      - decision_id
+      - decided_by_id
+      - decided_at
+      title: RequirementDecisionRead
+    RequirementDecisionRequest:
+      properties:
+        decision:
+          type: string
+          enum:
+          - accept
+          - reject
+          title: Decision
+        rationale:
+          type: string
+          maxLength: 10000
+          minLength: 1
+          title: Rationale
+      type: object
+      required:
+      - decision
+      - rationale
+      title: RequirementDecisionRequest
+    RequirementKind:
+      type: string
+      enum:
+      - functional
+      - performance
+      - safety
+      - interface
+      - operational
+      - regulatory
+      - constraint
+      - other
+      title: RequirementKind
+    RequirementPriority:
+      type: string
+      enum:
+      - mandatory
+      - expected
+      - optional
+      title: RequirementPriority
+    RequirementRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        reference:
+          type: string
+          title: Reference
+        title:
+          type: string
+          title: Title
+        statement:
+          type: string
+          title: Statement
+        source_text:
+          type: string
+          title: Source Text
+        kind:
+          $ref: '#/components/schemas/RequirementKind'
+        priority:
+          $ref: '#/components/schemas/RequirementPriority'
+        status:
+          $ref: '#/components/schemas/RequirementStatus'
+        approval_state:
+          $ref: '#/components/schemas/ObjectApprovalState'
+        is_inferred:
+          type: boolean
+          title: Is Inferred
+        confidence:
+          type: number
+          title: Confidence
+        rationale:
+          type: string
+          title: Rationale
+        verification_method:
+          type: string
+          title: Verification Method
+        sources:
+          items:
+            $ref: '#/components/schemas/RequirementSourceRead'
+          type: array
+          title: Sources
+        acceptance_criteria:
+          items:
+            $ref: '#/components/schemas/AcceptanceCriterionRead'
+          type: array
+          title: Acceptance Criteria
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - project_id
+      - reference
+      - title
+      - statement
+      - source_text
+      - kind
+      - priority
+      - status
+      - approval_state
+      - is_inferred
+      - confidence
+      - rationale
+      - verification_method
+      - created_at
+      - updated_at
+      title: RequirementRead
+    RequirementSourceRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        file_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: File Id
+        anchor_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Anchor Id
+        quoted_text:
+          type: string
+          title: Quoted Text
+        location_label:
+          type: string
+          title: Location Label
+        is_primary:
+          type: boolean
+          title: Is Primary
+      type: object
+      required:
+      - id
+      - quoted_text
+      - location_label
+      - is_primary
+      title: RequirementSourceRead
+    RequirementStatus:
+      type: string
+      enum:
+      - proposed
+      - accepted
+      - rejected
+      - superseded
+      - implemented
+      - verified
+      title: RequirementStatus
+    ResolveClarificationRequest:
+      properties:
+        answer:
+          type: string
+          maxLength: 10000
+          minLength: 1
+          title: Answer
+        resolution:
+          type: string
+          enum:
+          - answered
+          - dismissed
+          title: Resolution
+          default: answered
+      type: object
+      required:
+      - answer
+      title: ResolveClarificationRequest
+    RestrictedDomain:
+      type: string
+      enum:
+      - motion
+      - safety_logic
+      - burner_management
+      - process_safety
+      - high_energy
+      - electrical_power_distribution
+      - robotics
+      title: RestrictedDomain
+      description: 'Engineering domains this platform will not generate for by default.
+
+
+        Each is a domain where a plausible-looking generated artifact could cause
+
+        injury or major equipment damage, and where the competence to review it is
+
+        a formal qualification rather than general controls experience.'
+    RestrictedDomainMode:
+      type: string
+      enum:
+      - blocked
+      - manual_review_only
+      - qualified_workflow_enabled
+      title: RestrictedDomainMode
+      description: What the platform is permitted to do in a restricted domain.
     RoleName:
       type: string
       enum:
@@ -3989,6 +5830,20 @@ components:
       - task_count
       title: RunRead
       description: 'A workflow run: the task graph created by one ``POST /runs`` call.'
+    SafetyClassification:
+      type: string
+      enum:
+      - standard
+      - safety_rated
+      - mixed_standard_and_safety
+      - unknown
+      title: SafetyClassification
+      description: 'How a controller is classified for safety purposes.
+
+
+        Anything other than ``STANDARD`` puts the project into manual-review-only
+
+        mode unless an administrator has enabled a qualified workflow.'
     StartRunRequest:
       properties:
         force_reparse:
@@ -4008,6 +5863,125 @@ components:
       type: object
       title: StartRunRequest
       description: Starts a workflow run over the project's current files.
+    TargetPlatformInput:
+      properties:
+        controller_family:
+          $ref: '#/components/schemas/ControllerFamily'
+        controller_catalog_number:
+          type: string
+          maxLength: 60
+          minLength: 1
+          title: Controller Catalog Number
+        firmware_revision:
+          type: string
+          maxLength: 20
+          minLength: 1
+          title: Firmware Revision
+        studio_5000_version:
+          type: string
+          maxLength: 20
+          minLength: 1
+          title: Studio 5000 Version
+        safety_classification:
+          $ref: '#/components/schemas/SafetyClassification'
+          default: unknown
+        hmi_product:
+          $ref: '#/components/schemas/HmiProduct'
+          default: none
+        hmi_version:
+          type: string
+          maxLength: 20
+          title: Hmi Version
+          default: ''
+        hmi_terminal_model:
+          type: string
+          maxLength: 80
+          title: Hmi Terminal Model
+          default: ''
+        hmi_resolution:
+          type: string
+          maxLength: 40
+          title: Hmi Resolution
+          default: ''
+        factorytalk_architecture:
+          type: string
+          title: Factorytalk Architecture
+          default: ''
+        supported_instruction_set_key:
+          type: string
+          maxLength: 80
+          title: Supported Instruction Set Key
+          default: ''
+        known_limitations:
+          items: {}
+          type: array
+          title: Known Limitations
+      type: object
+      required:
+      - controller_family
+      - controller_catalog_number
+      - firmware_revision
+      - studio_5000_version
+      title: TargetPlatformInput
+    TargetPlatformRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        controller_family:
+          $ref: '#/components/schemas/ControllerFamily'
+        controller_catalog_number:
+          type: string
+          title: Controller Catalog Number
+        firmware_revision:
+          type: string
+          title: Firmware Revision
+        studio_5000_version:
+          type: string
+          title: Studio 5000 Version
+        safety_classification:
+          $ref: '#/components/schemas/SafetyClassification'
+        hmi_product:
+          $ref: '#/components/schemas/HmiProduct'
+        hmi_version:
+          type: string
+          title: Hmi Version
+        hmi_terminal_model:
+          type: string
+          title: Hmi Terminal Model
+        hmi_resolution_width:
+          type: integer
+          title: Hmi Resolution Width
+        hmi_resolution_height:
+          type: integer
+          title: Hmi Resolution Height
+        factorytalk_architecture:
+          type: string
+          title: Factorytalk Architecture
+        supported_instruction_set_key:
+          type: string
+          title: Supported Instruction Set Key
+        known_limitations:
+          items: {}
+          type: array
+          title: Known Limitations
+      type: object
+      required:
+      - id
+      - controller_family
+      - controller_catalog_number
+      - firmware_revision
+      - studio_5000_version
+      - safety_classification
+      - hmi_product
+      - hmi_version
+      - hmi_terminal_model
+      - hmi_resolution_width
+      - hmi_resolution_height
+      - factorytalk_architecture
+      - supported_instruction_set_key
+      title: TargetPlatformRead
     TaskDetail:
       properties:
         id:
@@ -4261,6 +6235,13 @@ components:
       - failed
       - cancelled
       title: TaskStatus
+    UnitSystem:
+      type: string
+      enum:
+      - metric
+      - imperial
+      - mixed
+      title: UnitSystem
     UpdateFindingRequest:
       properties:
         status:
@@ -4536,6 +6517,27 @@ components:
       - msg
       - type
       title: ValidationError
+    ValidationLevel:
+      type: string
+      enum:
+      - generated
+      - schema_validated
+      - internal_semantic_validated
+      - round_trip_parsed
+      - rockwell_import_verified
+      - human_approved
+      - released
+      title: ValidationLevel
+      description: 'How far an artifact has actually been proved.
+
+
+        Strictly ordered, and never collapsed to a boolean. Everything this backend
+
+        can do offline stops at ``ROUND_TRIP_PARSED``: we can prove our own output
+
+        parses back into the same model, which is not the same as proving Studio
+
+        5000 will import it.'
     WorkflowControlRequest:
       properties:
         reason:

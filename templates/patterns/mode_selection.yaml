@@ -1,7 +1,7 @@
 # Manual / automatic mode selection with a defined transition rule.
 # See templates/README.md for the file format and the versioning rule.
 id: esco.mode.selection
-version: 1.0.0
+version: 2.0.0
 category: mode_selection
 display_name: Manual / automatic mode selection
 description: >
@@ -128,20 +128,27 @@ generated_objects:
         Tells the operator the request was heard and refused. A mode button that
         appears to do nothing is one an operator presses repeatedly and then
         works around.
+
+        A TOF, not a TON. _Cmd_Mode_Auto is momentary, and a TON holds .TT only
+        while its rung is true: a 200 ms press produced a 200 ms indication and
+        block_message_hold_ms did nothing at all. A TOF's .DN comes up with the
+        press and stays up for the preset after the button is released.
       elements:
         - {instruction: XIC, operand: "{machine_tag}_Cmd_Mode_Auto", kind: condition}
         - branch:
             - - {instruction: XIO, operand: "{machine_tag}_Sts_Seq_Idle", kind: condition}
             - - {instruction: XIC, operand: "{machine_tag}_Sts_Faulted", kind: condition}
-        - instruction: TON
+        - instruction: TOF
           operands: ["{machine_tag}_Tmr_Mode_Blocked", "{block_message_hold_ms}", "0"]
           kind: output
 
     - routine: R_Mode_Select
       title: "{machine_tag} automatic refused indication"
-      comment: Held for the configured time so a momentary press produces a readable message.
+      comment: >
+        Held for the configured time so a momentary press produces a readable
+        message. Driven from the TOF's .DN, which outlives the button press.
       elements:
-        - {instruction: XIC, operand: "{machine_tag}_Tmr_Mode_Blocked.TT", kind: condition}
+        - {instruction: XIC, operand: "{machine_tag}_Tmr_Mode_Blocked.DN", kind: condition}
         - {instruction: OTE, operand: "{machine_tag}_Alm_Mode_Change_Blocked", kind: output}
 
     - routine: R_Mode_Select
@@ -189,6 +196,14 @@ generated_objects:
         - {instruction: OTE, operand: "{machine_tag}_Sts_Mode_Invalid", kind: output}
 
 engineering_notes: >
+  Version 2.0.0 made the refusal message actually hold. In 1.0.0 the refusal was
+  timed by a TON enabled from the momentary mode button, and a TON holds .TT only
+  while its rung is true: the message lasted as long as the operator's finger and
+  block_message_hold_ms had no effect. It is now a TOF, whose .DN outlives the
+  press by the preset. The identical construction was fixed in esco.fault.reset
+  at the same time, and it is worth looking for anywhere a "held" indication is
+  driven from a momentary command.
+
   The transition rule is asymmetric on purpose, and the asymmetry is the
   engineering content of this pattern.
 
@@ -232,6 +247,12 @@ restrictions:
     Does not decide what happens to equipment already running when the mode
     changes. Whether a running conveyor coasts, stops or continues is the device
     block's business and must be decided explicitly.
+  - >
+    Does not write _Sys_FirstScan. It is read by the power-up rung and must be
+    driven by the expansion from the controller's own first-scan status bit. If
+    nothing writes it the power-up rung never executes, and because both mode
+    bits are non-retentive the controller comes up with neither mode set and
+    _Sts_Mode_Invalid true until somebody presses a mode button.
   - Does not implement a mode-change history or record who requested one.
 
 tests:
@@ -240,11 +261,12 @@ tests:
     when: The first scan completes
     then: _Sts_Mode_Manual is true and _Sts_Mode_Auto is false.
   - name: Automatic is refused while the sequence is running
-    given: _Sts_Seq_Idle is false
-    when: _Cmd_Mode_Auto is pulsed
+    given: _Sts_Seq_Idle is false and block_message_hold_ms is 3000
+    when: _Cmd_Mode_Auto is pressed for 200 ms and released
     then: >
       _Sts_Mode_Auto stays false, the machine stays in manual, and
-      _Alm_Mode_Change_Blocked is raised for block_message_hold_ms.
+      _Alm_Mode_Change_Blocked is still true three seconds after the button was
+      released rather than lasting only as long as the press.
   - name: Automatic is refused while a fault is latched
     given: _Sts_Faulted is true and the sequence is idle
     when: _Cmd_Mode_Auto is pulsed

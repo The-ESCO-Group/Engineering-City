@@ -200,9 +200,15 @@ class HMIBinding(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Ba
     )
     is_resolved: Mapped[bool] = mapped_column(default=False, nullable=False)
 
-    #: ``read`` or ``write``. A String and not an enum: the vocabulary has no
-    #: member for HMI access direction, and this module adds none.
-    access: Mapped[str] = mapped_column(String(16), default="read", nullable=False)
+    #: ``read`` or ``write``, or empty when the artifact did not say. A String
+    #: and not an enum: the vocabulary has no member for HMI access direction,
+    #: and this module adds none.
+    #:
+    #: Empty rather than ``read`` by default. There are three real states and
+    #: the old default silently asserted the safest-looking one, which is the
+    #: wrong way round: see :attr:`is_command`. Every other unresolved reference
+    #: in this module defaults to empty for the same reason.
+    access: Mapped[str] = mapped_column(String(16), default="", nullable=False)
     #: A binding is not always a bare tag reference; ``Tag1 AND NOT Tag2`` is a
     #: normal animation expression. Stored verbatim, unparsed.
     expression: Mapped[str] = mapped_column(String(300), default="", nullable=False)
@@ -214,8 +220,13 @@ class HMIBinding(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Ba
     object_instance: Mapped[HMIObjectInstance | None] = relationship(back_populates="bindings")
 
     @property
+    def is_access_stated(self) -> bool:
+        """Whether the artifact actually said which direction this binding goes."""
+        return self.access.strip() != ""
+
+    @property
     def is_command(self) -> bool:
-        """Whether this binding writes into the controller rather than reading it.
+        """Whether this binding must be treated as writing into the controller.
 
         Worth separating, because an unhandled write is a *different and more
         serious* defect than an unresolved read. An unresolved read shows itself
@@ -223,8 +234,21 @@ class HMIBinding(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Ba
         something is wrong. A write binding that no PLC logic acts on looks
         completely normal: the button depresses, the value is accepted, and
         nothing happens. That failure reaches the plant floor.
+
+        Which is why this is "not stated to be a read" rather than "stated to be
+        a write". An unstated direction is unknown, and the two ways of guessing
+        are not symmetrical: guessing *read* downgrades a broken command to a
+        WARNING and ships it, guessing *write* over-reports a broken display
+        that was going to be reported anyway. A binding whose access nobody
+        stated and which resolves and is driven produces no result at all either
+        way, so nothing correct is ever blocked by failing closed here.
+
+        Callers that put this in front of a human should check
+        :attr:`is_access_stated` before writing the word "writes": with an
+        unstated access the honest sentence is that the direction is unknown and
+        has been treated as a command.
         """
-        return self.access == "write"
+        return self.access.strip().casefold() != "read"
 
 
 class HMINavigation(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Base):
@@ -316,7 +340,14 @@ class AlarmDefinition(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixi
     #: zero delay is a decision to alarm on the first scan.
     delay_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    latched: Mapped[bool] = mapped_column(default=False, nullable=False)
+    #: NULL, False, True — and no default, because ``False`` is a positive
+    #: engineering claim: "this alarm clears itself when the condition goes
+    #: away". A spreadsheet alarm list that gives reference, name, trigger and
+    #: message text and no latch column has not made that claim. The column is
+    #: also the sole gate on ``ResetBehaviourValidator``, whose ERROR is a
+    #: release blocker, so a wrong value here does not merely mis-describe an
+    #: alarm — it decides whether the reset-behaviour rule is checked at all.
+    latched: Mapped[bool | None] = mapped_column(nullable=True)
     requires_acknowledge: Mapped[bool] = mapped_column(default=True, nullable=False)
 
     #: The fault this alarm annunciates, when the two were modelled separately.

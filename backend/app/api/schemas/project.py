@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from app.api.schemas.common import ApiModel
+from app.api.schemas.engineering import EngineeringProfileInput
 from app.core.enums import ProjectRole, ProjectStatus
 
 
@@ -25,6 +26,7 @@ class CreateProjectRequest(ApiModel):
     description: str = ""
     client_reference: Annotated[str, Field(max_length=120)] = ""
     attributes: dict[str, Any] = Field(default_factory=dict)
+    engineering_profile: EngineeringProfileInput | None = None
 
 
 class UpdateProjectRequest(ApiModel):

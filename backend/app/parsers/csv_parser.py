@@ -80,6 +80,15 @@ REASON_ROW_LIMIT = "row_limit"
 _BOM_CHAR = "﻿"
 _REPLACEMENT_CHAR = "�"
 
+#: The one character this parser rewrites. PostgreSQL cannot hold ``\x00`` in a
+#: text column and rejects the ``\u0000`` escape in ``jsonb``, so a NUL reaching
+#: ``ParsedArtifact.content`` or ``EvidenceAnchor.excerpt`` aborts the parse
+#: transaction with a driver-level error and the upload lands in ``parse_failed``
+#: saying nothing an engineer can act on. SQLite stores it without complaint,
+#: which is why demo mode never sees this. Every substitution is reported; see
+#: :func:`_decode`.
+_NUL_CHAR = "\x00"
+
 _BOM_SIGNATURES = (
     codecs.BOM_UTF8,
     codecs.BOM_UTF32_LE,
@@ -248,6 +257,23 @@ def _decode(raw: bytes, result: ParseResult, label: str) -> tuple[str, str, floa
             WarningCode.ENCODING_GUESSED,
             f"{replacements} byte sequence(s) could not be decoded as '{encoding}' "
             "and were replaced with U+FFFD, so those values are not the original text.",
+            location=label,
+            severity="error",
+        )
+
+    nuls = text.count(_NUL_CHAR)
+    if nuls:
+        # ``errors="replace"`` does not touch these: a NUL byte decodes cleanly
+        # in every codec, so it arrives in the text intact. See _NUL_CHAR.
+        text = text.replace(_NUL_CHAR, " ")
+        result.warn(
+            WarningCode.ENCODING_GUESSED,
+            f"{nuls} NUL character(s) were replaced with a space, so those values are "
+            "not the original text. A space rather than a deletion, so the character "
+            "positions an anchor records still line up. The substitution is not "
+            "cosmetic: a NUL cannot be stored in a PostgreSQL text column or a jsonb "
+            "document, and keeping it would fail the whole parse with a database error "
+            "instead of recording the file.",
             location=label,
             severity="error",
         )

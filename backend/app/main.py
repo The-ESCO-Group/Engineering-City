@@ -24,13 +24,16 @@ from app.api.middleware import RequestContextMiddleware, SecurityHeadersMiddlewa
 from app.api.routes import agents as agent_routes
 from app.api.routes import approvals as approval_routes
 from app.api.routes import auth as auth_routes
+from app.api.routes import engineering as engineering_routes
 from app.api.routes import events as event_routes
 from app.api.routes import files as file_routes
 from app.api.routes import findings as finding_routes
 from app.api.routes import health as health_routes
 from app.api.routes import model_config as model_config_routes
 from app.api.routes import projects as project_routes
+from app.api.routes import releases as release_routes
 from app.api.routes import reports as report_routes
+from app.api.routes import requirements as requirement_routes
 from app.api.routes import workflow as workflow_routes
 from app.core.bootstrap import bootstrap
 from app.core.config import Settings, get_settings
@@ -132,7 +135,7 @@ def create_app(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=["X-Request-ID"],
     )
@@ -143,6 +146,9 @@ def create_app(
     app.include_router(health_routes.router, prefix=prefix)
     app.include_router(auth_routes.router, prefix=prefix)
     app.include_router(project_routes.router, prefix=prefix)
+    app.include_router(engineering_routes.router, prefix=prefix)
+    app.include_router(requirement_routes.router, prefix=prefix)
+    app.include_router(release_routes.router, prefix=prefix)
     app.include_router(file_routes.router, prefix=prefix)
     app.include_router(workflow_routes.router, prefix=prefix)
     app.include_router(agent_routes.router, prefix=prefix)

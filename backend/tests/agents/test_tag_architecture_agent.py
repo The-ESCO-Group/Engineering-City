@@ -20,6 +20,7 @@ import uuid
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.agents.base.actions import (
@@ -55,6 +56,7 @@ from app.core.enums import (
     ValidationSeverity,
 )
 from app.core.services.evidence_graph import build_graph
+from app.generators.plc.template_registry import get_registry
 from app.models.delivery import AlarmDefinition
 from app.models.interlocks import Interlock
 from app.models.plant import AddressAssignment, Device, IOPoint, Signal
@@ -63,7 +65,11 @@ from app.models.requirements import Requirement
 from app.models.tags import Tag, TagNamingRule
 from app.validation.tags import MAX_TAG_NAME_CHARS, RESERVED_TAG_NAMES
 
-TEMPLATE_ID = "esco.motor.standard@1.0.0"
+#: Resolved against the registry rather than written as a literal: a basis
+#: naming a version this installation does not ship is refused at the action
+#: boundary, and a literal here went stale the first time the pattern was
+#: revised.
+TEMPLATE_ID = f"esco.motor.standard@{get_registry().versions('esco.motor.standard')[-1]}"
 
 
 # ---------------------------------------------------------------------------
@@ -391,41 +397,31 @@ def test_a_rename_with_its_impact_and_the_human_gate_is_accepted(
     assert "Impact:" in operation.description
 
 
-def test_the_approval_gate_keys_on_the_operation_type_and_nothing_else(
+def test_a_name_edit_is_now_refused_rather_than_left_to_the_prompt(
     db: Session, project: Project, settings: Settings
 ) -> None:
-    """Pinned down because it is the reason the prompt is worded as it is.
+    """Revisited deliberately, as the previous version of this test asked.
 
-    ``requires_human_approval`` is forced by the presence of a ``rename_tag``
-    operation. An ``update_field`` that happens to write ``name`` is not one, so
-    it carries no gate — which is exactly why this agent is told to route every
-    rename through ``rename_tag`` and never through a field edit. If a later
-    change makes a name edit gate itself, this assertion is the one that should
-    be revisited, deliberately, rather than left to drift.
+    It used to assert the opposite: that ``requires_human_approval`` keyed on the
+    presence of a ``rename_tag`` operation and nothing else, so an
+    ``update_field`` writing ``name`` carried no gate and only the prompt told
+    this agent not to write one. An adversarial audit submitted exactly that
+    operation and it validated, renaming the tag at revision N with no approval
+    and no impact report. The schema now refuses the shape, so the prompt is
+    reinforcement rather than the only control.
     """
     tag = _tag(db, project, "M101_RUN")
 
-    outcome = _run(
-        db,
-        project,
-        settings,
-        _propose(
-            ChangeOperationProposal(
-                operation_type=ChangeOperationType.UPDATE_FIELD,
-                object_type=ObjectType.TAG,
-                object_id=tag.id,
-                based_on_object_revision=tag.object_revision,
-                field_name="name",
-                values={"name": "MTR_101_Cmd_Run"},
-            )
-        ),
-    )
+    with pytest.raises(ValidationError, match="is a rename"):
+        ChangeOperationProposal(
+            operation_type=ChangeOperationType.UPDATE_FIELD,
+            object_type=ObjectType.TAG,
+            object_id=tag.id,
+            based_on_object_revision=tag.object_revision,
+            field_name="name",
+            values={"name": "MTR_101_Cmd_Run"},
+        )
 
-    accepted = outcome.accepted[0].payload
-    assert isinstance(accepted, ProposeChangesetPayload)
-    assert accepted.operations[0].operation_type is ChangeOperationType.UPDATE_FIELD
-    assert accepted.requires_human_approval is False
-    # The prompt is what closes the gap the schema leaves open here.
     assert "never otherwise" in PROMPT
 
 

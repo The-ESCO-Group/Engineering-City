@@ -3,7 +3,7 @@
   "$id": "https://esco.local/contracts/events.schema.json",
   "title": "ESCO Engineering City event contract",
   "description": "Envelope and payload shapes for events broadcast on WebSocket /ws/projects/{project_id}. Every event is persisted before it is broadcast, and `seq` is gap-free per project so a reconnecting client can replay with ?since_seq=. Generated from the backend models; do not edit by hand.",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "1.1.0",
   "x-schema-version": 1,
   "x-payload-by-event-type": {
     "agent.location_changed": "#/$defs/AgentLocationEventPayload",

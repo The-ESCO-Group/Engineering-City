@@ -1,7 +1,7 @@
 # Raw-to-engineering-units scaling with out-of-range detection.
 # See templates/README.md for the file format and the versioning rule.
 id: esco.analog.input.scaling
-version: 1.0.0
+version: 2.0.0
 category: analog_input_scaling
 display_name: Analog input scaling with out-of-range detection
 description: >
@@ -23,12 +23,16 @@ parameters:
     type: integer
     required: false
     default: 0
-    description: Raw count corresponding to eu_min, e.g. 0 for a 0-20 mA card at 0 mA
+    description: >
+      Raw count corresponding to eu_min, e.g. 0 for a 0-20 mA card at 0 mA. Must
+      differ from raw_max: the scaling CPT divides by (raw_max - raw_min), and
+      nothing in this template or the loader checks it.
   - name: raw_max
     type: integer
     required: false
     default: 32767
-    description: Raw count corresponding to eu_max
+    description: >
+      Raw count corresponding to eu_max. Must differ from raw_min; see above.
   - name: eu_min
     type: number
     required: false
@@ -42,17 +46,33 @@ parameters:
   - name: raw_under_range
     type: integer
     required: false
-    default: 3000
+    default: 0
     description: >
-      Raw count below which the signal is treated as under range. For a 4-20 mA
-      transmitter on a 0-20 mA card this is the broken-wire threshold and must
-      sit below 4 mA but above zero, so a severed cable is distinguishable from a
-      genuine bottom-of-scale reading.
+      Raw count below which the signal is treated as under range. It must sit AT
+      OR BELOW raw_min: a threshold inside the transmitter's calibrated range
+      declares part of a genuine measurement invalid, and any interlock gated on
+      _Sts_Valid then drops out at the bottom of the range.
+
+      The default of 0 matches the default span, which is the card's whole count
+      range, so only a negative count is flagged — that is all a signal spanning
+      the full range of its card can detect. For a 4-20 mA transmitter set
+      raw_min to the 4 mA count and this to a count below it (a broken wire, a
+      failed transmitter or a lost loop supply), which is the configuration
+      where this test earns its keep.
   - name: raw_over_range
     type: integer
     required: false
-    default: 32000
-    description: Raw count above which the signal is treated as over range
+    default: 32767
+    description: >
+      Raw count above which the signal is treated as over range. It must sit AT
+      OR ABOVE raw_max, for the same reason as raw_under_range: a threshold
+      inside the calibrated span declares a real measurement invalid at exactly
+      the top of the range, where the process usually needs it most.
+
+      The default of 32767 is the top of the INT the card reports, so with the
+      default span nothing is ever flagged over range — there is no count above
+      full scale to flag. Over-range detection is only available where raw_max
+      sits below what the module can report.
   - name: fault_debounce_ms
     type: integer
     required: false
@@ -191,6 +211,16 @@ generated_objects:
         - {instruction: OTE, operand: "{signal_tag}_Alm_Signal_Fault", kind: output}
 
 engineering_notes: >
+  Version 2.0.0 changed two defaults that contradicted each other. 1.0.0 shipped
+  raw_min 0 / raw_max 32767 with raw_under_range 3000 and raw_over_range 32000,
+  so the bottom 9 per cent and the top 2.3 per cent of the transmitter's own
+  calibrated range were declared out of range: a genuinely full tank read
+  invalid, _Sts_Valid dropped, and every interlock gated on it dropped with it.
+  The four numbers have one relationship and it is now stated everywhere it
+  matters — raw_under_range <= raw_min < raw_max <= raw_over_range — with
+  defaults that satisfy it. Nothing enforces it, which is why it is also a
+  restriction.
+
   Scaling and validity are two different questions and this block answers them
   separately. Scaling asks "what number does this count represent"; validity
   asks "should anything believe it". Collapsing them — freezing _PV when the
@@ -212,6 +242,17 @@ engineering_notes: >
   that, which is why it appears in the restrictions.
 
 restrictions:
+  - >
+    Does not check its own parameters, and two of the ways they can be wrong are
+    silent. raw_min equal to raw_max makes the scaling CPT divide by zero: the
+    quotient is evaluated in REAL, so _PV becomes INF or NaN rather than
+    faulting the controller, and _Sts_Valid — which is computed from the range
+    thresholds and the module-fault bit, never from _PV — stays TRUE while every
+    downstream comparison is made against infinity. And a raw_under_range above
+    raw_min, or a raw_over_range below raw_max, declares part of the
+    transmitter's real range invalid. The required relationship is
+    raw_under_range <= raw_min < raw_max <= raw_over_range; check it at review,
+    because neither the loader nor this block will.
   - >
     Linear two-point scaling only. A square-root extraction for a differential
     pressure flow element, a thermocouple or RTD linearisation, or any
@@ -262,6 +303,12 @@ tests:
     given: An out-of-range raw count
     when: The scaling rung is scanned
     then: _PV holds the scaled out-of-range number, not zero and not its last good value.
+  - name: The shipped defaults call no part of the calibrated range invalid
+    given: The default parameters, unchanged
+    when: _Raw is swept from raw_min to raw_max
+    then: >
+      _Sts_Under_Range and _Sts_Over_Range are false at every count, including
+      both endpoints, and _Sts_Valid stays true throughout.
   - name: A momentary excursion does not alarm
     given: fault_debounce_ms of 1000
     when: The signal goes out of range for 200 ms and returns

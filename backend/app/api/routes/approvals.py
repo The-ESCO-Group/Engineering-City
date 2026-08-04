@@ -43,10 +43,42 @@ router = APIRouter(tags=["approvals"])
 
 def _read(db: DbSession, approval: Approval) -> ApprovalRead:
     payload = ApprovalRead.model_validate(approval)
+    allowed, reason = _decision_eligibility(db, approval)
+    payload.decision_allowed = allowed
+    payload.decision_disabled_reason = reason
     if approval.decided_by_id:
         decider = db.get(User, approval.decided_by_id)
         payload.decided_by_display_name = decider.display_name if decider else ""
     return payload
+
+
+def _decision_eligibility(
+    db: DbSession, approval: Approval, *, lock_subject: bool = False
+) -> tuple[bool, str]:
+    """Whether this row may receive a human decision, with a UI-ready reason."""
+    if approval.status is not ApprovalStatus.PENDING:
+        return False, f"This approval was already {approval.status.value}."
+    if approval.finding_id is None:
+        return True, ""
+
+    finding = (
+        db.execute(
+            select(Finding)
+            .where(Finding.id == approval.finding_id)
+            .with_for_update()
+        ).scalar_one_or_none()
+        if lock_subject
+        else db.get(Finding, approval.finding_id)
+    )
+    if finding is None:
+        return False, "The finding attached to this approval no longer exists."
+    if not finding.is_reviewed:
+        return (
+            False,
+            "Independent senior review has not finished for this finding. A human "
+            "decision is disabled until the senior-review verdict is recorded.",
+        )
+    return True, ""
 
 
 @router.get(
@@ -108,7 +140,9 @@ def decide(
     Once every approval on a project is decided, the tasks waiting on the gate
     return to the queue and the run continues.
     """
-    approval = db.get(Approval, approval_id)
+    approval = db.execute(
+        select(Approval).where(Approval.id == approval_id).with_for_update()
+    ).scalar_one_or_none()
     if approval is None:
         raise NotFoundError("Approval", approval_id)
 
@@ -125,6 +159,12 @@ def decide(
             f"This approval was already {approval.status.value}"
             + (f" on {approval.decided_at:%Y-%m-%d}." if approval.decided_at else ".")
         )
+
+    decision_allowed, disabled_reason = _decision_eligibility(
+        db, approval, lock_subject=True
+    )
+    if not decision_allowed:
+        raise ConflictError(disabled_reason)
 
     approval.status = ApprovalStatus.APPROVED if payload.approved else ApprovalStatus.REJECTED
     approval.decided_by_id = user.id

@@ -1,7 +1,7 @@
 # Connection-fault detection with a stated fail state.
 # See templates/README.md for the file format and the versioning rule.
 id: esco.communication.loss
-version: 1.0.0
+version: 2.0.0
 category: communication_loss
 display_name: Communication loss detection and fail state
 description: >
@@ -64,7 +64,16 @@ required_tags:
     description: >
       Everything received from this node is stale and must not be acted on. The
       input tags keep their last received values, which look entirely normal,
-      so this bit is the only thing that distinguishes them.
+      so this bit is the only thing that distinguishes them. True from power-up
+      until the node has communicated at least once.
+  - role: status
+    suffix: _Sts_Conn_Established
+    data_type: BOOL
+    description: >
+      This node has communicated at least once since the controller started.
+      Non-retentive and latched by the first healthy scan, so before it is set
+      the node's input image is whatever the controller powered up with — all
+      zeros — and has never been anything else.
   - role: status
     suffix: _Tmr_Conn_Fault
     data_type: TIMER
@@ -88,6 +97,15 @@ required_tags:
     suffix: _Conn_Fault_OneShot
     data_type: BOOL
     description: One-shot storage bit for counting a new connection loss
+  - role: status
+    suffix: _Fail_State_Release_OneShot
+    data_type: BOOL
+    description: >
+      One-shot storage bit for releasing the energize fail state on recovery.
+      The release has to be an edge: an unlatch written every scan would fight
+      the logic that normally owns these outputs, and this block is scanned last.
+    when_parameter: fail_state
+    when_value: energize
   - role: io_alias
     suffix: _Out_All
     data_type: BOOL
@@ -136,6 +154,23 @@ generated_objects:
           kind: output
 
     - routine: R_Comms_Diagnostics
+      title: "{node_tag} connection has been established at least once"
+      comment: >
+        Latched by the first scan on which the module reports the connection
+        healthy. Until then nothing has ever been received from this node, and
+        its input image is the zeros the controller powered up with — which for
+        any signal wired normally-closed or sensed true-when-healthy is
+        indistinguishable from good news. A power dip that brings the controller
+        back before the remote node is exactly that case, and it is the reason
+        the stale bit below is not driven from the fault timer alone.
+
+        Non-retentive, so it is false at power-up without needing a first-scan
+        tag that nothing in this template set writes.
+      elements:
+        - {instruction: XIO, operand: "{node_tag}_Conn_Faulted", kind: condition}
+        - {instruction: OTL, operand: "{node_tag}_Sts_Conn_Established", kind: output}
+
+    - routine: R_Comms_Diagnostics
       title: "{node_tag} communications healthy"
       comment: >
         Computed positively and written every scan. A program that stops being
@@ -150,15 +185,32 @@ generated_objects:
     - routine: R_Comms_Diagnostics
       title: "{node_tag} communications lost"
       comment: >
-        The declaration. Everything from this node is marked stale on the same
-        scan the alarm is raised, so no logic gets a window in which the alarm is
-        up but the data is still trusted.
+        The declaration. The alarm and the fail state come up together, and the
+        rung below marks the data stale on the same scan, so no logic gets a
+        window in which the alarm is up but the data is still trusted.
       elements:
         - {instruction: XIC, operand: "{node_tag}_Tmr_Conn_Fault.DN", kind: condition}
         - branch:
             - - {instruction: OTE, operand: "{node_tag}_Alm_Comms_Loss", kind: output}
-            - - {instruction: OTE, operand: "{node_tag}_Sts_Data_Stale", kind: output}
             - - {instruction: OTE, operand: "{node_tag}_Sts_Fail_State_Applied", kind: output}
+
+    - routine: R_Comms_Diagnostics
+      title: "{node_tag} data from this node is stale"
+      comment: >
+        Two ways for data to be untrustworthy, and until 2.0.0 only one of them
+        was written down. The declared loss is the obvious one. The other is a
+        node that has never communicated at all: the fault timer has not reached
+        its preset yet, so for the whole of connection_timeout_ms after a
+        power-up this bit read FALSE and every block honouring it treated an
+        input image of zeros — never received from anything — as current data.
+
+        Stale by default, therefore, and only clean once the node has actually
+        been heard from.
+      elements:
+        - branch:
+            - - {instruction: XIC, operand: "{node_tag}_Tmr_Conn_Fault.DN", kind: condition}
+            - - {instruction: XIO, operand: "{node_tag}_Sts_Conn_Established", kind: condition}
+        - {instruction: OTE, operand: "{node_tag}_Sts_Data_Stale", kind: output}
 
     - routine: R_Comms_Diagnostics
       title: "{node_tag} count the loss"
@@ -201,6 +253,30 @@ generated_objects:
         - {instruction: OTL, operand: "{node_tag}_Out_All", kind: output}
 
     - routine: R_Comms_Diagnostics
+      title: "{node_tag} release the energize fail state on recovery"
+      comment: >
+        A latch nothing unlatches is a latch nothing turns off. In 1.0.0 the
+        energize fail state set the node's outputs and the recovery simply
+        stopped setting them: any output not also driven every scan by an OTE
+        elsewhere — a spare, a latch-driven output, anything owned by a block
+        that only writes it on a transition — stayed energised for the rest of
+        the controller session after a two-second network event.
+
+        The release is a one-shot on purpose. An unlatch written every scan
+        while the fail state is not applied would fight whatever normally owns
+        these outputs, and this routine is scanned last in both ESCO layouts, so
+        it would win: the node's outputs would never come on again. Unlatched
+        once on the transition, control resumes on the following scan.
+      when_parameter: fail_state
+      when_value: energize
+      elements:
+        - {instruction: XIO, operand: "{node_tag}_Sts_Fail_State_Applied", kind: condition}
+        - instruction: ONS
+          operand: "{node_tag}_Fail_State_Release_OneShot"
+          kind: condition
+        - {instruction: OTU, operand: "{node_tag}_Out_All", kind: output}
+
+    - routine: R_Comms_Diagnostics
       title: "{node_tag} fail state — go to value"
       comment: >
         The chosen fail state is a stated value, which applies to analog outputs.
@@ -228,6 +304,18 @@ generated_objects:
         - {instruction: OTE, operand: "{node_tag}_Sts_Hold_Last_State", kind: output}
 
 engineering_notes: >
+  Version 2.0.0 closed two holes. Data from a node that had never communicated
+  was published as fresh for the whole of connection_timeout_ms after a
+  power-up, because _Sts_Data_Stale was driven only by the fault timer reaching
+  its preset; a plant power dip that brings the controller back before a remote
+  panel is precisely that case, and every input sensed as normally-closed reads
+  as its permissive state while it is happening. The bit is now stale by default
+  and only clean once the node has been heard from at least once. Separately,
+  the energize fail state was an OTL that nothing anywhere unlatched, so a
+  momentary network event left outputs energised for the rest of the controller
+  session; the release is now written, as a one-shot on recovery. Anything
+  expanded from 1.0.0 with fail_state energize should be re-expanded first.
+
   The connection-fault bit comes from the module's own status, not from a
   heartbeat in application logic. A heartbeat tells you the remote program is
   running; the connection status tells you the controller is receiving data. The
@@ -275,6 +363,20 @@ restrictions:
     is published; honouring it is the responsibility of every block that reads
     from this node, and a cross-discipline check should confirm each one does.
   - >
+    The energize fail state unlatches this node's outputs ONCE when the
+    connection returns, and then stops writing them. Any output whose normal
+    state is energised must be driven by its own logic on the following scan, or
+    it will simply be off. The release cannot be written every scan: this routine
+    is scanned last, so an unlatch held true would override normal control
+    entirely.
+  - >
+    Marks data stale from power-up until the node has communicated once, which
+    is a decision with a cost: a block honouring _Sts_Data_Stale will refuse to
+    act on this node for the first few seconds after every controller restart,
+    including a node that comes up perfectly. That is the intended direction —
+    an input image nobody has ever received is not data — but it must be
+    expected rather than diagnosed.
+  - >
     hold_last_state applies nothing. Choosing it means equipment keeps doing
     what it was last told with nobody controlling it, and it must be justified
     per node rather than chosen because it is the least disruptive option.
@@ -307,6 +409,20 @@ tests:
     given: fail_state is hold_last_state
     when: The connection is declared lost
     then: No output on this node is changed by this block.
+  - name: A node that has never communicated is stale, not fresh
+    given: >
+      A controller that has just powered up alongside a remote node which takes
+      longer to come back, and connection_timeout_ms of 3000
+    when: The first scan runs and the node is still not communicating
+    then: >
+      _Sts_Data_Stale is true immediately, not three seconds later, and stays
+      true until the node's connection is healthy for the first time.
+  - name: The energize fail state is released on recovery
+    given: fail_state is energize and a declared communication loss
+    when: The connection is re-established
+    then: >
+      This node's outputs are unlatched once, on the scan _Sts_Fail_State_Applied
+      goes false, so an output nothing else drives does not stay energised.
   - name: An unwritten status tag reads as not OK
     given: A project where the routine writing _Sts_Comms_OK is not scheduled
     when: The status is read

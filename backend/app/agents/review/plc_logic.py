@@ -635,15 +635,23 @@ def _render_element(element: RungElement, parameters: Mapping[str, Any], templat
 
 
 def _substitute(text: str, parameters: Mapping[str, Any], template: Template) -> str:
-    """Fill ``{parameter}`` placeholders, leaving unsupplied ones visible."""
+    """Fill ``{parameter}`` placeholders, leaving unsupplied ones visible.
+
+    Values are rendered through the template's own rule rather than with
+    ``str()``. A ``type: number`` parameter accepts both ``100`` and ``100.0``,
+    and ``str()`` would carry that distinction into the operand text — so the
+    same engineering value would produce two different rungs, two different L5X
+    byte streams and two different package checksums, and a browser client
+    cannot even express the second (``JSON.stringify(100.0)`` is ``"100"``).
+    """
 
     def replace(match: re.Match[str]) -> str:
         name = match.group(1)
         if name in parameters:
-            return str(parameters[name])
+            return template.render_parameter(name, parameters[name])
         declared = template.parameter(name)
         if declared is not None and declared.default is not None:
-            return str(declared.default)
+            return declared.render(declared.default)
         return match.group(0)
 
     return _PLACEHOLDER_RE.sub(replace, text)

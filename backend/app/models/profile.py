@@ -128,9 +128,19 @@ class ProjectProfile(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin
     template_set_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("template_sets.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    #: Named explicitly: the convention composes
+    #: ``fk_project_profiles_engineering_standard_set_id_engineering_standard_sets``,
+    #: 73 bytes. PostgreSQL truncates an identifier at 63 and appends a hash
+    #: fragment, so the two backends would hold different names for the same
+    #: constraint and a later migration naming it would work in demo mode and
+    #: fail on the shared deployment.
     engineering_standard_set_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID,
-        ForeignKey("engineering_standard_sets.id", ondelete="SET NULL"),
+        ForeignKey(
+            "engineering_standard_sets.id",
+            ondelete="SET NULL",
+            name="fk_project_profiles_engineering_standard_set_id",
+        ),
         nullable=True,
         index=True,
     )

@@ -81,12 +81,11 @@ class SeniorReviewAgent(BaseAgent):
         return PROMPT
 
     def build_context(self, context: AgentContext) -> dict[str, Any]:
+        statement = select(Finding).where(Finding.project_id == context.project.id)
+        if context.payload and context.payload.get("only_unreviewed"):
+            statement = statement.where(Finding.is_reviewed.is_(False))
         findings = list(
-            context.db.execute(
-                select(Finding)
-                .where(Finding.project_id == context.project.id)
-                .order_by(Finding.created_at)
-            ).scalars()
+            context.db.execute(statement.order_by(Finding.created_at)).scalars()
         )
 
         limitations_by_file = {item.file_id: item.message for item in context.graph.limitations}

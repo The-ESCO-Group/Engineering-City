@@ -18,6 +18,14 @@ other honest-gap columns work the same way: ``InterlockAction.UNDEFINED``,
 ``ResetBehaviorKind.UNDEFINED`` and ``FaultDefinition.is_driven`` all mean "the
 source did not say", and none of them is a slot to put a guess in.
 
+That rule needs three values, not two, and the implementation-status columns
+(``Interlock.is_implemented`` and its counterparts on ``Permissive``,
+``CauseEffectEntry``, ``SequenceStep``, and ``FaultDefinition.is_driven``) are
+therefore nullable with no default. NULL means no search has run; False means a
+search ran and found nothing; True means the logic was located. A ``False``
+default made those two the same value, so a freshly ingested project asserted
+that every documented protection was absent before anything had looked.
+
 Two conventions worth knowing before reading the tables:
 
 * Wherever a document names a tag, the name is kept as text (``*_tag_name``)
@@ -28,7 +36,10 @@ Two conventions worth knowing before reading the tables:
   asserts nothing (``UNDEFINED``, ``OTHER``). Where it has none —
   :class:`~app.core.enums.InterlockKind`, :class:`~app.core.enums.FaultClass` —
   the column is required, so the classification has to be stated rather than
-  inherited from whichever member happens to be listed first.
+  inherited from whichever member happens to be listed first. Where it has none
+  *and* the source routinely omits the field —
+  :attr:`FaultDefinition.severity` — the column is nullable and NULL means the
+  source did not say.
 """
 
 from __future__ import annotations
@@ -127,10 +138,18 @@ class Interlock(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Bas
     #: name contains "guard".
     is_safety_related: Mapped[bool] = mapped_column(default=False, nullable=False)
 
-    #: False until logic implementing this interlock has actually been located.
-    #: The default is the honest one: not yet found is not the same as absent,
-    #: and both are different from present.
-    is_implemented: Mapped[bool] = mapped_column(default=False, nullable=False)
+    #: Three states, so three values, and no default.
+    #:
+    #: ``None`` — no implementation search has run against this interlock.
+    #: ``False`` — a search ran and found nothing implementing it.
+    #: ``True`` — implementing logic was located; ``implementing_rung_id`` names it.
+    #:
+    #: A boolean defaulting to ``False`` collapsed the first two, which is the
+    #: one distinction this column exists to keep: "the protection is absent" is
+    #: a statement of fact about the customer's controller and "nothing has
+    #: looked yet" is a statement about us. Writing the first when only the
+    #: second is true puts an assertion nobody established into a report.
+    is_implemented: Mapped[bool | None] = mapped_column(nullable=True)
     implementing_rung_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("logic_rungs.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -154,20 +173,42 @@ class Interlock(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Bas
         the evidence for it. Requiring both means "implemented" cannot be
         asserted by a flag nobody can follow back to a rung.
         """
-        return self.is_implemented and self.implementing_rung_id is not None
+        return self.is_implemented is True and self.implementing_rung_id is not None
+
+    @property
+    def is_implementation_established(self) -> bool:
+        """Whether anything has actually looked for the implementing logic.
+
+        False while ``is_implemented`` is NULL. Read this before reporting an
+        interlock as missing: without it, a project that has been ingested but
+        never cross-referenced is indistinguishable from one whose protections
+        were searched for and are genuinely absent.
+        """
+        return self.is_implemented is not None
 
     @property
     def is_documented_but_missing(self) -> bool:
-        """Documented in a source, and nothing in the logic implements it.
+        """Documented in a source, and no implementation has been established.
 
-        This exact condition is the highest-value finding the product makes:
-        the schedule says the pump trips on low suction pressure and nothing in
-        the controller does. It is a plain, cheap property rather than an agent
-        judgement on purpose — the report can be regenerated and re-checked
-        without re-running a model, and the answer is the same every time.
+        The condition this reports is the highest-value finding the product
+        makes: the schedule says the pump trips on low suction pressure and
+        nothing in the controller does. It is a plain, cheap property rather
+        than an agent judgement on purpose — the report can be regenerated and
+        re-checked without re-running a model, and the answer is the same every
+        time.
+
+        It stays true for an unestablished search (``is_implemented is None``)
+        as well as for a failed one, deliberately: silence about a documented
+        protection is the one outcome that must never be the default. But the
+        two are not the same claim, and a caller that prints "no logic
+        implementing it was found" is entitled to say that only when
+        :attr:`is_implementation_established` is also true. Splitting the
+        message and the severity on that boundary belongs to
+        ``InterlockImplementationValidator``, which is what this property now
+        gives it the means to do.
         """
         documented = bool(self.source_reference or self.requirement_reference)
-        return documented and not self.is_implemented
+        return documented and self.is_implemented is not True
 
 
 class Permissive(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Base):
@@ -207,7 +248,9 @@ class Permissive(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Ba
         GUID, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
-    is_implemented: Mapped[bool] = mapped_column(default=False, nullable=False)
+    #: NULL, False, True — see :attr:`Interlock.is_implemented`. A permissive
+    #: nobody has searched for is not a permissive established to be missing.
+    is_implemented: Mapped[bool | None] = mapped_column(nullable=True)
     implementing_rung_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("logic_rungs.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -262,7 +305,9 @@ class CauseEffectEntry(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMix
     #: here would assert an immediate trip the document never specified.
     delay_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    is_implemented: Mapped[bool] = mapped_column(default=False, nullable=False)
+    #: NULL, False, True — see :attr:`Interlock.is_implemented`. Per cell, so a
+    #: matrix can report which cells were checked as well as which are missing.
+    is_implemented: Mapped[bool | None] = mapped_column(nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     #: Position within the matrix, so the original reading order survives.
@@ -496,7 +541,8 @@ class SequenceStep(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, 
     timeout_action: Mapped[str] = mapped_column(Text, default="", nullable=False)
     next_step_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    is_implemented: Mapped[bool] = mapped_column(default=False, nullable=False)
+    #: NULL, False, True — see :attr:`Interlock.is_implemented`.
+    is_implemented: Mapped[bool | None] = mapped_column(nullable=True)
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
@@ -522,7 +568,14 @@ class FaultDefinition(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixi
     #: FaultClass has no "unclassified" member, so this is required rather than
     #: defaulted — see the module docstring.
     fault_class: Mapped[FaultClass] = mapped_column(nullable=False, index=True)
-    severity: Mapped[AlarmSeverity] = mapped_column(default=AlarmSeverity.MEDIUM, nullable=False)
+    #: Nullable and undefaulted, matching
+    #: :attr:`app.models.delivery.AlarmDefinition.severity`. Severity is the
+    #: statement of how fast an operator must respond, judged against the
+    #: consequence of not responding; a fault list that states a trigger and a
+    #: corrective action but no severity — the usual shape, because severity
+    #: normally lives in a separate alarm philosophy document — has not made
+    #: that judgement. NULL says so; ``MEDIUM`` used to say somebody had.
+    severity: Mapped[AlarmSeverity | None] = mapped_column(nullable=True)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     trigger_condition: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -538,8 +591,10 @@ class FaultDefinition(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixi
     #: only reads the alarm list — and the operator will never see it, because
     #: no rung can ever set the bit. Recording the answer as a column is what
     #: turns "is this alarm reachable" from a manual cross-reference exercise
-    #: into a query. False is the honest default: not yet established.
-    is_driven: Mapped[bool] = mapped_column(default=False, nullable=False)
+    #: into a query. NULL, False, True, for the reason set out on
+    #: :attr:`Interlock.is_implemented`: an alarm nothing has cross-referenced
+    #: yet has not been shown to be undriven.
+    is_driven: Mapped[bool | None] = mapped_column(nullable=True)
 
     affected_device_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("devices.id", ondelete="SET NULL"), nullable=True, index=True

@@ -26,6 +26,7 @@ from app.core.enums import (
     SignalType,
     ValidationSeverity,
 )
+from app.models.plc import LogicRung
 from app.models.project import Project
 from app.validation.logic import (
     DestructiveWriteValidator,
@@ -100,6 +101,47 @@ def test_a_jump_label_is_not_an_unresolved_tag(db: Session, project: Project) ->
         ["Restart"],
         category=InstructionCategory.PROGRAM_CONTROL,
         unresolved=[0],
+    )
+
+    assert UNRESOLVED not in codes(run_check(OperandValidator(), db, project))
+
+
+def test_an_external_routine_call_is_not_an_unresolved_tag(db: Session, project: Project) -> None:
+    """JXR names a routine this project does not declare, exactly as JSR names one.
+
+    Reported, the message told the engineer to "declare the tag the operand
+    names" — the invent-a-tag outcome the non-tag table exists to prevent.
+    """
+    rung = make_ladder(db, project)
+    make_instruction(
+        db,
+        project,
+        rung,
+        "JXR",
+        ["Ext_Routine", "0", "Param"],
+        category=InstructionCategory.PROGRAM_CONTROL,
+        unresolved=[0],
+    )
+
+    assert UNRESOLVED not in codes(run_check(OperandValidator(), db, project))
+
+
+def test_a_cip_object_path_is_not_an_unresolved_tag(db: Session, project: Project) -> None:
+    """GSV's first three operands name a CIP class, instance and attribute.
+
+    None of them is a tag, and the instance is routinely empty. Cataloguing GSV
+    without saying so would trade one missing check for three false errors on
+    every GSV in the project.
+    """
+    rung = make_ladder(db, project)
+    make_instruction(
+        db,
+        project,
+        rung,
+        "GSV",
+        ["WallClockTime", "", "LocalDateTime", "Now"],
+        category=InstructionCategory.SPECIAL,
+        unresolved=[0, 1, 2],
     )
 
     assert UNRESOLVED not in codes(run_check(OperandValidator(), db, project))
@@ -204,6 +246,368 @@ def test_two_masked_writes_are_a_warning_not_an_error(db: Session, project: Proj
     assert "masks overlap" in issue.message
 
 
+def test_a_fill_and_a_move_on_one_tag_is_an_error(db: Session, project: Project) -> None:
+    """FLL was absent from the catalogue, so it contributed no write at all.
+
+    Nothing else records one — ``LogicOperand.is_destination`` is never
+    populated — so the group had one member and the project came back clean on
+    exactly the defect the duplicate check exists to find.
+    """
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    make_instruction(
+        db,
+        project,
+        first,
+        "FLL",
+        ["0", "Buffer[0]", "10"],
+        category=InstructionCategory.MOVE_LOGICAL,
+        literals=[0, 2],
+    )
+    make_instruction(
+        db,
+        project,
+        second,
+        "MOV",
+        ["Setpoint", "Buffer[0]"],
+        category=InstructionCategory.MOVE_LOGICAL,
+    )
+
+    issue = only(run_check(DestructiveWriteValidator(), db, project), DUPLICATE)
+
+    assert issue.severity is ValidationSeverity.ERROR
+    assert issue.detail["mnemonics"] == ["FLL", "MOV"]
+
+
+def test_a_get_system_value_destination_is_a_duplicate(db: Session, project: Project) -> None:
+    """GSV writes operand 3, and a COP into the same element is a real collision."""
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    make_instruction(
+        db,
+        project,
+        first,
+        "GSV",
+        ["WallClockTime", "", "LocalDateTime", "Now[0]"],
+        category=InstructionCategory.SPECIAL,
+        literals=[0, 1, 2],
+    )
+    make_instruction(
+        db,
+        project,
+        second,
+        "COP",
+        ["Stamp", "Now[0]", "7"],
+        category=InstructionCategory.MOVE_LOGICAL,
+        literals=[2],
+    )
+
+    issue = only(run_check(DestructiveWriteValidator(), db, project), DUPLICATE)
+
+    assert issue.detail["mnemonics"] == ["COP", "GSV"]
+
+
+def test_a_queue_loaded_and_unloaded_is_not_a_duplicate(db: Session, project: Project) -> None:
+    """FFL and FFU share the CONTROL and the array by design, as CTU shares with CTD."""
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    make_instruction(
+        db,
+        project,
+        first,
+        "FFL",
+        ["New_Part", "Part_Queue[0]", "Queue_Ctl", "10", "0"],
+        category=InstructionCategory.SPECIAL,
+        literals=[3, 4],
+    )
+    make_instruction(
+        db,
+        project,
+        second,
+        "FFU",
+        ["Part_Queue[0]", "Next_Part", "Queue_Ctl", "10", "0"],
+        category=InstructionCategory.SPECIAL,
+        literals=[3, 4],
+    )
+
+    assert DUPLICATE not in codes(run_check(DestructiveWriteValidator(), db, project))
+
+
+def test_a_sequencer_input_and_output_share_one_control(db: Session, project: Project) -> None:
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    make_instruction(
+        db,
+        project,
+        first,
+        "SQI",
+        ["Step_Table[0]", "16#FFFF", "Inputs", "Seq_Ctl", "8", "0"],
+        category=InstructionCategory.SPECIAL,
+        literals=[1, 4, 5],
+    )
+    make_instruction(
+        db,
+        project,
+        second,
+        "SQO",
+        ["Step_Table[0]", "16#FFFF", "Outputs", "Seq_Ctl", "8", "0"],
+        category=InstructionCategory.SPECIAL,
+        literals=[1, 4, 5],
+    )
+
+    assert DUPLICATE not in codes(run_check(DestructiveWriteValidator(), db, project))
+
+
+# ---------------------------------------------------------------------------
+# logic.range_duplicate_destination
+# ---------------------------------------------------------------------------
+RANGE_DUPLICATE = "logic.range_duplicate_destination"
+
+
+def _recipe_copy(
+    db: Session,
+    project: Project,
+    rung: LogicRung,
+    *,
+    length: str = "20",
+    destination: str = "Recipe_Active[0]",
+    mnemonic: str = "COP",
+) -> None:
+    make_instruction(
+        db,
+        project,
+        rung,
+        mnemonic,
+        ["Recipe_Master[0]", destination, length],
+        category=InstructionCategory.MOVE_LOGICAL,
+        literals=[2] if length.isdigit() else [],
+    )
+
+
+def test_a_copy_range_covering_another_writer_is_an_error(db: Session, project: Project) -> None:
+    """The copy writes Recipe_Active[0..19]; the MOV writes Recipe_Active[5].
+
+    Grouping by operand text makes these two groups of one, so nothing was
+    reported while the operator's manual entry was overwritten every scan.
+    """
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    _recipe_copy(db, project, first)
+    make_instruction(
+        db,
+        project,
+        second,
+        "MOV",
+        ["Manual_Speed", "Recipe_Active[5]"],
+        category=InstructionCategory.MOVE_LOGICAL,
+    )
+
+    issue = only(run_check(DestructiveWriteValidator(), db, project), RANGE_DUPLICATE)
+
+    assert issue.severity is ValidationSeverity.ERROR
+    assert issue.detail["overlap_proven"] is True
+    assert issue.detail["array"] == "recipe_active"
+    assert "lost every scan" in issue.message
+
+
+def test_a_copy_range_that_stops_short_is_not_reported(db: Session, project: Project) -> None:
+    """Three elements copied, and the other writer is element 5. No overlap."""
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    _recipe_copy(db, project, first, length="3")
+    make_instruction(
+        db,
+        project,
+        second,
+        "MOV",
+        ["Manual_Speed", "Recipe_Active[5]"],
+        category=InstructionCategory.MOVE_LOGICAL,
+    )
+
+    assert RANGE_DUPLICATE not in codes(run_check(DestructiveWriteValidator(), db, project))
+
+
+def test_a_copy_of_unknown_length_is_a_warning(db: Session, project: Project) -> None:
+    """A tag length cannot be evaluated here, so the extent was not established."""
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    _recipe_copy(db, project, first, length="Recipe_Length")
+    make_instruction(
+        db,
+        project,
+        second,
+        "MOV",
+        ["Manual_Speed", "Recipe_Active[5]"],
+        category=InstructionCategory.MOVE_LOGICAL,
+    )
+
+    issue = only(run_check(DestructiveWriteValidator(), db, project), RANGE_DUPLICATE)
+
+    assert issue.severity is ValidationSeverity.WARNING
+    assert issue.detail["overlap_proven"] is False
+    assert "not established" in issue.message
+
+
+def test_a_copy_nothing_else_writes_is_not_reported(db: Session, project: Project) -> None:
+    rung = make_ladder(db, project)
+    _recipe_copy(db, project, rung)
+
+    assert RANGE_DUPLICATE not in codes(run_check(DestructiveWriteValidator(), db, project))
+
+
+def test_one_copy_reaching_into_another_copy_is_reported(db: Session, project: Project) -> None:
+    """Twenty elements from element 0, and three more from element 5.
+
+    Neither is the other's exact destination, so the operand-text grouping sees
+    two groups of one — while fifteen of the first copy's elements are written
+    twice.
+    """
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    _recipe_copy(db, project, first)
+    _recipe_copy(db, project, second, destination="Recipe_Active[5]", length="3")
+
+    issue = only(run_check(DestructiveWriteValidator(), db, project), RANGE_DUPLICATE)
+
+    assert issue.severity is ValidationSeverity.ERROR
+    assert issue.detail["overlap_proven"] is True
+
+
+def test_a_synchronous_copy_is_range_checked_too(db: Session, project: Project) -> None:
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    _recipe_copy(db, project, first, mnemonic="CPS")
+    make_instruction(
+        db,
+        project,
+        second,
+        "MOV",
+        ["Manual_Speed", "Recipe_Active[5]"],
+        category=InstructionCategory.MOVE_LOGICAL,
+    )
+
+    issue = only(run_check(DestructiveWriteValidator(), db, project), RANGE_DUPLICATE)
+
+    assert issue.severity is ValidationSeverity.ERROR
+
+
+# ---------------------------------------------------------------------------
+# JSR return parameters and SBR parameters
+# ---------------------------------------------------------------------------
+
+
+def test_a_jsr_return_parameter_is_a_write(db: Session, project: Project) -> None:
+    """``JSR(Scale,1,Raw,Scaled)`` passes Scaled back; rung 12 also writes it.
+
+    Both write the tag and whichever scans last wins. The catalogue records no
+    fixed destructive position for JSR because it cannot, so without resolving
+    the return parameters from the input count this is a group of one.
+    """
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    make_instruction(
+        db,
+        project,
+        first,
+        "JSR",
+        ["Scale_Routine", "1", "Raw_Count", "Scaled_Value"],
+        category=InstructionCategory.PROGRAM_CONTROL,
+        literals=[1],
+    )
+    make_instruction(
+        db,
+        project,
+        second,
+        "MOV",
+        ["0", "Scaled_Value"],
+        category=InstructionCategory.MOVE_LOGICAL,
+        literals=[0],
+    )
+
+    issue = only(run_check(DestructiveWriteValidator(), db, project), DUPLICATE)
+
+    assert issue.detail["mnemonics"] == ["JSR", "MOV"]
+    assert issue.detail["tag_name"] == "Scaled_Value"
+
+
+def test_a_jsr_input_parameter_is_not_a_write(db: Session, project: Project) -> None:
+    """Naming an input as a destination would be a confident error against correct logic."""
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    make_instruction(
+        db,
+        project,
+        first,
+        "JSR",
+        ["Scale_Routine", "1", "Raw_Count", "Scaled_Value"],
+        category=InstructionCategory.PROGRAM_CONTROL,
+        literals=[1],
+    )
+    make_instruction(
+        db,
+        project,
+        second,
+        "MOV",
+        ["0", "Raw_Count"],
+        category=InstructionCategory.MOVE_LOGICAL,
+        literals=[0],
+    )
+
+    assert DUPLICATE not in codes(run_check(DestructiveWriteValidator(), db, project))
+
+
+def test_a_jsr_with_a_non_literal_count_claims_nothing(db: Session, project: Project) -> None:
+    """Where the input count is a tag, which operands are returns cannot be worked out."""
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    make_instruction(
+        db,
+        project,
+        first,
+        "JSR",
+        ["Scale_Routine", "Param_Count", "Raw_Count", "Scaled_Value"],
+        category=InstructionCategory.PROGRAM_CONTROL,
+    )
+    make_instruction(
+        db,
+        project,
+        second,
+        "MOV",
+        ["0", "Scaled_Value"],
+        category=InstructionCategory.MOVE_LOGICAL,
+        literals=[0],
+    )
+
+    assert DUPLICATE not in codes(run_check(DestructiveWriteValidator(), db, project))
+
+
+def test_an_sbr_parameter_is_a_write(db: Session, project: Project) -> None:
+    """Every SBR operand is written when the routine is called."""
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    make_instruction(
+        db,
+        project,
+        first,
+        "SBR",
+        ["Speed_SP", "Mode"],
+        category=InstructionCategory.PROGRAM_CONTROL,
+    )
+    make_instruction(
+        db,
+        project,
+        second,
+        "MOV",
+        ["0", "Speed_SP"],
+        category=InstructionCategory.MOVE_LOGICAL,
+        literals=[0],
+    )
+
+    issue = only(run_check(DestructiveWriteValidator(), db, project), DUPLICATE)
+
+    assert issue.detail["mnemonics"] == ["MOV", "SBR"]
+
+
 # ---------------------------------------------------------------------------
 # logic.output_without_driving_rung
 # ---------------------------------------------------------------------------
@@ -239,6 +643,28 @@ def test_a_driven_field_output_does_not_fire(db: Session, project: Project) -> N
     rung = make_ladder(db, project)
     _output_tag(db, project)
     write_tag(db, project, rung, "Motor_Run_Cmd")
+
+    assert UNDRIVEN_OUTPUT not in codes(run_check(OutputCoverageValidator(), db, project))
+
+
+def test_an_output_driven_by_a_jsr_return_is_not_undriven(db: Session, project: Project) -> None:
+    """The return parameter is what writes the output, and it is a write.
+
+    Reading the catalogue's fixed tuples alone, JSR writes nothing, so the field
+    output it drives was reported as one that can never energise — a confident
+    ERROR against correct logic, on the tag the whole subroutine exists to set.
+    """
+    rung = make_ladder(db, project)
+    _output_tag(db, project)
+    make_instruction(
+        db,
+        project,
+        rung,
+        "JSR",
+        ["Drive_Motor", "1", "Start_Req", "Motor_Run_Cmd"],
+        category=InstructionCategory.PROGRAM_CONTROL,
+        literals=[1],
+    )
 
     assert UNDRIVEN_OUTPUT not in codes(run_check(OutputCoverageValidator(), db, project))
 
@@ -413,6 +839,73 @@ def test_a_restricted_instruction_needs_a_human_decision(db: Session, project: P
     assert issue.severity is ValidationSeverity.UNSUPPORTED
     assert issue.requires_human_decision is True
     assert "Motion" in issue.message
+
+
+def test_a_direct_drive_command_is_restricted_not_unknown(db: Session, project: Project) -> None:
+    """MDO commands a servo drive with no profile at all.
+
+    Absent from the nine-mnemonic motion list, it came back "not described by
+    this platform's instruction catalogue" at UNSUPPORTED with no human decision
+    required, and the suggested action told the engineer to supply an Add-On
+    Instruction definition.
+    """
+    make_target_platform(db, project, controller_family=ControllerFamily.CONTROLLOGIX)
+    rung = make_ladder(db, project)
+    make_instruction(
+        db,
+        project,
+        rung,
+        "MDO",
+        ["Axis_1", "Motion_Ctrl_1", "50.0", "0"],
+        category=InstructionCategory.SPECIAL,
+        literals=[2, 3],
+    )
+
+    found = run_check(InstructionSupportValidator(), db, project)
+    issue = only(found, RESTRICTED)
+
+    assert issue.requires_human_decision is True
+    assert UNKNOWN not in codes(found)
+
+
+def test_a_motion_shaped_mnemonic_nobody_listed_is_still_restricted(
+    db: Session, project: Project
+) -> None:
+    """The Logix motion set outgrows the list; the shape is the backstop."""
+    make_target_platform(db, project, controller_family=ControllerFamily.CONTROLLOGIX)
+    rung = make_ladder(db, project)
+    make_instruction(db, project, rung, "MDCC", ["Axis_1"], category=InstructionCategory.SPECIAL)
+
+    issue = only(run_check(InstructionSupportValidator(), db, project), RESTRICTED)
+
+    assert issue.requires_human_decision is True
+    assert "by its mnemonic rather than by name" in issue.message
+
+
+def test_setting_a_system_value_is_restricted(db: Session, project: Project) -> None:
+    """``SSV(Program,Prog_Purge,Disabled,One)`` disables a whole program at runtime.
+
+    Catalogued as neither known nor restricted, it was reported as a name the
+    platform had never heard of rather than as a rung that reconfigures the
+    controller.
+    """
+    make_target_platform(db, project, controller_family=ControllerFamily.CONTROLLOGIX)
+    rung = make_ladder(db, project)
+    make_instruction(
+        db,
+        project,
+        rung,
+        "SSV",
+        ["Program", "Prog_Purge", "Disabled", "One"],
+        category=InstructionCategory.SPECIAL,
+        literals=[0, 1, 2],
+    )
+
+    found = run_check(InstructionSupportValidator(), db, project)
+    issue = only(found, RESTRICTED)
+
+    assert issue.requires_human_decision is True
+    assert UNKNOWN not in codes(found)
 
 
 def test_a_catalogued_instruction_is_not_restricted(db: Session, project: Project) -> None:

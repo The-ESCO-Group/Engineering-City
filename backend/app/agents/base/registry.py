@@ -97,6 +97,71 @@ CORE_AGENTS: tuple[AgentSpec, ...] = (
             "Can only reduce confidence, never raise it above what was claimed.",
         ),
     ),
+    # -- Production pipeline ------------------------------------------------
+    AgentSpec(
+        kind=AgentKind.REQUIREMENTS_PLANNING,
+        display_name="Requirements and Planning",
+        description=(
+            "Reads the project description and the supporting documents and produces "
+            "a traceable requirements model: requirements, acceptance criteria, "
+            "assumptions, constraints and clarifications, each citing the passage it "
+            "was read from."
+        ),
+        building="Requirements Hall",
+        home_location=SemanticLocation.REQUIREMENTS_HALL,
+        handles_task_kinds=(TaskKind.EXTRACT_REQUIREMENTS,),
+        boundaries=(
+            "Establishes what was asked for; never judges whether any of it is "
+            "correct, safe or achievable.",
+            "Never fills a stated gap with a plausible default: a missing threshold "
+            "becomes a clarification or an assumption with its consequence stated.",
+            "Cannot accept its own work — a requirement stays proposed, an "
+            "assumption unconfirmed and a clarification open until a named human "
+            "settles it.",
+            "Does not design tags, I/O or logic.",
+        ),
+    ),
+    AgentSpec(
+        kind=AgentKind.TAG_ARCHITECTURE,
+        display_name="Tag Architecture",
+        description=(
+            "Designs the canonical tag model every other discipline binds to — tags, "
+            "aliases, groups, UDTs and AOI references — under the project's naming "
+            "standard, with a stated basis for each."
+        ),
+        building="Tag Foundry",
+        home_location=SemanticLocation.TAG_FOUNDRY,
+        handles_task_kinds=(TaskKind.DESIGN_TAGS,),
+        boundaries=(
+            "Never renames an existing tag by editing it: a rename is proposed as "
+            "its own operation, with its impact report, for a human to decide.",
+            "The ESCO naming standard governs what this platform creates, not the "
+            "customer's existing tags.",
+            "Cannot author a UDT's member list — no change operation addresses a "
+            "member — so a proposed UDT says so rather than claiming a shape.",
+        ),
+    ),
+    AgentSpec(
+        kind=AgentKind.PLC_LOGIC,
+        display_name="PLC Logic",
+        description=(
+            "Creates the controller organisation and selects an approved ESCO control "
+            "pattern per network, supplying its parameters. Deterministic code expands "
+            "the pattern into rungs and generates the L5X from those rows."
+        ),
+        building="Automation Core",
+        home_location=SemanticLocation.AUTOMATION_CORE,
+        handles_task_kinds=(TaskKind.DESIGN_PLC_ARCHITECTURE, TaskKind.GENERATE_LOGIC),
+        boundaries=(
+            "Never emits XML: it writes the logic model, and the generator emits from that.",
+            "Writes no rung freehand — every network names an approved, checksummed "
+            "template, so the pattern was reviewed before it was ever selected.",
+            "Proposes no instruction the target controller family cannot run, and "
+            "none this platform refuses to generate at all.",
+            "Generates nothing at all for a project whose profile, target platform or "
+            "restricted domains do not permit it.",
+        ),
+    ),
 )
 
 CORE_AGENTS_BY_KIND: dict[AgentKind, AgentSpec] = {spec.kind: spec for spec in CORE_AGENTS}

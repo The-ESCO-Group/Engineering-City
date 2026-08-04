@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,7 +28,7 @@ from app.agents.base.providers import build_provider
 from app.agents.base.registry import AgentSpec, spec_for
 from app.agents.base.runner import AgentRunner, RunOutcome, resolve_model_configuration
 from app.core.config import Settings
-from app.core.enums import ActionType, AgentKind, AgentStatus, EventType
+from app.core.enums import ActionType, AgentKind, AgentStatus, EventType, ObjectType
 from app.core.logging import get_logger
 from app.core.services.evidence_graph import EvidenceGraph, build_graph
 from app.models.agent import AgentDefinition, AgentInstance
@@ -86,6 +87,7 @@ class AgentContext:
     settings: Settings
     graph: EvidenceGraph
     task_id: uuid.UUID | None = None
+    workflow_run_id: uuid.UUID | None = None
     payload: dict[str, Any] | None = None
 
 
@@ -135,6 +137,18 @@ class BaseAgent(ABC):
         persuades it to try.
         """
 
+    @property
+    def allowed_object_types(self) -> tuple[ObjectType, ...]:
+        """The canonical object types this agent may propose changes to.
+
+        Empty — the default — means this agent states no scope, and the action
+        layer does not constrain one: the merge's own check against
+        ``ChangeSet.allowed_object_types`` remains the gate. An agent that does
+        state a scope gets it refused at the boundary as well, which is where a
+        requirements extractor proposing ladder logic is cheapest to stop.
+        """
+        return ()
+
     @abstractmethod
     def system_prompt(self, context: AgentContext) -> str: ...
 
@@ -148,7 +162,13 @@ class BaseAgent(ABC):
         """
 
     # -- execution -------------------------------------------------------
-    def run(self, context: AgentContext, provider: ModelProvider | None = None) -> AgentResult:
+    def run(
+        self,
+        context: AgentContext,
+        provider: ModelProvider | None = None,
+        *,
+        handoff_handlers: Mapping[ActionType, str] | None = None,
+    ) -> AgentResult:
         instance = ensure_agent_instance(context.db, context.project, self.kind)
         set_agent_status(
             context.db,
@@ -158,10 +178,10 @@ class BaseAgent(ABC):
             task_id=context.task_id,
         )
 
+        kind, model, temperature, max_output_tokens = resolve_model_configuration(
+            context.db, context.project.id, self.kind.value, context.settings
+        )
         if provider is None:
-            kind, model, _temperature, _max_tokens = resolve_model_configuration(
-                context.db, context.project.id, self.kind.value, context.settings
-            )
             provider = build_provider(kind, context.settings, model=model or None)
 
         anchor_ids = set(
@@ -178,12 +198,20 @@ class BaseAgent(ABC):
             provider=provider,
             task_id=context.task_id,
             agent_instance_id=instance.id,
+            # The administrator's configured values, not a literal. Both are
+            # writable through the model-configuration endpoint and the admin
+            # UI shows them as applied; the run used to be cut at a hard-coded
+            # 4096 output tokens regardless, so a change set too large for that
+            # arrived as truncated JSON and failed as `invalid_response`.
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
         )
         outcome = runner.run(
             system_prompt=self.system_prompt(context),
             context=self.build_context(context),
             allowed_actions=self.allowed_actions,
             anchor_ids=anchor_ids,
+            allowed_object_types=self.allowed_object_types,
         )
 
         executor = ActionExecutor(
@@ -192,7 +220,9 @@ class BaseAgent(ABC):
             agent_kind=self.kind.value,
             run_id=outcome.run.id,
             task_id=context.task_id,
+            workflow_run_id=context.workflow_run_id,
             agent_instance_id=instance.id,
+            handoff_handlers=handoff_handlers,
         )
         execution = executor.execute(outcome)
 

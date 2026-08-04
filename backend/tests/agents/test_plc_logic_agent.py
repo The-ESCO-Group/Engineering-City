@@ -60,7 +60,11 @@ from app.models.project import Project
 from app.models.requirements import Clarification, Requirement
 
 MOTOR_TEMPLATE = "esco.motor.standard"
-MOTOR_VERSION = "1.0.0"
+#: Read from the registry rather than written as a literal. A basis naming a
+#: version this installation does not ship is now refused at the action
+#: boundary, and the literal that used to be here went stale silently the first
+#: time the pattern was revised.
+MOTOR_VERSION = get_registry().versions(MOTOR_TEMPLATE)[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -862,7 +866,8 @@ def test_the_preview_renders_the_expansion_as_ladder() -> None:
     # Series conditions, a parallel branch as [leg,leg], and a trailing semicolon —
     # the same form render_rung_text produces for the export.
     assert (
-        "[XIC(MTR_101_Cmd_Start)XIC(MTR_101_Permissive),XIC(MTR_101_Cmd_Run)]"
+        "[XIC(MTR_101_Cmd_Start)ONS(MTR_101_Start_OneShot)"
+        "XIC(MTR_101_Permissive),XIC(MTR_101_Cmd_Run)]"
         "XIO(MTR_101_Cmd_Stop)XIC(MTR_101_Interlock_OK)XIO(MTR_101_Sts_Faulted)"
         "OTE(MTR_101_Cmd_Run);"
     ) in preview

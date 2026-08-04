@@ -46,12 +46,14 @@ from app.core.enums import (
     ProviderKind,
     RequirementKind,
     RequirementStatus,
+    TaskKind,
 )
 from app.core.services.evidence_graph import build_graph
 from app.models.evidence import EvidenceAnchor
-from app.models.profile import ProjectProfile
+from app.models.profile import ProjectProfile, ProjectQuestion
 from app.models.project import Project
 from app.models.requirements import Requirement
+from app.models.task import Task
 
 #: Deliberately half narrative and half requirement, with one genuine ambiguity
 #: ("stops") — the same shape as a real brief, so the context assertions are
@@ -291,6 +293,66 @@ def test_an_ambiguity_naming_both_readings_is_accepted(
     assert outcome.rejected == []
     assert len(outcome.accepted) == 1
     assert outcome.accepted[0].action_type is ActionType.REQUEST_CLARIFICATION
+
+
+def test_an_accepted_clarification_is_persisted_once_for_a_human_to_answer(
+    db: Session, described_project: Project, settings: Settings
+) -> None:
+    task = Task(
+        project_id=described_project.id,
+        kind=TaskKind.EXTRACT_REQUIREMENTS,
+        title="Extract requirements",
+        idempotency_key="requirements-question-persistence",
+    )
+    db.add(task)
+    db.flush()
+    context = AgentContext(
+        db=db,
+        project=described_project,
+        settings=settings,
+        graph=build_graph(db, described_project.id),
+        task_id=task.id,
+    )
+    action: dict[str, Any] = {
+        "action_type": ActionType.REQUEST_CLARIFICATION.value,
+        "summary": "Clarify what stop means.",
+        "payload": {
+            "category": "requirement_ambiguity",
+            "question": "Does stop mean a controlled ramp-down or immediate drive disable?",
+            "why_it_matters": "The answer changes the commanded stop behaviour.",
+            "competing_readings": [
+                "Controlled ramp-down over the configured deceleration time",
+                "Immediate drive disable",
+            ],
+            "blocks_task_kinds": [TaskKind.GENERATE_LOGIC.value],
+        },
+    }
+    agent = RequirementsPlanningAgent()
+
+    first = agent.run(context, provider=_FixedProvider([action]))
+    second = agent.run(context, provider=_FixedProvider([action]))
+    questions = list(
+        db.execute(
+            select(ProjectQuestion).where(ProjectQuestion.project_id == described_project.id)
+        ).scalars()
+    )
+
+    assert len(questions) == 1
+    question = questions[0]
+    assert question.question == action["payload"]["question"]
+    assert question.is_blocking is True
+    assert question.asked_by_agent == "requirements_planning"
+    assert question.raised_in_task_id == task.id
+    assert question.blocks_task_kinds == [TaskKind.GENERATE_LOGIC.value]
+    assert question.attributes["competing_readings"] == action["payload"][
+        "competing_readings"
+    ]
+    assert first.execution.questions[0].id == question.id
+    assert second.execution.questions[0].id == question.id
+    assert all(
+        item.action_type != ActionType.REQUEST_CLARIFICATION.value
+        for item in first.execution.unexecuted
+    )
 
 
 # ---------------------------------------------------------------------------

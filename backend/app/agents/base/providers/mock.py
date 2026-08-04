@@ -703,6 +703,543 @@ def _build_senior_review(context: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# The production agents
+#
+# These three propose changes to the canonical model rather than findings, which
+# raises the stakes: a finding is a sentence a human reads, and a merged
+# operation is a row every later stage builds on. The rules below are therefore
+# narrower than the review ones, not wider. Each proposed object is a
+# transcription of something already recorded — a schedule row, an approved
+# device, an accepted requirement — and where the honest answer is a judgement,
+# these ask a question instead of making one up. Nothing here selects a control
+# pattern, classifies a requirement, or decides what a device is for.
+# ---------------------------------------------------------------------------
+def _build_requirements_planning(context: dict[str, Any]) -> dict[str, Any]:
+    """Record the interlock schedule's rows as requirements, and ask about the gaps.
+
+    A documented interlock is the one place in an uploaded set where the customer
+    wrote a requirement down in a structured, anchored form: an identifier, a
+    trip tag, a condition and an action, each traceable to the row it came from.
+    Restating those is transcription, which is all this provider does.
+
+    Reading requirements out of the narrative documents is deliberately not
+    attempted. "Is this sentence a requirement or is it background" is the one
+    judgement this agent exists to make, and a fixed rule that guessed at it
+    would fill the model with untestable items — exactly the failure the real
+    prompt spends most of its length warning against.
+
+    Nothing here is accepted, confirmed or resolved: every requirement is left at
+    its default ``proposed`` and every gap becomes an open clarification.
+    """
+    anchors = context.get("anchor_index") or {}
+    existing = context.get("existing") or {}
+    in_use = existing.get("references_in_use") or {}
+    taken = {str(item) for item in in_use.get("requirement") or []}
+    asked = {str(item.get("question", "")) for item in existing.get("open_clarifications") or []}
+
+    operations: list[dict[str, Any]] = []
+    cited: list[str] = []
+    transcribed = 0
+    gaps = 0
+
+    for interlock in (context.get("graph") or {}).get("documented_interlocks") or []:
+        if not interlock.get("is_current", True):
+            continue
+        identifier = str(interlock.get("identifier") or "").strip()
+        if not identifier:
+            continue
+        anchor = _first_anchor(interlock.get("sources") or [], anchors)
+        if anchor is None:
+            # No anchor means nothing to cite, and a requirement that cites
+            # nothing makes an invention look traceable.
+            continue
+
+        if interlock.get("is_specified"):
+            reference = f"REQ-{identifier}"[:64]
+            if reference in taken:
+                continue
+            taken.add(reference)
+            operations.append(_requirement_operation(reference, interlock, anchor))
+            cited.append(anchor)
+            transcribed += 1
+            continue
+
+        question = _gap_question(identifier, interlock)
+        if question in asked:
+            continue
+        asked.add(question)
+        operations.append(_clarification_operation(identifier, interlock, question, anchor))
+        cited.append(anchor)
+        gaps += 1
+
+    rationale = (
+        f"Transcribed {transcribed} documented interlock(s) into requirements and "
+        f"raised {gaps} clarification(s) for rows the schedule left incomplete. No "
+        f"requirement was read out of narrative text: deciding that a sentence is a "
+        f"requirement rather than background is a judgement this provider does not make."
+    )
+
+    if not operations:
+        return {
+            "rationale": rationale,
+            "actions": [
+                {
+                    "action_type": "complete_task",
+                    "summary": "Nothing new to record from the interlock schedule.",
+                    "confidence": 0.0,
+                    "payload": {
+                        "outcome": (
+                            "Every documented interlock is already recorded as a "
+                            "requirement or a clarification, or none carried an "
+                            "evidence anchor to cite."
+                        ),
+                        "limitations": [
+                            "Only the interlock schedule was read. The project "
+                            "description and the narrative documents were not, so "
+                            "this is not a complete requirements model.",
+                            MOCK_WARNING,
+                        ],
+                    },
+                }
+            ],
+        }
+
+    return {
+        "rationale": rationale,
+        "actions": [
+            {
+                "action_type": "propose_changeset",
+                "summary": (
+                    f"Record {transcribed} documented interlock(s) as requirements "
+                    f"and {gaps} incomplete row(s) as clarifications."
+                ),
+                "evidence_anchor_ids": sorted(set(cited)),
+                "confidence": _confidence(0.5),
+                "payload": {
+                    "title": "Requirements transcribed from the interlock schedule",
+                    "summary": (
+                        "One requirement per fully specified documented interlock, one "
+                        "clarification per incomplete row. Each cites the schedule row "
+                        "it was read from."
+                    ),
+                    "rationale": rationale,
+                    "base_revision_number": int(context.get("base_revision_number") or 0),
+                    "operations": operations,
+                    "warnings": [
+                        "Transcribed by the deterministic provider from structured "
+                        "schedule rows. The narrative documents were not read, so the "
+                        "requirements model is incomplete by construction.",
+                    ],
+                },
+            }
+        ],
+    }
+
+
+def _requirement_operation(
+    reference: str, interlock: dict[str, Any], anchor: str
+) -> dict[str, Any]:
+    """One schedule row as a requirement, with the row itself as source_text.
+
+    ``kind`` is deliberately unset. The column defaults to ``other``, and an
+    unclassified requirement is a classification nobody made — guessing
+    ``safety`` from the word "guard" would hide that from the validator that
+    reports it.
+    """
+    identifier = str(interlock.get("identifier") or "")
+    trip_tag = str(interlock.get("trip_tag") or "")
+    condition = str(interlock.get("trip_condition") or "")
+    action = str(interlock.get("action") or "")
+    return {
+        "operation_type": "create_object",
+        "object_type": "requirement",
+        "temp_key": f"req-{identifier}",
+        "values": {
+            "reference": reference,
+            "title": f"{identifier}: {interlock.get('description') or trip_tag}"[:300],
+            "statement": (
+                f"When {condition} ({trip_tag}), the system shall {action}."
+                if action
+                else f"The system shall respond to {condition} ({trip_tag})."
+            ),
+            # The row as the schedule wrote it, cell by cell. Not tidied: the
+            # whole point of keeping source_text beside statement is that an
+            # engineer can see what changed between them.
+            "source_text": " | ".join(
+                value
+                for value in (
+                    identifier,
+                    str(interlock.get("description") or ""),
+                    trip_tag,
+                    condition,
+                    action,
+                    str(interlock.get("failsafe") or ""),
+                )
+                if value
+            ),
+            "is_inferred": False,
+            "confidence": _confidence(0.5),
+        },
+        "basis": [
+            {
+                "kind": "direct",
+                "anchor_id": anchor,
+                "note": f"Row {identifier} of the interlock schedule.",
+            }
+        ],
+        "description": f"Transcribed from the schedule row for {identifier}.",
+    }
+
+
+def _clarification_operation(
+    identifier: str, interlock: dict[str, Any], question: str, anchor: str
+) -> dict[str, Any]:
+    missing = ", ".join(str(item) for item in interlock.get("missing_fields") or [])
+    return {
+        "operation_type": "create_object",
+        "object_type": "clarification",
+        "temp_key": f"clarify-{identifier}",
+        "values": {
+            "question": question,
+            "ambiguity": (
+                f"The schedule row for {identifier} leaves {missing} blank. Nothing "
+                f"can be designed or compared against it until those are stated, and "
+                f"choosing a value here would invent a requirement the customer never "
+                f"asked for."
+            ),
+            "blocks_generation": True,
+        },
+        "basis": [
+            {
+                "kind": "direct",
+                "anchor_id": anchor,
+                "note": f"The incomplete schedule row for {identifier}.",
+            }
+        ],
+        "description": f"The schedule row for {identifier} is missing {missing}.",
+    }
+
+
+def _gap_question(identifier: str, interlock: dict[str, Any]) -> str:
+    missing = ", ".join(str(item) for item in interlock.get("missing_fields") or []) or "fields"
+    return f"What are the {missing} for interlock {identifier}?"
+
+
+def _build_tag_architecture(context: dict[str, Any]) -> dict[str, Any]:
+    """Declare a tag per device signal, but only where a requirement asks for one.
+
+    The naming is mechanical — ``{tag_prefix}_{signal name}`` is the standard's
+    own composition rule — and the data type follows from the signal type. What
+    is not mechanical is *why the tag should exist*, and that is the whole of the
+    traceability rule: a tag with no stated basis is an object nobody can review.
+
+    So the only basis this provider will state is an accepted requirement that
+    names the device. Where no accepted requirement names it, the tag is not
+    proposed and a clarification says so. That is the honest asymmetry: naming a
+    tag is transcription, deciding that a device needs one is engineering.
+    """
+    base_revision = int(context.get("base_revision_number") or 0)
+    declared = {str(tag.get("name", "")).casefold() for tag in context.get("existing_tags") or []}
+    accepted = [
+        requirement
+        for requirement in context.get("requirements") or []
+        if requirement.get("is_accepted")
+    ]
+
+    operations: list[dict[str, Any]] = []
+    unsupported: list[str] = []
+
+    for device in context.get("devices") or []:
+        prefix = str(device.get("tag_prefix") or "").strip()
+        if not prefix:
+            continue
+        requirement = _requirement_naming(accepted, prefix)
+        if requirement is None:
+            unsupported.append(prefix)
+            continue
+
+        for signal in device.get("signals") or []:
+            name = f"{prefix}_{signal.get('name', '')}".strip("_")
+            data_type = _DATA_TYPE_BY_SIGNAL_TYPE.get(str(signal.get("signal_type", "")))
+            if not name or data_type is None or name.casefold() in declared:
+                continue
+            declared.add(name.casefold())
+            operations.append(_tag_operation(name, device, signal, data_type, requirement))
+
+    actions: list[dict[str, Any]] = []
+    if operations:
+        actions.append(
+            {
+                "action_type": "propose_changeset",
+                "summary": f"Declare {len(operations)} tag(s) for signals on approved devices.",
+                "confidence": _confidence(0.5),
+                "payload": {
+                    "title": "Tags for the signals of requirement-backed devices",
+                    "summary": (
+                        "One controller-scoped tag per signal of each device an accepted "
+                        "requirement names, composed as {tag_prefix}_{signal} and typed "
+                        "from the signal type."
+                    ),
+                    "rationale": (
+                        "Naming follows the standard's composition rule and the data "
+                        "type follows the signal type; both are mechanical. Each tag "
+                        "cites the accepted requirement that names its device."
+                    ),
+                    "base_revision_number": base_revision,
+                    "operations": operations,
+                    "warnings": [
+                        "Composed by the deterministic provider. No alias, group, UDT or "
+                        "AOI reference was designed, and no existing tag was examined "
+                        "against the naming standard.",
+                    ],
+                },
+            }
+        )
+
+    for prefix in unsupported[:_MAX_MOCK_CLARIFICATIONS]:
+        actions.append(
+            {
+                "action_type": "request_clarification",
+                "summary": f"No accepted requirement names {prefix}.",
+                "confidence": 0.0,
+                "payload": {
+                    "category": "tag_naming",
+                    "question": (
+                        f"Which accepted requirement do the tags for {prefix} come "
+                        f"from, or should {prefix} be out of scope for this project?"
+                    ),
+                    "why_it_matters": (
+                        f"No tag will be created for {prefix} until this is answered. "
+                        f"A tag that exists for no stated reason cannot be reviewed, "
+                        f"and everything generated from it would inherit the gap."
+                    ),
+                },
+            }
+        )
+
+    actions.append(
+        {
+            "action_type": "complete_task",
+            "summary": "Tag design pass by the deterministic provider.",
+            "confidence": 0.0,
+            "payload": {
+                "outcome": (
+                    f"Proposed {len(operations)} tag(s) and left {len(unsupported)} "
+                    f"device(s) undeclared for want of an accepted requirement."
+                ),
+                "objects_created": {"tag": len(operations)},
+                "limitations": [
+                    "Only base tags for device signals were considered. Aliases, "
+                    "groups, UDTs, AOI references and I/O alias tags were not.",
+                    "No existing tag was checked against the naming standard, so this "
+                    "is not evidence that the tag model is consistent.",
+                    MOCK_WARNING,
+                ],
+            },
+        }
+    )
+
+    return {
+        "rationale": (
+            f"Composed {len(operations)} tag name(s) mechanically from approved devices "
+            f"and their signals. Every one cites the accepted requirement that names its "
+            f"device; devices no requirement names produced a question, not a tag."
+        ),
+        "actions": actions,
+    }
+
+
+#: Signal types whose Logix data type follows without a judgement. A network or
+#: virtual signal does not: its type depends on what the producer publishes,
+#: which no rule here can read.
+_DATA_TYPE_BY_SIGNAL_TYPE: dict[str, str] = {
+    "discrete_input": "BOOL",
+    "discrete_output": "BOOL",
+    "analog_input": "REAL",
+    "analog_output": "REAL",
+}
+
+#: Questions one mock turn will raise. A run that asks forty is a run nobody
+#: answers, and the pattern is visible after a handful.
+_MAX_MOCK_CLARIFICATIONS = 10
+
+
+def _requirement_naming(requirements: list[dict[str, Any]], prefix: str) -> dict[str, Any] | None:
+    """The first accepted requirement whose wording names this device."""
+    needle = prefix.casefold()
+    for requirement in requirements:
+        text = f"{requirement.get('title', '')} {requirement.get('statement', '')}".casefold()
+        if needle in text:
+            return requirement
+    return None
+
+
+def _tag_operation(
+    name: str,
+    device: dict[str, Any],
+    signal: dict[str, Any],
+    data_type: str,
+    requirement: dict[str, Any],
+) -> dict[str, Any]:
+    description = str(signal.get("description") or "").strip()
+    return {
+        "operation_type": "create_object",
+        "object_type": "tag",
+        "temp_key": f"tag-{name}",
+        "values": {
+            "name": name,
+            "scope": "controller",
+            "base_data_type": data_type,
+            "description": (description or f"{device.get('name', '')} {signal.get('name', '')}")[
+                :250
+            ],
+            # The name it is being created under. Populated always, because it is
+            # what makes a later rename explicable rather than a discrepancy
+            # nobody can close.
+            "source_name": name,
+        },
+        "basis": [
+            {
+                "kind": "inference",
+                "requirement_reference": str(requirement.get("reference") or ""),
+                "note": (
+                    f"{requirement.get('reference')} names "
+                    f"{device.get('tag_prefix')}; this tag carries its "
+                    f"{signal.get('name')} signal."
+                ),
+            }
+        ],
+        "description": f"Signal {signal.get('name')} of device {device.get('tag_prefix')}.",
+    }
+
+
+def _build_plc_logic(context: dict[str, Any]) -> dict[str, Any]:
+    """Select no control pattern, and say exactly why not.
+
+    This is the one production agent whose central act — choosing which approved
+    pattern implements a requirement, and with which parameters — is irreducibly
+    a judgement. A fixed rule can match a device category to a template name, and
+    the result would look like engineering and be a coincidence of naming. The
+    expansion is then written into rungs that a reviewer reads as generated
+    logic, and nothing downstream would record that a lookup table chose it.
+
+    So it proposes nothing and asks. When generation is blocked for the project
+    it repeats the block's own question, which is already written to be put to a
+    human unedited.
+    """
+    block = context.get("generation_blocked")
+    if isinstance(block, dict):
+        return {
+            "rationale": (
+                "Generation is blocked for this project, so no template was offered "
+                "and none could be selected."
+            ),
+            "actions": [
+                {
+                    "action_type": "request_clarification",
+                    "summary": "Generation is blocked for this project.",
+                    "confidence": 0.0,
+                    "payload": {
+                        "category": str(block.get("question_category") or "scope"),
+                        "question": str(block.get("question") or ""),
+                        "why_it_matters": str(block.get("reason") or ""),
+                    },
+                },
+                {
+                    "action_type": "report_blocker",
+                    "summary": "No logic can be proposed for this project.",
+                    "confidence": 0.0,
+                    "payload": {
+                        "reason": str(block.get("reason") or ""),
+                        "resolvable_by_upload": False,
+                    },
+                },
+            ],
+        }
+
+    existing = context.get("existing") or {}
+    templates = context.get("templates") or []
+    # ``requirements`` is already the citable list — accepted, and with no open
+    # blocking clarification — so the only filter left is whether some network
+    # already claims to implement it.
+    claimed = {
+        str(network.get("requirement_reference") or "")
+        for network in existing.get("logic_networks") or []
+    }
+    unimplemented = [
+        requirement
+        for requirement in context.get("requirements") or []
+        if str(requirement.get("reference") or "") not in claimed
+    ]
+
+    actions: list[dict[str, Any]] = [
+        {
+            "action_type": "request_clarification",
+            "summary": f"Which approved pattern implements {requirement.get('reference')}?",
+            "confidence": 0.0,
+            "payload": {
+                "category": "template_selection",
+                "question": (
+                    f"Which of the {len(templates)} approved template(s) implements "
+                    f"{requirement.get('reference')}, and with which parameters?"
+                ),
+                "why_it_matters": (
+                    "No logic will be proposed for this requirement until a pattern is "
+                    "chosen. Choosing the nearest-sounding template would produce a "
+                    "rung whose pattern nobody selected."
+                ),
+            },
+        }
+        for requirement in unimplemented[:_MAX_MOCK_CLARIFICATIONS]
+    ]
+
+    actions.append(
+        {
+            "action_type": "complete_task",
+            "summary": "No control pattern was selected.",
+            "confidence": 0.0,
+            "payload": {
+                "outcome": (
+                    f"Reported the controller organisation already recorded "
+                    f"({len(existing.get('controller_tasks') or [])} task(s), "
+                    f"{len(existing.get('programs') or [])} program(s), "
+                    f"{len(existing.get('routines') or [])} routine(s)) and asked which "
+                    f"pattern implements each of {len(unimplemented)} citable "
+                    f"requirement(s) that no network yet claims."
+                ),
+                "limitations": [
+                    "No template was selected and no logic was proposed. Matching a "
+                    "requirement to an approved control pattern is a judgement, and a "
+                    "fixed rule that made it would produce logic whose pattern nobody "
+                    "chose.",
+                    MOCK_WARNING,
+                ],
+            },
+        }
+    )
+
+    return {
+        "rationale": (
+            f"{len(templates)} approved template(s) are available for this target. None "
+            f"was selected: matching one to a requirement is the judgement this provider "
+            f"does not make."
+        ),
+        "actions": actions,
+    }
+
+
+def _first_anchor(sources: list[Any], anchors: dict[str, Any]) -> str | None:
+    """The first anchor id among a fact's sources, or ``None`` if none resolves."""
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        anchor = anchors.get(str(source.get("anchor_key", "")))
+        if anchor:
+            return str(anchor)
+    return None
+
+
+# ---------------------------------------------------------------------------
 def _tag(graph: dict[str, Any], name: str) -> dict[str, Any] | None:
     for entry in graph.get("tags") or []:
         if entry.get("name") == name:
@@ -726,4 +1263,7 @@ _BUILDERS = {
     "plc_review": _build_plc_review,
     "interlock_review": _build_interlock_review,
     "senior_review": _build_senior_review,
+    "requirements_planning": _build_requirements_planning,
+    "tag_architecture": _build_tag_architecture,
+    "plc_logic": _build_plc_logic,
 }

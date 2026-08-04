@@ -1,7 +1,7 @@
 # Latched fault with a reset that cannot clear an active condition.
 # See templates/README.md for the file format and the versioning rule.
 id: esco.fault.reset
-version: 1.0.0
+version: 2.0.0
 category: fault_reset
 display_name: Latched fault and conditional reset
 description: >
@@ -128,10 +128,18 @@ generated_objects:
         to an operator like a broken button, and the usual next step is to press
         it harder, then to find a way around it. Telling them the condition is
         still present turns a refusal into information.
+
+        A TOF, not a TON, and that is the whole reason this rung works. Its
+        enabling condition lasts one scan — the last rung of this block consumes
+        _Cmd_Reset on the same scan it is seen — and a TON only holds .TT while
+        its rung is true, so a TON here produced a one-scan indication no HMI
+        polling at half a second could ever catch. A TOF's .DN comes up with the
+        rung and stays up for the preset AFTER the rung goes false, which is
+        what "held" was supposed to mean.
       elements:
         - {instruction: XIC, operand: "{device_tag}_Cmd_Reset", kind: condition}
         - {instruction: XIC, operand: "{device_tag}_Fault_Condition", kind: condition}
-        - instruction: TON
+        - instruction: TOF
           operands: ["{device_tag}_Tmr_Reset_Blocked", "{reset_blocked_hold_ms}", "0"]
           kind: output
 
@@ -139,10 +147,11 @@ generated_objects:
       title: "{device_tag} reset refused indication"
       comment: >
         Held for the configured time so a momentary press produces a readable
-        indication. Not latched: once the condition clears and a reset succeeds,
-        the refusal is history.
+        indication. Driven from the TOF's .DN, which outlives the button. Not
+        latched: once the hold expires the refusal is history, and a reset that
+        succeeds never raises it in the first place.
       elements:
-        - {instruction: XIC, operand: "{device_tag}_Tmr_Reset_Blocked.TT", kind: condition}
+        - {instruction: XIC, operand: "{device_tag}_Tmr_Reset_Blocked.DN", kind: condition}
         - {instruction: OTE, operand: "{device_tag}_Sts_Reset_Blocked", kind: output}
 
     - routine: R_Alarm_Latch
@@ -160,6 +169,17 @@ generated_objects:
         - {instruction: OTU, operand: "{device_tag}_Cmd_Reset", kind: output}
 
 engineering_notes: >
+  Version 2.0.0 made the refusal indication actually hold. In 1.0.0 it was a TON
+  enabled by _Cmd_Reset — a command this block clears on the scan it reads it —
+  so the timer was enabled for one scan, .TT dropped with it, and
+  _Sts_Reset_Blocked was a single-scan pulse regardless of
+  reset_blocked_hold_ms. Against an HMI polling every half second the operator
+  saw nothing at all, which is precisely the silent refusal this pattern exists
+  to prevent. A TOF holds its .DN for the preset after its rung goes false, which
+  is what the comment always claimed. A TON cannot hold anything past its
+  enabling condition, and the same construction is worth looking for anywhere
+  else a "held" indication is driven from a momentary command.
+
   A reset acknowledges that a fault has been dealt with. It is not a way of
   making the fault go away. Everything in this pattern follows from that one
   sentence: the condition is checked at the moment of reset, the reset is
@@ -202,8 +222,19 @@ restrictions:
     their own reset requirements, usually including a monitored manual reset,
     and are outside this pattern entirely.
   - >
-    Does not restart equipment. Clearing the fault restores permission to start;
-    a start still needs a fresh command with the permissives satisfied.
+    Does not restart equipment, and cannot enforce that on its own. Clearing the
+    fault restores permission to start; whether a start then needs a fresh
+    command is decided by the device block, not here. The ESCO device patterns
+    (esco.motor.standard, esco.vfd.standard, esco.valve.standard, 2.0.0 and
+    later) take the start as a rising edge, so a held command does not restart
+    them. A hand-written block that seals on a maintained start command WILL
+    restart the equipment on the scan this reset is accepted, and nothing in
+    this pattern can detect that.
+  - >
+    Clears _Sts_Faulted and nothing else. It does not clear a latched interlock
+    trip — _Sts_Ilk_Tripped belongs to esco.permissive.interlock and is reset
+    there, on this same _Cmd_Reset. Expand both patterns for a device that has
+    both, or a trip stays latched with the fault showing clear.
   - >
     Does not generate _Fault_Condition. The expansion builds it from the
     device's fault sources, and this template cannot verify that it is the live
@@ -246,9 +277,12 @@ tests:
     when: _Fault_Condition is true for a single scan
     then: _Sts_Faulted is latched and stays latched.
   - name: The refused indication is readable
-    given: A live fault condition
-    when: The reset button is pressed for 100 ms
-    then: _Sts_Reset_Blocked stays true for reset_blocked_hold_ms.
+    given: A live fault condition and reset_blocked_hold_ms of 3000
+    when: The reset button is pressed for 100 ms and released
+    then: >
+      _Sts_Reset_Blocked comes up on the press and is still true three seconds
+      later, so an HMI polling at 500 ms cannot miss it. It must not be a
+      one-scan pulse.
   - name: The reset request does not persist
     given: An HMI that sets _Cmd_Reset and does not clear it
     when: The block is scanned

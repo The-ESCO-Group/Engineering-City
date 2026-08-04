@@ -1,7 +1,7 @@
 # The generic permissive / interlock gate.
 # See templates/README.md for the file format and the versioning rule.
 id: esco.permissive.interlock
-version: 1.0.0
+version: 2.0.0
 category: permissive_interlock
 display_name: Permissive and interlock gate
 description: >
@@ -65,6 +65,20 @@ required_tags:
     suffix: _Ilk_Trip_OneShot
     data_type: BOOL
     description: One-shot storage bit for the first-out capture
+  - role: command
+    suffix: _Cmd_Reset
+    data_type: BOOL
+    description: >
+      Operator reset request, momentary, written by the HMI or a pushbutton.
+      The same tag esco.fault.reset consumes: one button clears the device fault
+      and this trip latch, and both blocks take the same edge on the same scan.
+  - role: status
+    suffix: _Ilk_Reset_OneShot
+    data_type: BOOL
+    description: >
+      One-shot storage bit for the interlock reset edge. Separate from the fault
+      pattern's own storage bit, because two blocks reading one command each
+      need their own edge memory.
   - role: diagnostic
     suffix: _Ilk_First_Out
     data_type: DINT
@@ -195,26 +209,24 @@ generated_objects:
         - {instruction: OTE, operand: "{device_tag}_Interlock_OK", kind: output}
 
     - routine: R_Interlocks
-      title: "{device_tag} interlock trip latch"
-      comment: >
-        A trip is latched once the debounce is satisfied. An interlock that
-        clears itself lets equipment restart the moment the condition goes away,
-        which is how a machine restarts on its own with somebody still standing
-        in front of it. Clearing this latch is esco.fault.reset's job, and it
-        will refuse while the sources are still bad.
-      elements:
-        - {instruction: XIC, operand: "{device_tag}_Tmr_Ilk_Debounce.DN", kind: condition}
-        - {instruction: OTL, operand: "{device_tag}_Sts_Ilk_Tripped", kind: output}
-
-    - routine: R_Interlocks
       title: "{device_tag} first out capture"
       comment: >
         Records which interlock was tripped on the scan the trip began, and only
         on that scan. Without the one-shot, every condition that fails as a
         consequence of the stop overwrites the cause, and the operator is told
         the last thing that went wrong instead of the first.
+
+        The one-shot alone is not enough, and this rung's position is part of
+        the mechanism. A one-shot re-arms whenever its rung-in goes false, and
+        .DN goes false the moment the sources recover — so a source that trips,
+        clears itself and is followed by a consequential trip would overwrite the
+        cause even though nobody had reset anything. XIO _Sts_Ilk_Tripped closes
+        that: no capture while a trip is still latched. The rung therefore has to
+        be scanned BEFORE the latch rung below, or the trip would latch first and
+        the cause would never be captured at all.
       elements:
         - {instruction: XIC, operand: "{device_tag}_Tmr_Ilk_Debounce.DN", kind: condition}
+        - {instruction: XIO, operand: "{device_tag}_Sts_Ilk_Tripped", kind: condition}
         - instruction: ONS
           operand: "{device_tag}_Ilk_Trip_OneShot"
           kind: condition
@@ -222,7 +234,71 @@ generated_objects:
           operands: ["{device_tag}_Ilk_First_Out_Now", "{device_tag}_Ilk_First_Out"]
           kind: output
 
+    - routine: R_Interlocks
+      title: "{device_tag} interlock trip latch"
+      comment: >
+        A trip is latched once the debounce is satisfied. An interlock that
+        clears itself lets equipment restart the moment the condition goes away,
+        which is how a machine restarts on its own with somebody still standing
+        in front of it. The latch is cleared by the reset rung below — in THIS
+        template, on the same operator command esco.fault.reset uses.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Tmr_Ilk_Debounce.DN", kind: condition}
+        - {instruction: OTL, operand: "{device_tag}_Sts_Ilk_Tripped", kind: output}
+
+    - routine: R_Interlocks
+      title: "{device_tag} interlock trip reset"
+      comment: >
+        The other half of the latch, and until 2.0.0 it did not exist anywhere:
+        1.0.0 latched _Sts_Ilk_Tripped and said clearing it was esco.fault.reset's
+        job, but that pattern unlatches _Sts_Faulted and has never touched this
+        bit. A tripped interlock could not be cleared for the life of the
+        controller session.
+
+        Same three conditions as the fault reset, for the same reasons. The edge
+        means a held reset button cannot clear trips as fast as they latch. XIC
+        _Ilk_Sources_OK means the reset is refused while the sources are still
+        bad — an interlock is not cleared by acknowledging it. _Ilk_First_Out is
+        zeroed with the latch so that "zero means no trip since the last reset"
+        is true rather than aspirational.
+
+        This rung must be scanned before esco.fault.reset consumes _Cmd_Reset.
+        Both ESCO controller layouts place the interlock routine ahead of the
+        alarm-latch routine, so both blocks see the same edge on the same scan.
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Cmd_Reset", kind: condition}
+        - instruction: ONS
+          operand: "{device_tag}_Ilk_Reset_OneShot"
+          kind: condition
+        - {instruction: XIC, operand: "{device_tag}_Ilk_Sources_OK", kind: condition}
+        - branch:
+            - - {instruction: OTU, operand: "{device_tag}_Sts_Ilk_Tripped", kind: output}
+            - - instruction: MOV
+                operands: ["0", "{device_tag}_Ilk_First_Out"]
+                kind: output
+
 engineering_notes: >
+  Version 2.0.0 gave the trip latch a reset and stopped the first-out capture
+  re-arming. In 1.0.0 _Sts_Ilk_Tripped was set by an OTL that no rung in any
+  template ever unlatched: the restriction said "use esco.fault.reset", but that
+  pattern unlatches _Sts_Faulted, which this one never sets. A tripped interlock
+  held _Interlock_OK false until the controller was power cycled or somebody
+  forced the bit online. The reset rung is now here, on the same _Cmd_Reset the
+  fault pattern uses and on the same terms — an edge, and only while the sources
+  are healthy. The first-out capture is now gated on the trip not already being
+  latched and is scanned ahead of the latch, so a source that clears itself
+  cannot re-arm the one-shot and let a consequential trip overwrite the recorded
+  cause. Anything expanded from 1.0.0 must be re-expanded: it has no way to clear
+  a trip.
+
+  This pattern and esco.fault.reset are a PAIR and are expanded together. They
+  share _Cmd_Reset, they each keep their own one-shot storage bit, and the
+  controller layouts scan the interlock routine before the alarm-latch routine so
+  that the fault pattern's rung clearing _Cmd_Reset runs after both have seen the
+  edge. Expanding this template without the fault-reset pattern leaves nothing to
+  clear _Cmd_Reset, and an HMI bit left set will then clear each new trip as it
+  arrives — which is the failure the edge exists to prevent.
+
   A permissive is a condition for STARTING. An interlock is a condition for
   CONTINUING. They are different bits, gated at different points in the
   equipment pattern, and the difference is not stylistic: a permissive in the
@@ -267,7 +343,21 @@ restrictions:
     Does not decide whether a condition is a permissive or an interlock. That
     classification is an engineering judgement recorded in the interlock
     schedule, and putting a condition in the wrong one is not detectable here.
-  - Does not clear its own trip latch. Use esco.fault.reset.
+  - >
+    Clears its own trip latch, and only its own. The reset rung unlatches
+    _Sts_Ilk_Tripped and zeroes _Ilk_First_Out; it does not touch _Sts_Faulted or
+    any device fault, which is esco.fault.reset's business. Expand both patterns
+    for a device that has both, and expect one press of _Cmd_Reset to clear both.
+  - >
+    Does not annunciate a refused interlock reset. A reset pressed while the
+    sources are still bad does nothing here and says nothing here; the refusal
+    indication belongs to esco.fault.reset, and it is raised against the device
+    fault condition rather than against this trip latch.
+  - >
+    Depends on rung order across routines. The reset rung must be scanned before
+    esco.fault.reset clears _Cmd_Reset. Both ESCO controller layouts do that;
+    an expansion that places the interlock gate after the alarm-latch routine
+    produces a reset button that never clears a trip.
   - >
     First-out is only as good as _Ilk_First_Out_Now. If the expansion does not
     write a distinct code per source, the captured value is meaningless rather
@@ -298,6 +388,30 @@ tests:
     given: A captured first-out value
     when: Another source trips before the trip is reset
     then: _Ilk_First_Out is unchanged.
+  - name: First out survives the tripped source clearing itself
+    given: >
+      Source 3 has tripped, _Ilk_First_Out holds 3 and _Sts_Ilk_Tripped is
+      latched
+    when: >
+      Source 3 clears on its own — so the debounce timer resets — and source 7
+      then trips, with no reset in between
+    then: _Ilk_First_Out still holds 3.
+  - name: A reset clears the trip once the sources are healthy
+    given: A latched trip and _Ilk_Sources_OK back to true
+    when: _Cmd_Reset is pulsed
+    then: >
+      _Sts_Ilk_Tripped goes false, _Ilk_First_Out returns to 0, and _Interlock_OK
+      goes true so the equipment can be started again.
+  - name: A reset against live sources is refused
+    given: A latched trip with _Ilk_Sources_OK still false
+    when: _Cmd_Reset is pulsed
+    then: _Sts_Ilk_Tripped stays latched and _Ilk_First_Out is unchanged.
+  - name: A held reset button cannot clear repeated trips
+    given: _Cmd_Reset is forced true and held
+    when: A source trips and then recovers
+    then: >
+      _Sts_Ilk_Tripped stays latched, because the reset is edge-triggered and no
+      new rising edge has occurred.
   - name: An unwritten source tag reads as tripped
     given: A project where the routine writing _Ilk_Sources_OK is not scheduled
     when: The gate is scanned

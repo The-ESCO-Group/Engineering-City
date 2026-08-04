@@ -1,7 +1,7 @@
 # Standard VFD run/stop with a clamped speed reference.
 # See templates/README.md for the file format and the versioning rule.
 id: esco.vfd.standard
-version: 1.0.0
+version: 2.0.0
 category: vfd_control
 display_name: Standard VFD run/stop with speed reference
 description: >
@@ -41,7 +41,17 @@ required_tags:
   - role: command
     suffix: _Cmd_Start
     data_type: BOOL
-    description: Operator or sequence start request, momentary
+    description: >
+      Operator or sequence start request. Acted on as a RISING EDGE, so a
+      requester that holds it true gets one start and not a standing request to
+      run.
+  - role: status
+    suffix: _Start_OneShot
+    data_type: BOOL
+    description: >
+      One-shot storage bit for the start request. It is what makes this
+      three-wire control rather than two-wire: without it a held start command
+      re-seals the drive the instant a stop, an interlock or a fault goes away.
   - role: command
     suffix: _Cmd_Stop
     data_type: BOOL
@@ -129,9 +139,19 @@ generated_objects:
         a fault at the drive rather than a start. Drive ready is deliberately not
         in the common leg — a drive that drops ready while running has already
         stopped itself.
+
+        The one-shot is what makes this three-wire. Without it the start branch
+        is a standing request, and a sequence or HMI bit left true restarts the
+        drive by itself as soon as the stop, the interlock or the fault that
+        dropped it goes away. It sits ahead of the permissive and the ready bit
+        so that a start issued while either is false is spent and refused rather
+        than held pending until they return.
       elements:
         - branch:
             - - {instruction: XIC, operand: "{device_tag}_Cmd_Start", kind: condition}
+              - instruction: ONS
+                operand: "{device_tag}_Start_OneShot"
+                kind: condition
               - {instruction: XIC, operand: "{device_tag}_Permissive", kind: condition}
               - {instruction: XIC, operand: "{device_tag}_Sts_Drive_Ready", kind: condition}
             - - {instruction: XIC, operand: "{device_tag}_Cmd_Run", kind: condition}
@@ -165,18 +185,17 @@ generated_objects:
     - routine: R_Devices
       title: "{device_tag} speed reference clamped high"
       comment: >
-        A request above the maximum is clamped rather than rejected, and the
-        clamp is flagged. Passing an out-of-range reference to the drive and
-        letting it decide means two devices each holding half the limit.
+        A request above the maximum is clamped rather than rejected. Passing an
+        out-of-range reference to the drive and letting it decide means two
+        devices each holding half the limit. The clamp is flagged two rungs
+        below, from one place, for both directions.
       elements:
         - instruction: GRT
           operands: ["{device_tag}_SP_Speed_Hz", "{speed_max_hz}"]
           kind: condition
-        - branch:
-            - - instruction: MOV
-                operands: ["{speed_max_hz}", "{device_tag}_Out_Speed_Ref_Hz"]
-                kind: output
-            - - {instruction: OTE, operand: "{device_tag}_Sts_SP_Clamped", kind: output}
+        - instruction: MOV
+          operands: ["{speed_max_hz}", "{device_tag}_Out_Speed_Ref_Hz"]
+          kind: output
 
     - routine: R_Devices
       title: "{device_tag} speed reference clamped low"
@@ -188,11 +207,31 @@ generated_objects:
         - instruction: LES
           operands: ["{device_tag}_SP_Speed_Hz", "{speed_min_hz}"]
           kind: condition
+        - instruction: MOV
+          operands: ["{speed_min_hz}", "{device_tag}_Out_Speed_Ref_Hz"]
+          kind: output
+
+    - routine: R_Devices
+      title: "{device_tag} speed request was clamped"
+      comment: >
+        One rung, one destination, both directions. The clamp indication used to
+        be an OTE on each of the two clamp rungs, which is the duplicate
+        destination defect: an OTE writes its operand every scan in both
+        directions, so the later rung always won and a request clamped HIGH was
+        flagged for no scans at all. The operator saw a 75 Hz setpoint, the drive
+        ran at 60, and the bit that exists to tell them so stayed off.
+
+        Written as a two-leg branch feeding a single OTE, the bit follows the
+        request every scan and cannot be stuck by a misconfigured range.
+      elements:
         - branch:
-            - - instruction: MOV
-                operands: ["{speed_min_hz}", "{device_tag}_Out_Speed_Ref_Hz"]
-                kind: output
-            - - {instruction: OTE, operand: "{device_tag}_Sts_SP_Clamped", kind: output}
+            - - instruction: GRT
+                operands: ["{device_tag}_SP_Speed_Hz", "{speed_max_hz}"]
+                kind: condition
+            - - instruction: LES
+                operands: ["{device_tag}_SP_Speed_Hz", "{speed_min_hz}"]
+                kind: condition
+        - {instruction: OTE, operand: "{device_tag}_Sts_SP_Clamped", kind: output}
 
     - routine: R_Devices
       title: "{device_tag} zero the reference when stopped"
@@ -208,12 +247,16 @@ generated_objects:
 
     - routine: R_Devices
       title: "{device_tag} drive fault"
-      comment: The drive's own fault is latched here so it behaves like every other fault.
+      comment: >
+        The drive's own fault is latched here so it behaves like every other
+        fault. The alarm is latched with it: a drive that trips and then clears
+        its own fault at the keypad would otherwise leave _Sts_Faulted set with
+        nothing on the HMI saying what caused it.
       elements:
         - {instruction: XIC, operand: "{device_tag}_Sts_Drive_Faulted", kind: condition}
         - branch:
             - - {instruction: OTL, operand: "{device_tag}_Sts_Faulted", kind: output}
-            - - {instruction: OTE, operand: "{device_tag}_Alm_Drive_Fault", kind: output}
+            - - {instruction: OTL, operand: "{device_tag}_Alm_Drive_Fault", kind: output}
 
     - routine: R_Devices
       title: "{device_tag} fail to start timer"
@@ -229,19 +272,49 @@ generated_objects:
 
     - routine: R_Devices
       title: "{device_tag} fail to start"
-      comment: Latches the fault, which drops the run command on the first rung.
+      comment: >
+        Latches the fault, which drops the run command on the first rung. The
+        alarm is latched with it, because dropping _Cmd_Run makes the timer rung
+        above false and resets the timer: an energised alarm would clear on the
+        next scan and leave a stopped drive with no stated cause.
       elements:
         - {instruction: XIC, operand: "{device_tag}_Tmr_FailToStart.DN", kind: condition}
         - branch:
             - - {instruction: OTL, operand: "{device_tag}_Sts_Faulted", kind: output}
-            - - {instruction: OTE, operand: "{device_tag}_Alm_FailToStart", kind: output}
+            - - {instruction: OTL, operand: "{device_tag}_Alm_FailToStart", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} clear the drive alarms with the fault"
+      comment: >
+        Both alarm bits live exactly as long as the fault they belong to.
+        Clearing them here rather than in the reset pattern keeps the alarm and
+        the latch from ever disagreeing: esco.fault.reset unlatches
+        _Sts_Faulted, and this rung follows on the next scan. Scanned after both
+        detection rungs, so an alarm raised this scan is not cleared by it.
+      elements:
+        - {instruction: XIO, operand: "{device_tag}_Sts_Faulted", kind: condition}
+        - branch:
+            - - {instruction: OTU, operand: "{device_tag}_Alm_Drive_Fault", kind: output}
+            - - {instruction: OTU, operand: "{device_tag}_Alm_FailToStart", kind: output}
 
 engineering_notes: >
+  Version 2.0.0 fixed three things. The clamp indication was an OTE on each of
+  the two clamp rungs — a duplicate destination, so the clamp-low rung wrote the
+  bit false every scan a request was clamped HIGH and the indication never
+  appeared; it is now one OTE fed by a two-leg branch. The start branch had no
+  one-shot, so a held start request restarted the drive by itself whenever a
+  stop, an interlock or a fault went away. And both alarm bits were energised
+  rather than latched, so they cleared as soon as the condition that raised them
+  was removed by the fault they had just latched. Anything expanded from 1.0.0
+  must be re-expanded; all three defects are in generated rungs.
+
   The reference rungs are ordered and the order is load-bearing: in-range, then
-  clamped high, then clamped low, then zeroed when stopped. Each later rung can
-  override an earlier one, and the last word belongs to "the drive is stopped,
-  so the reference is zero". Reordering them produces a drive that starts at
-  whatever speed was last requested.
+  clamped high, then clamped low, then the clamp flag, then zeroed when stopped.
+  Each later rung can override an earlier one, and the last word belongs to "the
+  drive is stopped, so the reference is zero". Reordering them produces a drive
+  that starts at whatever speed was last requested. The clamp flag reads the
+  REQUEST rather than the reference, so zeroing the reference on a stopped drive
+  does not make the request look as though it was in range.
 
   The minimum speed is an equipment limit, not a preference. It is why a request
   of zero clamps up instead of down, and it is why stopping has to be the run
@@ -259,6 +332,17 @@ restrictions:
     by removing its run command is not in a safe state, and this pattern must
     never be used where a risk assessment calls for STO or a safe stop.
   - Single direction only. Reversing needs a direction command, a zero-speed check and a reversal dead time.
+  - >
+    A start is taken on the RISING EDGE of _Cmd_Start and nowhere else. A
+    sequence step or an HMI bit that holds the request true gets one start, not
+    a standing request: once the drive has been stopped by a stop command, an
+    interlock or a fault, the held request will not restart it and whatever
+    issued it has to drop and re-assert it.
+  - >
+    Does not check that speed_min_hz is below speed_max_hz. With the two the
+    wrong way round both clamp rungs can be true on the same scan, the later one
+    wins the reference, and _Sts_SP_Clamped reads true for every request. The
+    range comes from the driven equipment and nothing here validates it.
   - >
     Does not configure the drive. Acceleration and deceleration ramps, current
     limits, the carrier frequency, the stop mode and the drive's own parameter
@@ -285,6 +369,22 @@ tests:
     given: speed_min_hz is 15.0
     when: _SP_Speed_Hz is set to 5.0 with the drive running
     then: _Out_Speed_Ref_Hz is 15.0 and _Sts_SP_Clamped is true.
+  - name: A high request is still flagged after the low clamp has been scanned
+    given: speed_min_hz 0.0, speed_max_hz 60.0 and _SP_Speed_Hz set to 75.0
+    when: Every reference rung has been scanned
+    then: >
+      _Sts_SP_Clamped is true. The clamp-low rung, which is scanned after the
+      clamp-high rung, must not write it false.
+  - name: An in-range request clears the clamp flag
+    given: A request that was clamped high on the previous scan
+    when: _SP_Speed_Hz is returned to a value inside the band
+    then: _Sts_SP_Clamped goes false without any reset.
+  - name: A held start does not restart the drive after a fault reset
+    given: _Cmd_Start is held true and the drive is faulted and stopped
+    when: The fault condition clears and the reset is accepted
+    then: >
+      _Cmd_Run stays false. The drive restarts only after _Cmd_Start goes false
+      and true again.
   - name: A stopped drive carries a zero reference
     given: The drive is stopped and _SP_Speed_Hz is 45.0
     when: The reference rungs are scanned
@@ -292,7 +392,9 @@ tests:
   - name: A drive fault latches
     given: The drive is running
     when: _Sts_Drive_Faulted goes true and then clears at the drive
-    then: _Sts_Faulted stays true and _Cmd_Run stays false until a reset is accepted.
+    then: >
+      _Sts_Faulted stays true, _Alm_Drive_Fault stays true, and _Cmd_Run stays
+      false until a reset is accepted.
   - name: Fail to start is detected
     given: The drive is commanded to run
     when: _Sts_Drive_Running stays false for longer than fail_to_start_ms

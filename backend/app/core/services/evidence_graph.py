@@ -27,6 +27,7 @@ import difflib
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -1023,6 +1024,31 @@ def _as_int(value: Any) -> int:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+def _file_order(record: UploadedFile) -> tuple[int, datetime, str, uuid.UUID]:
+    """A total order over a project's files, with no way for two rows to tie.
+
+    L5X first: the tag declarations it provides are what everything else is
+    matched against.
+
+    Then ``created_at`` — and then a tiebreaker, which is the load-bearing part.
+    ``created_at`` is a client-side ``utcnow()`` and every member of an uploaded
+    ZIP is written in one tight loop, so a whole project's files routinely share
+    a timestamp to the microsecond. A tie used to fall through to whatever row
+    order the database happened to return, which no engine guarantees, and this
+    builder is order-sensitive: :meth:`_Builder._tag` keeps the *first* spelling
+    of a name and :meth:`_Builder.add_l5x` keeps the first non-empty data type,
+    scope and description. Two runs over the same upload could hand the review
+    agents a different data type and a different rung order, so a review was not
+    reproducible.
+    """
+    return (
+        0 if record.file_kind is FileKind.L5X else 1,
+        record.created_at,
+        record.original_filename,
+        record.id,
+    )
+
+
 def build_graph(db: Session, project_id: uuid.UUID) -> EvidenceGraph:
     """Join every parsed artifact in a project into one evidence graph."""
     files = list(
@@ -1032,24 +1058,29 @@ def build_graph(db: Session, project_id: uuid.UUID) -> EvidenceGraph:
                 UploadedFile.project_id == project_id,
                 UploadedFile.deleted_at.is_(None),
             )
-            .order_by(UploadedFile.created_at)
+            .order_by(
+                UploadedFile.created_at,
+                UploadedFile.original_filename,
+                UploadedFile.id,
+            )
         ).scalars()
     )
     artifacts_by_file: dict[uuid.UUID, ParsedArtifact] = {}
     for artifact in db.execute(
         select(ParsedArtifact)
         .where(ParsedArtifact.project_id == project_id)
-        .order_by(ParsedArtifact.created_at)
+        # Later artifacts overwrite earlier ones, so a re-parse wins. ``id``
+        # breaks a timestamp tie: without it, which parse of a file the graph is
+        # built from would be the database's choice rather than ours.
+        .order_by(ParsedArtifact.created_at, ParsedArtifact.id)
     ).scalars():
         artifacts_by_file[artifact.file_id] = artifact
 
     builder = _Builder(project_id)
 
-    # L5X first: the tag declarations it provides are what everything else is
-    # matched against.
     ordered = sorted(
         (record for record in files if record.id in artifacts_by_file),
-        key=lambda record: (0 if record.file_kind is FileKind.L5X else 1, record.created_at),
+        key=_file_order,
     )
 
     for record in ordered:

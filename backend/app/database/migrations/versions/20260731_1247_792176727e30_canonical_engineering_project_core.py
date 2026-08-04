@@ -1707,7 +1707,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["engineering_standard_set_id"],
             ["engineering_standard_sets.id"],
-            name=op.f("fk_project_profiles_engineering_standard_set_id_engineering_standard_sets"),
+            name="fk_project_profiles_engineering_standard_set_id",
             ondelete="SET NULL",
         ),
         sa.ForeignKeyConstraint(
@@ -2557,15 +2557,6 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_object_evidence_links")),
-        sa.UniqueConstraint(
-            "object_type",
-            "object_id",
-            "anchor_id",
-            "requirement_id",
-            "decision_id",
-            "template_id",
-            name="uq_object_evidence_links_object_id_anchor_id",
-        ),
     )
     with op.batch_alter_table("object_evidence_links", schema=None) as batch_op:
         batch_op.create_index(
@@ -2588,6 +2579,34 @@ def upgrade() -> None:
         )
         batch_op.create_index(
             batch_op.f("ix_object_evidence_links_requirement_id"), ["requirement_id"], unique=False
+        )
+        batch_op.create_index(
+            "uq_object_evidence_links_anchor",
+            ["object_type", "object_id", "anchor_id"],
+            unique=True,
+            sqlite_where=sa.text("anchor_id IS NOT NULL"),
+            postgresql_where=sa.text("anchor_id IS NOT NULL"),
+        )
+        batch_op.create_index(
+            "uq_object_evidence_links_decision",
+            ["object_type", "object_id", "decision_id"],
+            unique=True,
+            sqlite_where=sa.text("decision_id IS NOT NULL"),
+            postgresql_where=sa.text("decision_id IS NOT NULL"),
+        )
+        batch_op.create_index(
+            "uq_object_evidence_links_requirement",
+            ["object_type", "object_id", "requirement_id"],
+            unique=True,
+            sqlite_where=sa.text("requirement_id IS NOT NULL"),
+            postgresql_where=sa.text("requirement_id IS NOT NULL"),
+        )
+        batch_op.create_index(
+            "uq_object_evidence_links_template",
+            ["object_type", "object_id", "template_id"],
+            unique=True,
+            sqlite_where=sa.text("template_id != ''"),
+            postgresql_where=sa.text("template_id != ''"),
         )
 
     op.create_table(
@@ -2753,7 +2772,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["superseded_by_candidate_id"],
             ["release_candidates.id"],
-            name=op.f("fk_release_candidates_superseded_by_candidate_id_release_candidates"),
+            name="fk_release_candidates_superseded_by_candidate_id",
             ondelete="SET NULL",
         ),
         sa.ForeignKeyConstraint(
@@ -3314,7 +3333,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["release_candidate_id"],
             ["release_candidates.id"],
-            name=op.f("fk_release_manifests_release_candidate_id_release_candidates"),
+            name="fk_release_manifests_release_candidate_id",
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_release_manifests")),
@@ -3460,7 +3479,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["release_candidate_id"],
             ["release_candidates.id"],
-            name=op.f("fk_workstation_verification_jobs_release_candidate_id_release_candidates"),
+            name="fk_workstation_verification_jobs_release_candidate_id",
             ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
@@ -3595,7 +3614,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["depends_on_artifact_id"],
             ["export_artifacts.id"],
-            name=op.f("fk_import_dependencies_depends_on_artifact_id_export_artifacts"),
+            name="fk_import_dependencies_depends_on_artifact_id",
             ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
@@ -3607,16 +3626,10 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["release_candidate_id"],
             ["release_candidates.id"],
-            name=op.f("fk_import_dependencies_release_candidate_id_release_candidates"),
+            name="fk_import_dependencies_release_candidate_id",
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_import_dependencies")),
-        sa.UniqueConstraint(
-            "artifact_id",
-            "depends_on_artifact_id",
-            "kind",
-            name="uq_import_dependencies_artifact_id_depends_on_artifact_id_kind",
-        ),
     )
     with op.batch_alter_table("import_dependencies", schema=None) as batch_op:
         batch_op.create_index(
@@ -3637,6 +3650,20 @@ def upgrade() -> None:
             batch_op.f("ix_import_dependencies_release_candidate_id"),
             ["release_candidate_id"],
             unique=False,
+        )
+        batch_op.create_index(
+            "uq_import_dependencies_external_edge",
+            ["artifact_id", "depends_on_label", "kind"],
+            unique=True,
+            sqlite_where=sa.text("depends_on_artifact_id IS NULL"),
+            postgresql_where=sa.text("depends_on_artifact_id IS NULL"),
+        )
+        batch_op.create_index(
+            "uq_import_dependencies_internal_edge",
+            ["artifact_id", "depends_on_artifact_id", "kind"],
+            unique=True,
+            sqlite_where=sa.text("depends_on_artifact_id IS NOT NULL"),
+            postgresql_where=sa.text("depends_on_artifact_id IS NOT NULL"),
         )
 
     op.create_table(
@@ -5867,6 +5894,32 @@ def upgrade() -> None:
             batch_op.f("ix_test_steps_test_case_id"), ["test_case_id"], unique=False
         )
 
+    # ``finding_evidence`` predates this revision too, and its unique
+    # constraint is inert now that ``anchor_id`` is nullable. Partial rather
+    # than full: several citations of one finding legitimately hold NULL once
+    # their anchors have been re-parsed away.
+    with op.batch_alter_table("finding_evidence", schema=None) as batch_op:
+        batch_op.create_index(
+            "uq_finding_evidence_anchored_link",
+            ["finding_id", "anchor_id", "role"],
+            unique=True,
+            sqlite_where=sa.text("anchor_id IS NOT NULL"),
+            postgresql_where=sa.text("anchor_id IS NOT NULL"),
+        )
+
+    # ``model_configurations`` predates this revision. The unique constraint it
+    # was created with is inert for the global defaults, because those are
+    # exactly the rows with a NULL ``project_id``; this index is the half the
+    # constraint cannot express.
+    with op.batch_alter_table("model_configurations", schema=None) as batch_op:
+        batch_op.create_index(
+            "uq_model_configurations_global_scope",
+            ["agent_kind"],
+            unique=True,
+            sqlite_where=sa.text("project_id IS NULL"),
+            postgresql_where=sa.text("project_id IS NULL"),
+        )
+
     with op.batch_alter_table("approvals", schema=None) as batch_op:
         batch_op.add_column(sa.Column("change_set_id", app.database.types.GUID(), nullable=True))
         batch_op.add_column(
@@ -5915,6 +5968,20 @@ def downgrade() -> None:
     with op.batch_alter_table("projects", schema=None) as batch_op:
         batch_op.drop_column("release_candidate_seq")
         batch_op.drop_column("current_revision_number")
+
+    with op.batch_alter_table("finding_evidence", schema=None) as batch_op:
+        batch_op.drop_index(
+            "uq_finding_evidence_anchored_link",
+            sqlite_where=sa.text("anchor_id IS NOT NULL"),
+            postgresql_where=sa.text("anchor_id IS NOT NULL"),
+        )
+
+    with op.batch_alter_table("model_configurations", schema=None) as batch_op:
+        batch_op.drop_index(
+            "uq_model_configurations_global_scope",
+            sqlite_where=sa.text("project_id IS NULL"),
+            postgresql_where=sa.text("project_id IS NULL"),
+        )
 
     with op.batch_alter_table("approvals", schema=None) as batch_op:
         batch_op.drop_index(batch_op.f("ix_approvals_release_candidate_id"))
@@ -6218,6 +6285,16 @@ def downgrade() -> None:
 
     op.drop_table("logic_branches")
     with op.batch_alter_table("import_dependencies", schema=None) as batch_op:
+        batch_op.drop_index(
+            "uq_import_dependencies_internal_edge",
+            sqlite_where=sa.text("depends_on_artifact_id IS NOT NULL"),
+            postgresql_where=sa.text("depends_on_artifact_id IS NOT NULL"),
+        )
+        batch_op.drop_index(
+            "uq_import_dependencies_external_edge",
+            sqlite_where=sa.text("depends_on_artifact_id IS NULL"),
+            postgresql_where=sa.text("depends_on_artifact_id IS NULL"),
+        )
         batch_op.drop_index(batch_op.f("ix_import_dependencies_release_candidate_id"))
         batch_op.drop_index(batch_op.f("ix_import_dependencies_project_id"))
         batch_op.drop_index(batch_op.f("ix_import_dependencies_depends_on_artifact_id"))
@@ -6342,6 +6419,26 @@ def downgrade() -> None:
 
     op.drop_table("project_decisions")
     with op.batch_alter_table("object_evidence_links", schema=None) as batch_op:
+        batch_op.drop_index(
+            "uq_object_evidence_links_template",
+            sqlite_where=sa.text("template_id != ''"),
+            postgresql_where=sa.text("template_id != ''"),
+        )
+        batch_op.drop_index(
+            "uq_object_evidence_links_requirement",
+            sqlite_where=sa.text("requirement_id IS NOT NULL"),
+            postgresql_where=sa.text("requirement_id IS NOT NULL"),
+        )
+        batch_op.drop_index(
+            "uq_object_evidence_links_decision",
+            sqlite_where=sa.text("decision_id IS NOT NULL"),
+            postgresql_where=sa.text("decision_id IS NOT NULL"),
+        )
+        batch_op.drop_index(
+            "uq_object_evidence_links_anchor",
+            sqlite_where=sa.text("anchor_id IS NOT NULL"),
+            postgresql_where=sa.text("anchor_id IS NOT NULL"),
+        )
         batch_op.drop_index(batch_op.f("ix_object_evidence_links_requirement_id"))
         batch_op.drop_index(batch_op.f("ix_object_evidence_links_project_id"))
         batch_op.drop_index("ix_object_evidence_links_object")

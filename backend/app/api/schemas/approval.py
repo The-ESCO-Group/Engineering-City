@@ -35,6 +35,8 @@ class ApprovalRead(ApiModel):
     decided_by_display_name: str = ""
     decided_at: datetime | None = None
     decision_notes: str = ""
+    decision_allowed: bool = True
+    decision_disabled_reason: str = ""
     created_at: datetime
 
 

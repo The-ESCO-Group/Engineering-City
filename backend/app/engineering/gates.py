@@ -73,6 +73,7 @@ from app.core.enums import (
     ObjectType,
     RecommendationStatus,
     ReleaseMode,
+    RequirementStatus,
     RoleName,
     RoutineLanguage,
     SemanticLocation,
@@ -613,6 +614,38 @@ def _generation_scope_settled(context: GateContext) -> str:
     )
 
 
+def _requirements_human_decided(context: GateContext) -> str:
+    proposed = [
+        requirement
+        for requirement in context.model.requirements
+        if requirement.status is RequirementStatus.PROPOSED
+    ]
+    if not proposed:
+        return ""
+    return (
+        f"{len(proposed)} extracted requirement(s) still await a human decision: "
+        f"{_naming([requirement.reference for requirement in proposed])}. "
+        "Accept or reject each one before approving the project profile."
+    )
+
+
+def _accepted_requirement_for_generation(context: GateContext) -> str:
+    profile = context.model.profile
+    if profile is None or profile.release_mode is ReleaseMode.REVIEW_ONLY:
+        return ""
+    accepted_states = {
+        RequirementStatus.ACCEPTED,
+        RequirementStatus.IMPLEMENTED,
+        RequirementStatus.VERIFIED,
+    }
+    if any(requirement.status in accepted_states for requirement in context.model.requirements):
+        return ""
+    return (
+        "Generation requires at least one requirement accepted by a human. None of the "
+        "recorded requirements is accepted, implemented, or verified."
+    )
+
+
 def _blocking_questions_answered(context: GateContext) -> str:
     outstanding = [question for question in context.model.questions if question.is_blocking]
     if not outstanding:
@@ -721,13 +754,17 @@ def _ladder_routines_hold_logic(context: GateContext) -> str:
 
 def _hmi_screens_recorded(context: GateContext) -> str:
     platform = context.model.target_platform
-    if platform is not None and platform.hmi_product is HmiProduct.NONE:
+    if platform is None:
+        # Normally unreachable — gate 1 requires a platform — but reachable if
+        # gate 1 was disabled, and "no screens" would be the wrong complaint.
+        return "No target platform is recorded, so whether an HMI is in scope is unstated."
+    if platform.hmi_product is HmiProduct.NONE:
         # No HMI in scope; there is nothing to design and nothing to approve.
         return ""
     if not context.model.hmi_screens:
         return (
-            "The target platform names an HMI product but no screens are recorded, so there "
-            "is no display design to approve."
+            f"The target platform names {platform.hmi_product.value} but no screens are "
+            "recorded, so there is no display design to approve."
         )
     return ""
 
@@ -783,6 +820,20 @@ def _full_validation_current(context: GateContext) -> str:
 
 def _no_unwaived_errors(context: GateContext) -> str:
     return _error_summary(context, ALL_DISCIPLINES)
+
+
+def _serious_findings_senior_reviewed(context: GateContext) -> str:
+    outstanding = [
+        finding for finding in context.serious_findings if not finding.is_reviewed
+    ]
+    if not outstanding:
+        return ""
+    outstanding.sort(key=lambda finding: -SEVERITY_ORDER[finding.severity])
+    return (
+        f"{len(outstanding)} critical or high finding(s) have not completed independent "
+        f"senior review: "
+        f"{_naming([f'{finding.title} ({finding.severity.value})' for finding in outstanding])}."
+    )
 
 
 def _serious_findings_decided(context: GateContext) -> str:
@@ -1195,6 +1246,16 @@ GATE_SPECS: tuple[GateSpec, ...] = (
                 _generation_scope_settled,
             ),
             Criterion(
+                "requirements_human_decided",
+                "Every extracted requirement has been accepted or rejected by a human.",
+                _requirements_human_decided,
+            ),
+            Criterion(
+                "accepted_requirement_for_generation",
+                "A generation project has at least one human-accepted requirement.",
+                _accepted_requirement_for_generation,
+            ),
+            Criterion(
                 "blocking_questions_answered",
                 "Every mandatory project question has been answered.",
                 _blocking_questions_answered,
@@ -1313,6 +1374,11 @@ GATE_SPECS: tuple[GateSpec, ...] = (
                 "no_unwaived_errors",
                 "No unwaived error-severity result is outstanding.",
                 _no_unwaived_errors,
+            ),
+            Criterion(
+                "serious_findings_senior_reviewed",
+                "Every critical and high finding has completed independent senior review.",
+                _serious_findings_senior_reviewed,
             ),
             Criterion(
                 "serious_findings_decided",

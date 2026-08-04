@@ -9,14 +9,21 @@ code that expands them.
 Three rules make the registry worth trusting:
 
 1. **The checksum is computed here, never read from the file.** It is a SHA-256
-   over the canonically-serialised template body, so an expansion can record
-   ``esco.motor.standard@1.0.0`` *and* the checksum of the bytes that produced
+   over the canonically-serialised *loaded template*, so an expansion can record
+   ``esco.motor.standard@1.0.0`` *and* the digest of the pattern that produced
    it. A checksum a human can edit in the YAML proves nothing; one derived from
-   the content proves the file has not drifted since the expansion was made.
+   the content proves the template has not drifted since the expansion was made.
+   It answers "does this template still expand to the same thing", which is the
+   question a re-review exists to settle — so a reflowed file, a trailing space
+   inside a quoted scalar or an added documentary key, none of which reach the
+   loaded template, do not manufacture drift against approved logic.
 
-2. **Loading is deterministic.** Files are visited in sorted order and the body
-   is canonicalised (sorted keys, fixed separators) before hashing, so two loads
-   of the same tree give byte-identical checksums.
+2. **Loading is deterministic.** Files are discovered by suffix rather than by a
+   platform-dependent glob, visited in one sorted order on every operating
+   system, and hashed from the *loaded template* — not from the raw YAML body —
+   through a canonicaliser that refuses any value it cannot serialise without
+   guessing. Two loads of the same tree, in two processes started with different
+   ``PYTHONHASHSEED`` values, give byte-identical checksums.
 
 3. **A bad file is recorded, not raised.** One malformed template must not stop
    the platform from starting — it degrades to a clearly-reported missing
@@ -31,9 +38,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -70,11 +78,14 @@ __all__ = [
     "TemplateParameter",
     "TemplateRegistry",
     "TemplateTest",
+    "canonical_parameter_value",
     "compute_checksum",
     "default_template_root",
     "get_registry",
     "load_templates",
     "reload_templates",
+    "render_parameter_value",
+    "template_checksum",
     "template_for",
 ]
 
@@ -90,6 +101,10 @@ _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
 #: A template identifier: dotted, lower-case, e.g. ``esco.motor.standard``.
 _ID_RE = re.compile(r"^[a-z][a-z0-9]*(\.[a-z0-9_]+)+$")
+
+#: File extensions the loader reads, compared case-folded so the same tree loads
+#: identically on Windows and on Linux.
+_TEMPLATE_SUFFIXES: frozenset[str] = frozenset({".yaml", ".yml"})
 
 #: An instruction mnemonic as it appears in ladder: ``XIC``, ``TON``, ``MOV``,
 #: or the name of an Add-On Instruction. Validated structurally here; whether
@@ -109,6 +124,59 @@ _TAG_REFERENCE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*([.\[\]][A-Za-z0-9_.\[\]
 PARAMETER_TYPES: frozenset[str] = frozenset(
     {"string", "identifier", "tag_reference", "boolean", "integer", "number", "enum"}
 )
+
+
+def _is_real_number(value: Any) -> bool:
+    """``True`` for an int or float, and never for a bool.
+
+    ``bool`` is an ``int`` in Python, and a ``True`` that rendered as ``1`` in a
+    CPT expression would be a silent type change nobody wrote down.
+    """
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def canonical_parameter_value(parameter_type: str, value: Any) -> Any:
+    """The one stored form of a supplied parameter value.
+
+    Only ``number`` is affected, and it is the whole reason this exists.
+    ``TemplateParameter.check`` accepts both ``100`` and ``100.0`` for a
+    ``type: number`` parameter, so without this the same engineering value
+    arrives in two spellings — and a browser cannot even express the second,
+    because ``JSON.stringify(100.0)`` is ``"100"``. Storing and rendering the
+    float form means an expansion re-submitted from the UI regenerates the same
+    bytes and the release manifest checksum does not move for a change nobody
+    made.
+
+    Values of the wrong type are returned untouched: reporting them is
+    :meth:`TemplateParameter.check`'s job, and coercing here would hide it.
+    """
+    if parameter_type == "number" and _is_real_number(value):
+        return float(value)
+    return value
+
+
+def render_parameter_value(parameter_type: str, value: Any) -> str:
+    """The operand text a parameter value substitutes into a rung.
+
+    One rule, shared by the reviewer's preview and anything that later expands
+    the same template, so the two cannot disagree about what was generated.
+
+    A ``number`` keeps its decimal point — ``100.0``, not ``100`` — even when it
+    is whole. That is deliberate and is *not* the rule
+    :func:`app.generators.rockwell.l5x._number` uses for a task scan rate: these
+    values land inside CPT expressions, where Logix evaluates an expression whose
+    operands are all integers with integer arithmetic. Rendering a calibrated
+    engineering range of ``100.0`` as ``100`` would turn
+    ``(Raw * (100 - 0) / 32767)`` into a truncating integer divide — a scaling
+    defect introduced while fixing a formatting one.
+    """
+    if parameter_type == "number" and _is_real_number(value):
+        # repr() of a float is the shortest string that round-trips, and has been
+        # platform-independent in CPython since 3.1.
+        return repr(float(value))
+    if parameter_type == "integer" and _is_real_number(value) and not isinstance(value, float):
+        return str(int(value))
+    return str(value)
 
 
 class TemplateFormatError(ValueError):
@@ -237,9 +305,20 @@ class TemplateParameter:
             type=param_type,
             required=required,
             description=_optional_str(data, "description", where),
-            default=default,
+            # Canonicalised at load: a template that writes ``default: 100`` and
+            # one that writes ``default: 100.0`` for the same ``type: number``
+            # parameter expand identically, so they must not hash differently.
+            default=canonical_parameter_value(param_type, default),
             choices=choices,
         )
+
+    def canonical(self, value: Any) -> Any:
+        """``value`` in the single form this parameter is stored in."""
+        return canonical_parameter_value(self.type, value)
+
+    def render(self, value: Any) -> str:
+        """``value`` as the text it substitutes into a rung operand."""
+        return render_parameter_value(self.type, value)
 
     def check(self, value: Any) -> str | None:
         """Return a problem with ``value``, or ``None`` if it is acceptable."""
@@ -661,6 +740,31 @@ class Template:
                 return parameter
         return None
 
+    def canonical_parameters(self, values: Mapping[str, Any]) -> dict[str, Any]:
+        """``values`` with every declared parameter in its one stored form.
+
+        Call this at the boundary — before the values are persisted against an
+        expansion and before anything renders them — so that a value which
+        arrived as ``100`` and a value which arrived as ``100.0`` cannot go on to
+        produce two different rungs, two different L5X byte streams and two
+        different package checksums for the same engineering intent.
+
+        An undeclared name is passed through untouched.
+        :meth:`validate_parameters` is what reports it; silently dropping it here
+        would expand the template on the old default while the caller believed
+        otherwise.
+        """
+        declared = {parameter.name: parameter for parameter in self.parameters}
+        return {
+            name: declared[name].canonical(value) if name in declared else value
+            for name, value in values.items()
+        }
+
+    def render_parameter(self, name: str, value: Any) -> str:
+        """``value`` as the operand text it substitutes into a rung."""
+        parameter = self.parameter(name)
+        return parameter.render(value) if parameter is not None else str(value)
+
     def validate_parameters(self, values: Mapping[str, Any]) -> list[str]:
         """Check supplied values against the declared parameters.
 
@@ -762,7 +866,9 @@ class Template:
         template = cls(
             id=template_id,
             version=version,
-            checksum=compute_checksum(data),
+            # Filled in below, once there is a template to hash. The digest is
+            # over what this file loaded to, not over the bytes it was written in.
+            checksum="",
             category=_enum_member(TemplateCategory, data.get("category"), "category", source),
             display_name=_require_str(data, "display_name", source),
             description=_require_str(data, "description", source),
@@ -789,7 +895,7 @@ class Template:
             source=source,
         )
         _check_internal_references(template, source)
-        return template
+        return replace(template, checksum=template_checksum(template, source))
 
 
 def _check_internal_references(template: Template, source: str) -> None:
@@ -845,24 +951,102 @@ def _check_internal_references(template: Template, source: str) -> None:
                 )
 
 
-def compute_checksum(body: Mapping[str, Any]) -> str:
-    """SHA-256 over the canonically-serialised template body.
+def _canonical_value(value: Any, where: str) -> Any:
+    """``value`` as a JSON-native structure, or a load error saying why not.
 
-    Canonical means sorted keys and a fixed separator, so formatting, key order
-    and trailing whitespace in the YAML cannot change the digest while the
-    content is unchanged — and no content change can leave it unchanged.
+    Refusing is the whole point. The obvious spelling of this function is
+    ``json.dumps(..., default=str)``, which accepts anything by stringifying it,
+    and that breaks the digest in both directions at once:
 
-    Deliberately computed from the parsed body rather than stored in the file:
-    a checksum a human can edit records nothing but their intent.
+    * ``str()`` of a ``set`` renders in iteration order, which CPython
+      randomises per process. ``yaml.safe_load`` produces a ``set`` for the
+      standard ``!!set`` tag, so one worker would approve an expansion against a
+      digest the next worker recomputes differently and reports as drift, for a
+      file nobody touched;
+    * a ``datetime.date`` and the quoted string that spells it stringify to the
+      same text, so two genuinely different values hash alike — the opposite
+      failure, and the one a checksum is least allowed to have.
+
+    So anything that is not JSON-native is a :class:`TemplateFormatError` naming
+    the path and the type, which the loader records against the file. Quoting the
+    value in the YAML is the fix, and it makes the author state which of the two
+    things they meant.
+    """
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        # StrEnum members are strings; take the value, not the member.
+        return str(value)
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise TemplateFormatError(
+                f"{where}: {value!r} is not a finite number, so it has no canonical "
+                "JSON form and cannot be checksummed"
+            )
+        return float(value)
+    if isinstance(value, Mapping):
+        canonical: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TemplateFormatError(
+                    f"{where}: key {key!r} is a {type(key).__name__}, not a string. "
+                    "Quote it — JSON has only string keys, so 1 and '1' would "
+                    "otherwise hash alike."
+                )
+            name = str(key)
+            canonical[name] = _canonical_value(item, f"{where}.{name}")
+        return canonical
+    if isinstance(value, list | tuple):
+        return [_canonical_value(item, f"{where}[{index}]") for index, item in enumerate(value)]
+    raise TemplateFormatError(
+        f"{where}: a {type(value).__name__} has no canonical JSON form, so no honest "
+        "checksum can be taken over it. Quote the value in the YAML: a date and the "
+        "string that spells it, or a !!set and its own text, must not hash alike."
+    )
+
+
+def compute_checksum(body: Mapping[str, Any], *, where: str = "template") -> str:
+    """SHA-256 over a canonically-serialised mapping.
+
+    Canonical means sorted keys, a fixed separator, and — through
+    :func:`_canonical_value` — no value that had to be guessed at. Key order and
+    layout cannot change the digest while the content is unchanged, and no
+    content change can leave it unchanged.
+
+    ``where`` labels the structure in any error, so a refusal reads as a place in
+    a template rather than as an anonymous type name.
     """
     canonical = json.dumps(
-        body,
+        _canonical_value(body, where),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
-        default=str,
+        allow_nan=False,
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def template_checksum(template: Template, where: str = "template") -> str:
+    """SHA-256 over the loaded template, excluding its own checksum and source.
+
+    Taken over the *constructed* :class:`Template` rather than over the raw YAML
+    body, because the loader normalises: every string is stripped and every key
+    the schema does not name is discarded. Two files that build an identical
+    template expand to identical logic, so they must carry an identical digest —
+    otherwise a trailing space inside a quoted ``display_name``, or a documentary
+    ``reviewed_by:`` key, reports every approved expansion pinned to that
+    template as drifted and forces a re-review of control logic that did not
+    change.
+
+    ``source`` is excluded for the same reason: the same pattern read from a
+    customer template root is the same pattern.
+    """
+    body = asdict(template)
+    del body["checksum"]
+    del body["source"]
+    return compute_checksum(body, where=where)
 
 
 # ---------------------------------------------------------------------------
@@ -982,8 +1166,9 @@ def load_templates(root: Path | None = None) -> TemplateRegistry:
     and the rest of the tree still loads — one bad template must not stop the
     platform from starting.
 
-    Files are visited in sorted order, so the registry, its errors and every
-    checksum are identical between runs.
+    Files are discovered by case-folded suffix and visited in one sorted order on
+    every platform, so the registry, its errors and every checksum are identical
+    between runs, between processes and between operating systems.
     """
     template_root = (root or default_template_root()).resolve()
     registry = TemplateRegistry(root=template_root)
@@ -998,7 +1183,20 @@ def load_templates(root: Path | None = None) -> TemplateRegistry:
         logger.warning("template root missing", extra={"template_root": str(template_root)})
         return registry
 
-    paths = sorted({path for suffix in ("*.yaml", "*.yml") for path in template_root.rglob(suffix)})
+    # Not ``rglob("*.yaml")``: pathlib inherits the platform's case rules, so on
+    # Windows that pattern matches ``Motor_Standard.YAML`` and on Linux it does
+    # not. A template that loads on a developer's machine and is *never visited*
+    # in the container is the one failure this loader's "record it, don't raise"
+    # design cannot report — there is no file to report. Sorting on ``as_posix()``
+    # for the same reason: comparing Path objects is case-folded on Windows only.
+    paths = sorted(
+        (
+            path
+            for path in template_root.rglob("*")
+            if path.suffix.lower() in _TEMPLATE_SUFFIXES and path.is_file()
+        ),
+        key=lambda path: path.as_posix(),
+    )
     for path in paths:
         relative = path.relative_to(template_root).as_posix()
         try:

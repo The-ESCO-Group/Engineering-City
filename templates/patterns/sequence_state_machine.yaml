@@ -1,7 +1,7 @@
 # Stepped sequence with a per-step timeout.
 # See templates/README.md for the file format and the versioning rule.
 id: esco.sequence.state_machine
-version: 1.0.0
+version: 2.0.0
 category: sequence_state_machine
 display_name: Stepped sequence with per-step timeouts
 description: >
@@ -133,6 +133,13 @@ generated_objects:
         A start is accepted only from idle, in automatic, with no fault. Starting
         from anywhere else means resuming at a step that may not match where the
         equipment physically is.
+
+        The running flag is LATCHED, not energised. The rung is true for exactly
+        one scan — the one-shot is spent and _Sts_Seq_Idle goes false the moment
+        the step register leaves 0 — so an OTE here would write the flag back to
+        false on the next scan and the sequence would sit at step 1 with no
+        timer, no advance and no timeout. The latch is unlatched by the
+        "sequence complete" and "abort" rungs, and by nothing else.
       elements:
         - {instruction: XIC, operand: "{machine_tag}_Cmd_Seq_Start", kind: condition}
         - instruction: ONS
@@ -145,7 +152,7 @@ generated_objects:
             - - instruction: MOV
                 operands: ["1", "{machine_tag}_Seq_Step"]
                 kind: output
-            - - {instruction: OTE, operand: "{machine_tag}_Sts_Seq_Running", kind: output}
+            - - {instruction: OTL, operand: "{machine_tag}_Sts_Seq_Running", kind: output}
 
     - routine: "R_Sequence"
       title: "{machine_tag} reset the step timer on a step change"
@@ -195,6 +202,12 @@ generated_objects:
         records which step it was. The sequence is stopped rather than skipped:
         advancing past a step that did not finish is how a machine ends up
         acting on a condition nobody established.
+
+        The alarm is latched alongside the fault. Energising it would clear it
+        one or two scans later — the abort this fault triggers returns the step
+        register to 0, the step-change rung resets the timer, .DN drops and the
+        alarm with it — leaving a machine stopped on a latched fault with
+        nothing on the HMI saying why.
       elements:
         - {instruction: XIC, operand: "{machine_tag}_Tmr_Seq_Step.DN", kind: condition}
         - branch:
@@ -202,7 +215,19 @@ generated_objects:
                 operands: ["{machine_tag}_Seq_Step", "{machine_tag}_Seq_Timeout_Step"]
                 kind: output
             - - {instruction: OTL, operand: "{machine_tag}_Sts_Faulted", kind: output}
-            - - {instruction: OTE, operand: "{machine_tag}_Alm_Seq_Step_Timeout", kind: output}
+            - - {instruction: OTL, operand: "{machine_tag}_Alm_Seq_Step_Timeout", kind: output}
+
+    - routine: R_Sequence
+      title: "{machine_tag} clear the timeout alarm with the fault"
+      comment: >
+        The timeout alarm lives exactly as long as the fault it belongs to. It
+        is cleared here rather than by the reset pattern, so the alarm and the
+        latch can never disagree: esco.fault.reset unlatches _Sts_Faulted and
+        this rung follows on the next scan. _Seq_Timeout_Step is deliberately
+        NOT cleared — which step failed is still worth having after the reset.
+      elements:
+        - {instruction: XIO, operand: "{machine_tag}_Sts_Faulted", kind: condition}
+        - {instruction: OTU, operand: "{machine_tag}_Alm_Seq_Step_Timeout", kind: output}
 
     - routine: R_Sequence
       title: "{machine_tag} hold the sequence"
@@ -286,6 +311,18 @@ generated_objects:
         - {instruction: OTE, operand: "{machine_tag}_Sts_Seq_Idle", kind: output}
 
 engineering_notes: >
+  Version 2.0.0 fixes a defect that stopped this pattern working at all, and one
+  that hid the reason. In 1.0.0 the start rung ENERGISED _Sts_Seq_Running from a
+  rung condition that is true for exactly one scan, so the flag was written back
+  to false on the following scan: the step timer never ran, the advance rung was
+  blocked by its own leading XIC, no step ever timed out, and the machine sat on
+  step 1 until somebody aborted it. It is now latched, paired with the OTUs that
+  were already in the "sequence complete" and "abort" rungs. Also in 1.0.0 the
+  step-timeout alarm was energised from the timer's .DN bit, which the abort it
+  triggers clears within two scans; it is now latched with the fault and cleared
+  with it. Anything expanded from 1.0.0 must be re-expanded, not patched in the
+  project: both defects are in generated rungs.
+
   One integer holds the state. Every step's action logic is written as "if
   _Seq_Step equals N then ...", and there is exactly one place that changes it.
   The alternative — a latch per step — looks simpler until two of them are set
@@ -339,6 +376,12 @@ tests:
     given: The machine is in manual
     when: _Cmd_Seq_Start is pulsed
     then: _Seq_Step stays 0 and _Sts_Seq_Running stays false.
+  - name: The sequence keeps running after the scan it was started on
+    given: An idle machine in automatic with no fault
+    when: _Cmd_Seq_Start is pulsed and the block is scanned ten more times
+    then: >
+      _Sts_Seq_Running is still true on every one of those scans, the step timer
+      is accumulating, and _Seq_Step is still 1.
   - name: A normal cycle advances one step per completion
     given: A running sequence at step 3
     when: _Seq_Step_Complete goes true and stays true for ten scans
@@ -353,6 +396,12 @@ tests:
     then: >
       _Sts_Faulted latches, _Alm_Seq_Step_Timeout is set, _Seq_Timeout_Step
       holds 5, and the sequence does not advance to step 6.
+  - name: The timeout alarm stays up for as long as the fault does
+    given: A step timeout that latched _Sts_Faulted and aborted the sequence
+    when: The machine is left alone for a minute
+    then: >
+      _Alm_Seq_Step_Timeout is still true, and it clears only once the fault is
+      reset.
   - name: The timed-out step number survives the abort
     given: A step timeout that aborted the sequence
     when: _Seq_Step has returned to 0

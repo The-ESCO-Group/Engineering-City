@@ -1,15 +1,17 @@
 # Two-state valve open/close with position feedback and a travel timeout.
 # See templates/README.md for the file format and the versioning rule.
 id: esco.valve.standard
-version: 1.0.0
+version: 2.0.0
 category: valve_control
 display_name: Standard two-state valve open/close
 description: >
   Open/close control for a two-state valve with an open command, position
-  feedback from limit switches, and a travel timeout that latches a fault when
-  the valve does not reach the commanded position. Position is taken from the
-  feedback switches and never inferred from the command, so a valve that did not
-  move is distinguishable from one that did.
+  feedback from a pair of limit switches, and a travel timeout that latches a
+  fault when the valve does not reach the commanded position. Position is taken
+  from the feedback switches and never inferred from the command, so a valve
+  that did not move is distinguishable from one that did. A valve with no
+  feedback at all is supported as a stated reduction in capability; a valve with
+  one limit switch is not supported, and the restrictions say why.
 supported_families: [compactlogix, controllogix]
 approval_level: standard
 restricted_domains: []
@@ -19,16 +21,16 @@ parameters:
     type: identifier
     required: true
     description: Device tag stem, e.g. XV_305
-  - name: has_open_feedback
+  - name: has_position_feedback
     type: boolean
     required: false
     default: true
-    description: An open limit switch is wired
-  - name: has_closed_feedback
-    type: boolean
-    required: false
-    default: true
-    description: A closed limit switch is wired
+    description: >
+      Both limit switches are wired — open AND closed. True is the supported
+      configuration and the only one that can detect a valve which failed to
+      move. False means no position feedback of any kind, in which case position
+      is the command echoed back and there is no travel timeout. One switch on
+      its own is not a supported configuration; see the restrictions.
   - name: travel_timeout_ms
     type: integer
     required: false
@@ -41,11 +43,21 @@ required_tags:
   - role: command
     suffix: _Cmd_Open
     data_type: BOOL
-    description: Operator or sequence open request, momentary
+    description: >
+      Operator or sequence open request. Acted on as a RISING EDGE, so a
+      requester that holds it true gets one open command and not a standing
+      request to open.
   - role: command
     suffix: _Cmd_Close
     data_type: BOOL
-    description: Operator or sequence close request, momentary
+    description: Operator or sequence close request; true means close is requested
+  - role: status
+    suffix: _Open_OneShot
+    data_type: BOOL
+    description: >
+      One-shot storage bit for the open request. Without it a held open command
+      re-opens the valve by itself the moment a close command, an interlock trip
+      or a latched fault goes away.
   - role: permissive
     suffix: _Permissive
     data_type: BOOL
@@ -66,12 +78,14 @@ required_tags:
     suffix: _In_Opened
     data_type: BOOL
     description: Open limit switch; the valve has reached the open position
-    when_parameter: has_open_feedback
+    when_parameter: has_position_feedback
+    when_value: true
   - role: feedback
     suffix: _In_Closed
     data_type: BOOL
     description: Closed limit switch; the valve has reached the closed position
-    when_parameter: has_closed_feedback
+    when_parameter: has_position_feedback
+    when_value: true
   - role: status
     suffix: _Sts_Opened
     data_type: BOOL
@@ -84,6 +98,8 @@ required_tags:
     suffix: _Sts_Travelling
     data_type: BOOL
     description: The valve is at neither limit
+    when_parameter: has_position_feedback
+    when_value: true
   - role: status
     suffix: _Sts_Faulted
     data_type: BOOL
@@ -92,20 +108,28 @@ required_tags:
     suffix: _Tmr_Travel
     data_type: TIMER
     description: Times how long the valve has been between positions
+    when_parameter: has_position_feedback
+    when_value: true
   - role: alarm
     suffix: _Alm_FailToOpen
     data_type: BOOL
     description: Commanded open and the open position was not reached in time
+    when_parameter: has_position_feedback
+    when_value: true
   - role: alarm
     suffix: _Alm_FailToClose
     data_type: BOOL
     description: Commanded closed and the closed position was not reached in time
+    when_parameter: has_position_feedback
+    when_value: true
   - role: alarm
     suffix: _Alm_Position_Invalid
     data_type: BOOL
     description: >
       Both limit switches are made at once, which is physically impossible and
       means a switch or its wiring has failed.
+    when_parameter: has_position_feedback
+    when_value: true
 
 generated_objects:
   routines:
@@ -123,9 +147,20 @@ generated_objects:
         interlock is in the common leg, so a trip drops the output and the valve
         goes to its de-energised position. Close is examined if-open so a close
         request always wins over a held open request.
+
+        The one-shot makes the open request an edge. Without it the start branch
+        is a standing request: a sequence step that holds _Cmd_Open true for its
+        duration re-opens the valve by itself as soon as the close command, the
+        interlock trip or the latched fault that shut it goes away. It sits
+        ahead of the permissive so an open pressed while the permissive is false
+        is spent and refused, rather than held pending until the permissive
+        returns and then opening the valve unattended.
       elements:
         - branch:
             - - {instruction: XIC, operand: "{device_tag}_Cmd_Open", kind: condition}
+              - instruction: ONS
+                operand: "{device_tag}_Open_OneShot"
+                kind: condition
               - {instruction: XIC, operand: "{device_tag}_Permissive", kind: condition}
             - - {instruction: XIC, operand: "{device_tag}_Cmd_Open_Sealed", kind: condition}
         - {instruction: XIO, operand: "{device_tag}_Cmd_Close", kind: condition}
@@ -145,8 +180,10 @@ generated_objects:
 
     - routine: R_Devices
       title: "{device_tag} open position"
-      comment: Position comes from the limit switch, never from the command.
-      when_parameter: has_open_feedback
+      comment: >
+        Position comes from the limit switches, never from the command. Both are
+        examined, so a valve reporting two positions at once reports neither.
+      when_parameter: has_position_feedback
       when_value: true
       elements:
         - {instruction: XIC, operand: "{device_tag}_In_Opened", kind: condition}
@@ -155,12 +192,35 @@ generated_objects:
 
     - routine: R_Devices
       title: "{device_tag} closed position"
-      comment: Position comes from the limit switch, never from the command.
-      when_parameter: has_closed_feedback
+      comment: Position comes from the limit switches, never from the command.
+      when_parameter: has_position_feedback
       when_value: true
       elements:
         - {instruction: XIC, operand: "{device_tag}_In_Closed", kind: condition}
         - {instruction: XIO, operand: "{device_tag}_In_Opened", kind: condition}
+        - {instruction: OTE, operand: "{device_tag}_Sts_Closed", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} open position from the command"
+      comment: >
+        No feedback is wired, so the open position is the command echoed back.
+        This is an assumption, not an observation: the HMI must show it as
+        "commanded open", and no fail-to-open detection is possible.
+      when_parameter: has_position_feedback
+      when_value: false
+      elements:
+        - {instruction: XIC, operand: "{device_tag}_Cmd_Open_Sealed", kind: condition}
+        - {instruction: OTE, operand: "{device_tag}_Sts_Opened", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} closed position from the command"
+      comment: >
+        The other half of the same assumption. A valve that is not commanded
+        open is REPORTED closed, whatever it is actually doing.
+      when_parameter: has_position_feedback
+      when_value: false
+      elements:
+        - {instruction: XIO, operand: "{device_tag}_Cmd_Open_Sealed", kind: condition}
         - {instruction: OTE, operand: "{device_tag}_Sts_Closed", kind: output}
 
     - routine: R_Devices
@@ -169,19 +229,26 @@ generated_objects:
         Both switches made at once cannot happen mechanically, so it means a
         switch, its wiring or its adjustment has failed. Raised as its own alarm
         because "the valve is in two places" is a different problem from "the
-        valve did not get there".
-      when_parameter: has_open_feedback
+        valve did not get there", and latched with the fault so the alarm cannot
+        outlive or predecease it.
+      when_parameter: has_position_feedback
       when_value: true
       elements:
         - {instruction: XIC, operand: "{device_tag}_In_Opened", kind: condition}
         - {instruction: XIC, operand: "{device_tag}_In_Closed", kind: condition}
         - branch:
             - - {instruction: OTL, operand: "{device_tag}_Sts_Faulted", kind: output}
-            - - {instruction: OTE, operand: "{device_tag}_Alm_Position_Invalid", kind: output}
+            - - {instruction: OTL, operand: "{device_tag}_Alm_Position_Invalid", kind: output}
 
     - routine: R_Devices
       title: "{device_tag} travelling"
-      comment: At neither limit. Normal briefly during a stroke, a fault if it persists.
+      comment: >
+        At neither limit. Normal briefly during a stroke, a fault if it persists.
+        Only meaningful when both switches are wired: with one switch the valve
+        would be declared travelling for the whole time it rests at the position
+        nothing is watching, which is why that configuration is not supported.
+      when_parameter: has_position_feedback
+      when_value: true
       elements:
         - {instruction: XIO, operand: "{device_tag}_Sts_Opened", kind: condition}
         - {instruction: XIO, operand: "{device_tag}_Sts_Closed", kind: condition}
@@ -190,11 +257,17 @@ generated_objects:
     - routine: R_Devices
       title: "{device_tag} travel timer"
       comment: >
-        Runs whenever the valve is between positions. It is not reset by the
-        command changing, so a valve that is commanded back and forth faster
-        than it can stroke still eventually times out.
+        Runs whenever the valve is between positions and not already faulted. It
+        is not reset by the command changing, so a valve that is commanded back
+        and forth faster than it can stroke still eventually times out. Holding
+        it reset while the fault is latched is what gives the valve a full fresh
+        allowance after a reset instead of re-faulting on the scan the reset is
+        accepted.
+      when_parameter: has_position_feedback
+      when_value: true
       elements:
         - {instruction: XIC, operand: "{device_tag}_Sts_Travelling", kind: condition}
+        - {instruction: XIO, operand: "{device_tag}_Sts_Faulted", kind: condition}
         - instruction: TON
           operands: ["{device_tag}_Tmr_Travel", "{travel_timeout_ms}", "0"]
           kind: output
@@ -204,26 +277,88 @@ generated_objects:
       comment: >
         Travel timed out while commanded open. Latched, so the valve stays
         faulted and visible rather than retrying.
+
+        Two things make the diagnosis survive. The alarm is LATCHED rather than
+        energised, and the rung is gated on the fault not already being set.
+        Without both, latching the fault drops _Cmd_Open_Sealed on the next scan
+        — the rung above examines _Sts_Faulted if-open — which made this rung
+        false and the fail-to-CLOSE rung below true: a valve that jammed on its
+        way open reported, one scan later, that it had failed to close, and an
+        operator was sent to the wrong end of the stroke.
+      when_parameter: has_position_feedback
+      when_value: true
       elements:
         - {instruction: XIC, operand: "{device_tag}_Tmr_Travel.DN", kind: condition}
         - {instruction: XIC, operand: "{device_tag}_Cmd_Open_Sealed", kind: condition}
+        - {instruction: XIO, operand: "{device_tag}_Sts_Faulted", kind: condition}
         - branch:
             - - {instruction: OTL, operand: "{device_tag}_Sts_Faulted", kind: output}
-            - - {instruction: OTE, operand: "{device_tag}_Alm_FailToOpen", kind: output}
+            - - {instruction: OTL, operand: "{device_tag}_Alm_FailToOpen", kind: output}
 
     - routine: R_Devices
       title: "{device_tag} fail to close"
       comment: >
         Travel timed out while not commanded open. Usually the more serious of
-        the two, because the process is being isolated and has not been.
+        the two, because the process is being isolated and has not been. Gated
+        on the fault not already being set, on the same terms as the rung above,
+        so the direction recorded is the direction that was commanded when the
+        timeout occurred.
+      when_parameter: has_position_feedback
+      when_value: true
       elements:
         - {instruction: XIC, operand: "{device_tag}_Tmr_Travel.DN", kind: condition}
         - {instruction: XIO, operand: "{device_tag}_Cmd_Open_Sealed", kind: condition}
+        - {instruction: XIO, operand: "{device_tag}_Sts_Faulted", kind: condition}
         - branch:
             - - {instruction: OTL, operand: "{device_tag}_Sts_Faulted", kind: output}
-            - - {instruction: OTE, operand: "{device_tag}_Alm_FailToClose", kind: output}
+            - - {instruction: OTL, operand: "{device_tag}_Alm_FailToClose", kind: output}
+
+    - routine: R_Devices
+      title: "{device_tag} clear the valve alarms with the fault"
+      comment: >
+        The three alarm bits live exactly as long as the fault they belong to.
+        Clearing them here rather than in the reset pattern keeps the alarm and
+        the latch from ever disagreeing: esco.fault.reset unlatches
+        _Sts_Faulted, and this rung follows on the next scan. Scanned after
+        every detection rung, so an alarm raised this scan is not cleared by it.
+      when_parameter: has_position_feedback
+      when_value: true
+      elements:
+        - {instruction: XIO, operand: "{device_tag}_Sts_Faulted", kind: condition}
+        - branch:
+            - - {instruction: OTU, operand: "{device_tag}_Alm_FailToOpen", kind: output}
+            - - {instruction: OTU, operand: "{device_tag}_Alm_FailToClose", kind: output}
+            - - {instruction: OTU, operand: "{device_tag}_Alm_Position_Invalid", kind: output}
 
 engineering_notes: >
+  Version 2.0.0 fixed three defects and withdrew a configuration the pattern
+  could not actually support.
+
+  A valve that failed to OPEN reported, one scan later, that it had failed to
+  CLOSE. Latching the fault removes _Cmd_Open_Sealed, which was the very
+  condition distinguishing the two alarm rungs, so the energised fail-to-open
+  bit cleared and the fail-to-close bit came up in its place. The alarms are now
+  latched with the fault, both rungs are gated on the fault not already being
+  set, and the direction recorded is the direction that was commanded at the
+  moment of the timeout.
+
+  1.0.0 offered has_open_feedback and has_closed_feedback as independent
+  booleans, and neither the logic nor the tag list survived them being different.
+  _Sts_Travelling is "at neither limit", and a switch that is not wired is never
+  written, so a valve with only an open limit was declared travelling for the
+  whole time it sat closed and faulted ten seconds after every close. The
+  position and both-limits rungs also referenced the switch on the other
+  parameter, so an asymmetric expansion emitted rungs against tags the required
+  tag list did not contain. The two parameters are replaced by one:
+  has_position_feedback, meaning both switches or neither.
+
+  The open request is now edge-triggered. A sequence step that holds _Cmd_Open
+  true for its duration used to re-open the valve by itself as soon as a close
+  command, an interlock trip or a fault went away.
+
+  Anything expanded from 1.0.0 must be re-expanded and its parameters restated;
+  the parameter names have changed and all three defects are in generated rungs.
+
   The travel timeout is the whole point of the pattern. Without it, a valve that
   jams halfway is indistinguishable from one that has arrived, because the
   command says open and nothing contradicts it. With it, the failure has a name,
@@ -235,16 +370,28 @@ engineering_notes: >
   timeout is meaningless; one that is far too long means the fault arrives after
   the process has already been damaged.
 
-  Position and command are separate throughout. _Sts_Opened is the open limit
-  switch and nothing else. Deriving position from the command reintroduces
-  exactly the failure the feedback was installed to catch.
-
-  With only one limit switch wired, "travelling" is true for the whole of the
-  unmonitored half of the stroke, so the timeout has to be long enough to cover
-  a full stroke rather than the time to leave a limit.
+  Position and command are separate throughout wherever there is feedback to be
+  separate from. _Sts_Opened is the open limit switch and nothing else. Deriving
+  position from the command reintroduces exactly the failure the feedback was
+  installed to catch, which is why the no-feedback configuration is described in
+  the restrictions as a reduction in capability rather than an alternative.
 
 restrictions:
   - Not a safety function, and not a safety shutoff valve. Emergency isolation belongs in a system assessed for it.
+  - >
+    Both limit switches, or neither. A valve with one limit switch is NOT
+    supported by this pattern and must not be expanded with it: "travelling" is
+    defined as being at neither limit, so the unmonitored position is
+    indistinguishable from a stroke in progress and the travel timer would fault
+    the valve every time it came to rest there. A single-switch valve needs a
+    block written for it, in which the timeout runs only in the monitored
+    direction and the unmonitored direction is stated as undetectable.
+  - >
+    With has_position_feedback false there is no travel timeout, no
+    fail-to-open, no fail-to-close and no both-limits-made detection, and
+    _Sts_Opened and _Sts_Closed are the command echoed back. A valve that never
+    moved reports itself as having arrived. That is a documented reduction in
+    capability, not an equivalent configuration.
   - >
     Two-state valves only. Modulating and positioner-controlled valves need an
     analog output, position feedback scaling and a deadband, none of which this
@@ -255,14 +402,25 @@ restrictions:
     and needs interlocking between the two solenoids; this pattern must not be
     used for one.
   - >
+    An open is taken on the RISING EDGE of _Cmd_Open and nowhere else. A
+    sequence step or an HMI bit that holds the request true gets one open
+    command, not a standing request: once the valve has been closed by a close
+    command, an interlock or a fault, the held request will not re-open it and
+    whatever issued it has to drop and re-assert it.
+  - >
+    Records the first travel failure and not the second. Once _Sts_Faulted is
+    latched, both travel rungs are blocked, so a valve that fails to open and is
+    then reset and fails to close reports the second failure only after the
+    first has been cleared.
+  - >
     Does not determine the valve's fail position. That is decided by the valve
     and its actuator, and this pattern only assumes the output is de-energised
     to reach it.
   - Does not detect a valve that leaks by, drifts off its seat, or is stroked by hand.
   - >
     Does not detect a failed limit switch that is stuck MADE at the position the
-    valve is resting in. Only the both-made case is caught, and only when open
-    feedback is present.
+    valve is resting in. Only the both-made case is caught, and only when
+    position feedback is present.
   - Does not clear its own fault. Use esco.fault.reset.
 
 tests:
@@ -273,7 +431,14 @@ tests:
   - name: Close wins over a held open request
     given: _Cmd_Open is held true and the valve is open
     when: _Cmd_Close is pulsed
-    then: _Cmd_Open_Sealed goes false and does not re-seal while _Cmd_Close is true.
+    then: >
+      _Cmd_Open_Sealed goes false and does not re-seal — not while _Cmd_Close is
+      true and not after it is released — until _Cmd_Open is dropped and
+      asserted again.
+  - name: A held open request does not re-open the valve after a fault reset
+    given: _Cmd_Open is held true by a sequence step and the valve is faulted shut
+    when: The fault condition clears and the reset is accepted
+    then: _Cmd_Open_Sealed stays false until _Cmd_Open goes false and true again.
   - name: An interlock drives the valve to its spring position
     given: The valve is open
     when: _Interlock_OK goes false
@@ -282,18 +447,32 @@ tests:
     given: The valve is commanded open and the open limit switch is disconnected
     when: The stroke completes mechanically
     then: _Sts_Opened stays false and the travel timeout eventually faults the valve.
-  - name: Fail to open is detected
+  - name: Fail to open is detected and keeps saying so
     given: The valve is commanded open and jammed
-    when: travel_timeout_ms elapses
-    then: _Sts_Faulted latches and _Alm_FailToOpen is set.
+    when: travel_timeout_ms elapses and the block is scanned for another minute
+    then: >
+      _Sts_Faulted latches, _Alm_FailToOpen is set and stays set, and
+      _Alm_FailToClose is never set.
   - name: Fail to close is detected
     given: The valve is commanded closed and jammed
     when: travel_timeout_ms elapses
     then: _Sts_Faulted latches and _Alm_FailToClose is set.
+  - name: A reset gives the valve a full fresh travel allowance
+    given: A valve latched on a travel timeout
+    when: The obstruction is cleared and the fault is reset
+    then: >
+      The travel timer starts from zero, so the valve has the whole of
+      travel_timeout_ms to reach its commanded position before it faults again.
   - name: Both limits made is caught
-    given: Both feedback switches are wired
-    when: Both are forced true at once
+    given: has_position_feedback is true
+    when: Both feedback switches are forced true at once
     then: _Sts_Faulted latches and _Alm_Position_Invalid is set.
+  - name: A closed valve with no feedback never faults
+    given: has_position_feedback is false
+    when: The valve is left closed for an hour
+    then: >
+      No travel timer, no travel alarm and no fault exists in the generated
+      block, and _Sts_Closed reads true because the valve is not commanded open.
   - name: A normal stroke does not fault
     given: A healthy valve with a measured stroke time well inside the timeout
     when: It is opened and closed ten times

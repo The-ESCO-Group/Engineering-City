@@ -19,12 +19,31 @@ Where the catalogue does not describe an instruction it answers ``()``, which is
 ``UNSUPPORTED`` by name, so a rung this platform could not reason about is visible
 in the record rather than indistinguishable from one that was checked and found
 clean.
+
+An empty tuple is not the only way the catalogue can under-state a write, and
+this module reads
+:attr:`~app.generators.plc.instructions.InstructionSpec.destination_coverage`
+rather than the tuple alone:
+
+* ``JSR`` and ``SBR`` write positions that depend on their own operand list, so
+  their fixed tuple is empty. :func:`~app.generators.plc.instructions.resolved_destructive_operands`
+  works the real positions out and :func:`operand_dependent_writes` turns them
+  into the writes the checks here group over. Without that, a ``JSR`` return
+  parameter is a tag nothing writes: missed as a duplicate destination and
+  reported as an undriven output.
+* ``COP``, ``CPS`` and ``FLL`` name the *first element* of a destination range.
+  Two writers of ``Buffer[0]`` and ``Buffer[5]`` are different group keys and
+  the collision between a 20-element copy and a ``MOV`` is invisible to a check
+  that compares operand text. :class:`DestructiveWriteValidator` expands the
+  range when the start and the length are both literals, and says it could not
+  when they are not.
 """
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from app.core.enums import (
     AlarmSeverity,
@@ -39,14 +58,24 @@ from app.core.enums import (
     ValidationSeverity,
 )
 from app.generators.plc.instructions import (
+    DestinationCoverage,
     is_known,
     is_restricted,
+    resolved_destructive_operands,
     restriction_reason,
     spec_for,
     supports,
 )
 from app.models.plc import LogicInstruction
-from app.validation.base import DestructiveWrite, Issue, ValidationContext, fold, label
+from app.validation.base import (
+    DestructiveWrite,
+    Issue,
+    ValidationContext,
+    base_name,
+    fold,
+    label,
+    references,
+)
 
 __all__ = [
     "DestructiveWriteValidator",
@@ -58,6 +87,8 @@ __all__ = [
     "ResetBehaviourValidator",
     "RoutineCallValidator",
     "SequenceStateValidator",
+    "all_destructive_writes",
+    "operand_dependent_writes",
 ]
 
 _DISCIPLINE = ValidationDiscipline.PLC_LOGIC
@@ -69,10 +100,26 @@ _DISCIPLINE = ValidationDiscipline.PLC_LOGIC
 #: it invites somebody to "fix" it by inventing a tag.
 _NON_TAG_OPERAND_POSITIONS: dict[str, frozenset[int]] = {
     "JSR": frozenset({0}),
+    # The L5X parser treats JXR's first operand as a routine target exactly as
+    # it treats JSR's (``_ROUTINE_TARGET_MNEMONICS``). An external routine is
+    # not declared in this project, so the operand always arrives unresolved.
+    "JXR": frozenset({0}),
     "JMP": frozenset({0}),
     "LBL": frozenset({0}),
     "SFR": frozenset({0, 1}),
     "SFP": frozenset({0, 1}),
+    "FOR": frozenset({0}),
+    "EVENT": frozenset({0}),
+    # GSV and SSV address a CIP object: class name, instance name, attribute
+    # name. None of the three is a tag, and the instance is routinely written
+    # empty — ``GSV(WallClockTime,,LocalDateTime,Now[0])``.
+    "GSV": frozenset({0, 1, 2}),
+    "SSV": frozenset({0, 1, 2}),
+    # Keyword operands: SWPB's byte order, and the mode of the file
+    # instructions. Written as words rather than as tags or numbers.
+    "SWPB": frozenset({1}),
+    "FAL": frozenset({3}),
+    "FSC": frozenset({3}),
 }
 
 #: Mnemonic combinations that write one tag on purpose. A latch needs its
@@ -86,6 +133,18 @@ _COMPLEMENTARY_WRITER_SETS: tuple[frozenset[str], ...] = (
     frozenset({"TON", "RES"}),
     frozenset({"TOF", "RES"}),
     frozenset({"RTO", "RES"}),
+    # A queue is loaded by one instruction and unloaded by another, and the two
+    # share the CONTROL structure and the array by design. Reporting the pair
+    # would be a confident error against the only correct way to write a FIFO.
+    frozenset({"FFL", "FFU", "RES"}),
+    frozenset({"LFL", "LFU", "RES"}),
+    # A sequencer's input, output and load steps share one CONTROL for the same
+    # reason: they are one sequencer, stepped together.
+    frozenset({"SQI", "SQO", "SQL", "RES"}),
+    frozenset({"BSL", "RES"}),
+    frozenset({"BSR", "RES"}),
+    frozenset({"FAL", "RES"}),
+    frozenset({"FSC", "RES"}),
 )
 
 #: Instructions that write only part of their destination. Two of them on one
@@ -93,10 +152,113 @@ _COMPLEMENTARY_WRITER_SETS: tuple[frozenset[str], ...] = (
 #: decode masks — so it reports the pair and says why it cannot decide.
 _MASKED_WRITERS = frozenset({"MVM", "BTD"})
 
+#: Instructions whose destination operand names the *first element* of a range,
+#: mapped to the operand that gives the range's length. The catalogue records
+#: these as :attr:`DestinationCoverage.PARTIAL`; this table is what turns that
+#: into a check, because the length is an operand and its position is per
+#: mnemonic. ``FAL`` is deliberately absent: its extent depends on the mode
+#: operand as well as the length, and this module does not decode it.
+_RANGE_WRITER_LENGTH_OPERANDS: dict[str, int] = {
+    "COP": 2,
+    "CPS": 2,
+    "FLL": 2,
+}
+
 #: Signal types that reach a field output.
 _OUTPUT_SIGNAL_TYPES = frozenset(
     {SignalType.DISCRETE_OUTPUT, SignalType.ANALOG_OUTPUT, SignalType.NETWORK_OUTPUT}
 )
+
+
+# ---------------------------------------------------------------------------
+# Writes the catalogue's fixed tuples cannot state on their own
+# ---------------------------------------------------------------------------
+def operand_dependent_writes(context: ValidationContext) -> list[DestructiveWrite]:
+    """Writes by instructions whose destinations depend on their own operands.
+
+    ``JSR``'s return parameters and ``SBR``'s parameter list. Both are recorded
+    in the catalogue with an empty destructive tuple because no fixed tuple can
+    name them, so
+    :attr:`~app.validation.base.ValidationContext.destructive_writes` — which
+    reads that tuple — leaves them out. Nothing else puts them back:
+    ``LogicOperand.is_destination`` is never populated anywhere in the backend.
+
+    Returned separately rather than folded into the context so this module owns
+    the special case, and so a position already recorded by either mechanism is
+    not counted twice.
+    """
+    writes: list[DestructiveWrite] = []
+    for instruction in context.instructions:
+        spec = spec_for(instruction.mnemonic)
+        if spec is None or spec.destination_coverage is not DestinationCoverage.OPERAND_DEPENDENT:
+            continue
+        operands = context.operands_by_instruction.get(instruction.id, ())
+        if [operand.ordinal for operand in operands] != list(range(len(operands))):
+            # A gap in the ordinals means the operand list is not the one the
+            # instruction was written with, and a position counted off it would
+            # name the wrong operand. Reported as unsupported elsewhere.
+            continue
+        resolved = set(
+            resolved_destructive_operands(spec.mnemonic, [item.text for item in operands])
+        )
+        already = set(spec.destructive_operand_indexes)
+        for operand in operands:
+            if operand.ordinal not in resolved or operand.ordinal in already:
+                continue
+            if operand.is_destination:
+                # Already counted by ``destructive_writes``.
+                continue
+            name = context.operand_name(operand)
+            if not name:
+                continue
+            writes.append(
+                DestructiveWrite(
+                    tag_name=name,
+                    mnemonic=spec.mnemonic,
+                    rung_id=instruction.rung_id,
+                    rung_label=context.rung_label(instruction.rung_id),
+                    operand_ordinal=operand.ordinal,
+                    from_catalogue=True,
+                )
+            )
+    return writes
+
+
+def all_destructive_writes(context: ValidationContext) -> list[DestructiveWrite]:
+    """Every write in the project's ladder this module can establish.
+
+    The context's own list plus :func:`operand_dependent_writes`. Every check
+    here uses this rather than the context's list directly, so "which tags does
+    the ladder write" has one answer inside this module.
+    """
+    return [*context.destructive_writes, *operand_dependent_writes(context)]
+
+
+def _subscript_index(operand_text: str) -> int | None:
+    """The literal element index of ``Buffer[7]``, or ``None``.
+
+    ``None`` for anything that is not a single integer subscript — a variable
+    index ``Buffer[i]``, a multi-dimensional ``Buffer[1,2]``, a member path.
+    An array reference with no subscript at all starts at element 0, which is
+    what Logix does, so that answers ``0``.
+    """
+    text = operand_text.strip()
+    if "." in text.split("[", 1)[0] or text.endswith("."):
+        return None
+    if "[" not in text:
+        return 0
+    if not text.endswith("]"):
+        return None
+    inner = text[text.index("[") + 1 : -1].strip()
+    if not inner.isdigit():
+        return None
+    return int(inner)
+
+
+def _literal_count(operand_text: str) -> int | None:
+    """A plain non-negative integer operand, or ``None`` when it is not one."""
+    text = operand_text.strip()
+    return int(text) if text.isdigit() else None
 
 
 class OperandValidator:
@@ -161,6 +323,66 @@ class OperandValidator:
         return issues
 
 
+@dataclass(frozen=True, slots=True)
+class _RangeWrite:
+    """A ``COP``/``CPS``/``FLL`` destination, with the extent it covers.
+
+    The destructive tuple names ``Buffer[0]``; the instruction writes
+    ``Buffer[0]`` through ``Buffer[length - 1]``. ``start`` and ``length`` are
+    ``None`` when the operands do not state them literally, which is the
+    difference between proving an overlap and admitting one was not ruled out.
+    """
+
+    tag_name: str
+    mnemonic: str
+    rung_id: uuid.UUID
+    rung_label: str
+    start: int | None
+    length: int | None
+
+    def covers(self, index: int | None) -> bool | None:
+        """Whether this range writes element ``index``. ``None`` if undecidable."""
+        if self.start is None or self.length is None or index is None:
+            return None
+        return self.start <= index < self.start + self.length
+
+
+def _range_writes(context: ValidationContext) -> list[_RangeWrite]:
+    """Every ``COP``/``CPS``/``FLL`` destination in the ladder, with its extent."""
+    found: list[_RangeWrite] = []
+    for instruction in context.instructions:
+        mnemonic = instruction.mnemonic.upper()
+        length_ordinal = _RANGE_WRITER_LENGTH_OPERANDS.get(mnemonic)
+        if length_ordinal is None:
+            continue
+        spec = spec_for(mnemonic)
+        if spec is None:  # pragma: no cover - the table only names catalogued entries
+            continue
+        by_ordinal = {
+            operand.ordinal: operand
+            for operand in context.operands_by_instruction.get(instruction.id, ())
+        }
+        length = by_ordinal.get(length_ordinal)
+        for ordinal in spec.destructive_operand_indexes:
+            destination = by_ordinal.get(ordinal)
+            if destination is None:
+                continue
+            name = context.operand_name(destination)
+            if not name:
+                continue
+            found.append(
+                _RangeWrite(
+                    tag_name=name,
+                    mnemonic=mnemonic,
+                    rung_id=instruction.rung_id,
+                    rung_label=context.rung_label(instruction.rung_id),
+                    start=_subscript_index(destination.text or name),
+                    length=_literal_count(length.text) if length is not None else None,
+                )
+            )
+    return found
+
+
 class DestructiveWriteValidator:
     """Tags that more than one instruction writes."""
 
@@ -169,8 +391,9 @@ class DestructiveWriteValidator:
     description = "Two or more instructions writing the same tag."
 
     def check(self, context: ValidationContext) -> Iterable[Issue]:
+        writes = all_destructive_writes(context)
         grouped: dict[str, list[DestructiveWrite]] = {}
-        for write in context.destructive_writes:
+        for write in writes:
             grouped.setdefault(fold(write.tag_name), []).append(write)
 
         issues: list[Issue] = []
@@ -249,6 +472,101 @@ class DestructiveWriteValidator:
                 )
             )
 
+        issues.extend(self._range_overlaps(context, writes))
+        return issues
+
+    def _range_overlaps(
+        self, context: ValidationContext, writes: list[DestructiveWrite]
+    ) -> list[Issue]:
+        """Copies and fills whose written range reaches another writer's element.
+
+        The check above groups by operand text, so a ``COP`` into ``Buffer[0]``
+        and a ``MOV`` into ``Buffer[5]`` are two groups of one and nothing is
+        reported — while both write ``Buffer[5]`` every scan and the operator's
+        manual entry is lost. Grouping by the array instead, and comparing the
+        copy's extent against the other writer's element, is what makes that
+        findable.
+        """
+        ranges = _range_writes(context)
+        if not ranges:
+            return []
+
+        by_base: dict[str, list[DestructiveWrite]] = {}
+        for write in writes:
+            by_base.setdefault(base_name(write.tag_name), []).append(write)
+
+        issues: list[Issue] = []
+        for base in sorted({base_name(item.tag_name) for item in ranges}):
+            in_range = [item for item in ranges if base_name(item.tag_name) == base]
+            # Every writer of the same array, compared against every range that
+            # is not itself. One copy reaching into another copy's range is the
+            # same defect as a copy reaching into a MOV's element, so the two
+            # cases are not separated here.
+            proven = False
+            reached: list[tuple[_RangeWrite, DestructiveWrite]] = []
+            for item in in_range:
+                for write in by_base.get(base, []):
+                    if fold(write.tag_name) == fold(item.tag_name):
+                        continue
+                    covered = item.covers(_subscript_index(write.tag_name))
+                    if covered is False:
+                        continue
+                    proven = proven or covered is True
+                    reached.append((item, write))
+            if not reached:
+                # Either nothing else writes the array, or every element was
+                # accounted for and none of them collide.
+                continue
+
+            first = reached[0][0]
+            involved = [write for _, write in reached]
+            locations = sorted(
+                {item.rung_label for item, _ in reached} | {write.rung_label for write in involved}
+            )
+            elements = sorted({write.tag_name for write in involved})
+            detail: dict[str, object] = {
+                "array": base,
+                "range_writers": sorted({item.mnemonic for item, _ in reached}),
+                "other_writers": sorted({write.mnemonic for write in involved}),
+                "elements": elements[:20],
+                "locations": locations,
+                "overlap_proven": proven,
+            }
+            issues.append(
+                Issue(
+                    code="logic.range_duplicate_destination",
+                    discipline=_DISCIPLINE,
+                    # ERROR once the overlap is proven from literal operands:
+                    # it is the same defect as two coils on one tag, and the
+                    # copy wins or loses by scan order every scan. WARNING when
+                    # the start element or the length is not a literal, because
+                    # then the extent genuinely was not established and a
+                    # confident error would be a guess.
+                    severity=(ValidationSeverity.ERROR if proven else ValidationSeverity.WARNING),
+                    message=(
+                        f"'{first.tag_name}' is the start of a {first.mnemonic} destination "
+                        f"range in '{base}', and {', '.join(elements[:5])} "
+                        f"{'is' if len(elements) == 1 else 'are'} written separately at: "
+                        f"{'; '.join(locations)}. "
+                        + (
+                            "The copied range covers those elements, so one of the two "
+                            "writes is lost every scan."
+                            if proven
+                            else "Whether the range covers them was not established: the "
+                            "start element or the length is not a literal."
+                        )
+                    ),
+                    object_type=ObjectType.LOGIC_RUNG,
+                    object_id=first.rung_id,
+                    object_label=first.rung_label,
+                    suggested_action=(
+                        "Check the copy's length against the elements the other rungs "
+                        "write; if they overlap, copy into a range nothing else drives or "
+                        "drop the separate write."
+                    ),
+                    detail=detail,
+                )
+            )
         return issues
 
 
@@ -280,18 +598,30 @@ class OutputCoverageValidator:
                 )
             ]
 
+        # Not ``context.is_written``: that reads the catalogue's fixed tuples
+        # only, so a JSR return parameter is a tag nothing writes and the field
+        # output it drives is reported as one that can never energise — a
+        # confident error against correct logic.
+        writes = all_destructive_writes(context)
+        written = frozenset(fold(write.tag_name) for write in writes)
+
         issues: list[Issue] = []
-        issues.extend(self._undriven_outputs(context))
-        issues.extend(self._undriven_alarms(context))
-        issues.extend(self._unlatched_latches(context))
+        issues.extend(self._undriven_outputs(context, written))
+        issues.extend(self._undriven_alarms(context, written))
+        issues.extend(self._unlatched_latches(writes))
         return issues
 
-    def _undriven_outputs(self, context: ValidationContext) -> list[Issue]:
+    @staticmethod
+    def _is_written(written: frozenset[str], tag_name: str) -> bool:
+        """Whether the ladder writes this tag, a member of it or an element of it."""
+        return any(references(name, tag_name) for name in written)
+
+    def _undriven_outputs(self, context: ValidationContext, written: frozenset[str]) -> list[Issue]:
         issues: list[Issue] = []
         for tag in context.tags:
             if not self._is_field_output(context, tag.signal_id, tag.io_point_id):
                 continue
-            if context.is_written(tag.name):
+            if self._is_written(written, tag.name):
                 continue
             issues.append(
                 Issue(
@@ -337,7 +667,7 @@ class OutputCoverageValidator:
                 return True
         return False
 
-    def _undriven_alarms(self, context: ValidationContext) -> list[Issue]:
+    def _undriven_alarms(self, context: ValidationContext, written: frozenset[str]) -> list[Issue]:
         issues: list[Issue] = []
         io_bound = {fold(tag.name) for tag in context.tags if tag.is_io_bound or tag.is_alias}
 
@@ -373,7 +703,7 @@ class OutputCoverageValidator:
                 # would be a confident error against a perfectly normal alarm on
                 # a hardwired input.
                 continue
-            if context.is_written(trigger):
+            if self._is_written(written, trigger):
                 continue
             issues.append(
                 Issue(
@@ -403,10 +733,10 @@ class OutputCoverageValidator:
             )
         return issues
 
-    def _unlatched_latches(self, context: ValidationContext) -> list[Issue]:
+    def _unlatched_latches(self, writes: list[DestructiveWrite]) -> list[Issue]:
         latched: dict[str, DestructiveWrite] = {}
         unlatched: set[str] = set()
-        for write in context.destructive_writes:
+        for write in writes:
             if write.mnemonic == "OTL":
                 latched.setdefault(fold(write.tag_name), write)
             elif write.mnemonic == "OTU":

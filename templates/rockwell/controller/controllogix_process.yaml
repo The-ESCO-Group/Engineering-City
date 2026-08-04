@@ -1,7 +1,7 @@
 # ControlLogix process-control project layout.
 # See templates/README.md for the file format and the versioning rule.
 id: esco.controller.controllogix.process
-version: 1.0.0
+version: 2.0.0
 category: controller_project
 display_name: ControlLogix process-control project layout
 description: >
@@ -23,18 +23,6 @@ parameters:
     type: string
     required: true
     description: Process area or unit this controller runs; used in program descriptions
-  - name: process_task_rate_ms
-    type: integer
-    required: false
-    default: 100
-    description: >
-      ProcessTask period in milliseconds. Must be chosen from the slowest loop
-      period the process actually needs, not from what the controller can manage.
-  - name: process_task_watchdog_ms
-    type: integer
-    required: false
-    default: 500
-    description: ProcessTask watchdog in milliseconds; must exceed the worst-case scan
 
 required_tags:
   - role: status
@@ -76,7 +64,9 @@ generated_objects:
       description: >
         The control chain, at a fixed period. Periodic rather than continuous
         because analog conditioning, PID and any rate calculation are only
-        correct if the interval between executions is known.
+        correct if the interval between executions is known. The period and the
+        watchdog are FIXED at 100 ms and 500 ms by this layout and are not
+        parameters; see the restrictions.
       rate_ms: 100
       watchdog_ms: 500
       programs:
@@ -303,11 +293,24 @@ generated_objects:
         - {instruction: JSR, operand: R_Comms_Diagnostics, kind: output}
 
 engineering_notes: >
+  Version 2.0.0 removed process_task_rate_ms and process_task_watchdog_ms. They
+  were declared parameters that could not reach the task specification — the
+  period and the watchdog are literals in this layout, and the loader parses them
+  as integers, so a placeholder would not even load. An engineer could therefore
+  set 20 ms for a fast loop, have it validated, accepted and recorded against the
+  requirement as a reviewed decision, and receive a controller running the chain
+  at 100 ms with every rate calculation and every PID tuned for the wrong
+  interval. A parameter that cannot be applied is worse than no parameter: it
+  produces a project record that disagrees with the project. What the layout
+  actually fixes is now stated on the task and in the restrictions, where an
+  engineer will read it before choosing this layout rather than after.
+
   The period is an engineering decision, not a default. A periodic task exists
   so that the interval between executions is known: PID tuning, rate-of-change
   calculations and totalisers are all wrong if it drifts. Choose the period from
   the fastest loop the process genuinely needs and confirm the worst-case scan
-  fits inside it with margin, then set the watchdog above that worst case.
+  fits inside it with margin, then set the watchdog above that worst case. This
+  layout cannot do any of that for you, and it no longer pretends to ask.
 
   Program order inside ProcessTask is the point of the layout: conditioning,
   then permissives and interlocks, then control, then alarms. Reordering it
@@ -334,7 +337,20 @@ restrictions:
     in Process_Interlocks may be relied on as a protection layer. Safety
     instrumented functions belong in a system assessed under IEC 61511 by a
     qualified person.
-  - Does not choose the task period or the watchdog for you, and cannot verify the worst-case scan.
+  - >
+    Fixes the task period at 100 ms and the watchdog at 500 ms, and offers no
+    parameter for either. Both are literals in this layout. A project that needs
+    a different period must change it in the generated project before it is
+    commissioned, or use a layout that states the one it needs — and either way
+    the choice has to be recorded somewhere other than here, because this
+    template cannot carry it. It also cannot verify the worst-case scan.
+  - >
+    A condition that must STOP running equipment is never a permissive in this
+    template set. R_Permissives holds conditions for STARTING, which the device
+    patterns examine in the start branch only, so equipment already running does
+    not stop when one goes false. Anything that has to stop running equipment
+    belongs in R_Interlocks. Choosing the wrong routine is not detectable by any
+    check in this platform.
   - Does not create I/O modules, produced/consumed tags, or any communication configuration.
   - Does not create PID or loop instructions; R_Loops is created empty.
   - Does not apply to redundant chassis configuration, which changes task and program constraints.
@@ -345,7 +361,14 @@ tests:
     when: ProcessTask's program list is read
     then: >
       The order is Analog_Inputs, Process_Interlocks, Process_Control, Alarms,
-      and ProcessTask is periodic with the chosen rate.
+      and ProcessTask is periodic at the 100 ms this layout states.
+  - name: The layout offers no parameter it cannot apply
+    given: The template's parameter list
+    when: It is compared with the generated ProcessTask
+    then: >
+      No parameter claims to set the task period or the watchdog, so a value
+      recorded against the requirement cannot disagree with the controller that
+      is delivered.
   - name: Deadline-free work is outside the periodic task
     given: The layout has been expanded
     when: MainTask's program list is read

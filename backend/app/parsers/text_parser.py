@@ -5,8 +5,13 @@ unstructured, they are usually second-hand, and they are exactly the kind of
 text a reviewer — human or model — can be tempted to read a conclusion into. So
 this parser interprets as little as possible: it records which encoding it used,
 the lines exactly as they appear, and only the shape it could actually see. It
-does not join wrapped lines into sentences, does not expand abbreviations, does
-not classify a note as an issue, and never rewrites a character it read.
+does not join wrapped lines into sentences, does not expand abbreviations and
+does not classify a note as an issue.
+
+It rewrites exactly one character it read, and says so when it does: a NUL
+becomes a space, because no PostgreSQL text column or ``jsonb`` document can
+hold one and keeping it would fail the parse rather than record the file. See
+:func:`_replace_nuls`.
 
 Content shape (``ParseResult.content``)::
 
@@ -238,6 +243,31 @@ def _normalise_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _replace_nuls(text: str) -> tuple[str, int]:
+    """NUL characters mapped to a space, and how many there were.
+
+    The one place this parser rewrites a character it read, and it does so
+    because the alternative is not recording the text at all. PostgreSQL cannot
+    hold ``\\x00`` in a text column and rejects the ``\\u0000`` escape in
+    ``jsonb``, so a NUL reaching either ``ParsedArtifact.content`` or
+    ``EvidenceAnchor.excerpt`` aborts the whole parse transaction with a driver
+    message no engineer can act on -- and the file lands in ``parse_failed``
+    with nothing said about why. SQLite stores NUL happily, which is exactly
+    why demo mode never sees it.
+
+    A space rather than a deletion, matching :mod:`app.parsers.pdf_parser`:
+    dropping characters would put ``character_count`` and every line and
+    section offset out of step with the text they index into. Only NUL is
+    substituted; the other control characters are storable and stay as they
+    were read.
+
+    The count is returned rather than the substitution being made quietly,
+    because :meth:`TextParser._report_binary_content` has to say it happened.
+    """
+    count = text.count("\x00")
+    return (text.replace("\x00", " "), count) if count else (text, 0)
+
+
 def _split_lines(text: str) -> list[str]:
     """Split normalised text into lines without inventing a trailing one."""
     if not text:
@@ -407,7 +437,7 @@ class TextParser:
     def parse(self, context: ParseContext) -> ParseResult:
         data = self._read(context)
         decoded = _decode(data)
-        text = _normalise_newlines(decoded.text)
+        text, nul_count = _replace_nuls(_normalise_newlines(decoded.text))
         line_texts = _split_lines(text)
         headings = _detect_headings(line_texts)
         sections = _build_sections(line_texts, headings)
@@ -432,7 +462,7 @@ class TextParser:
         )
 
         self._report_encoding(result, context, decoded)
-        self._report_binary_content(result, context, text)
+        self._report_binary_content(result, context, nul_count)
         self._report_shape(result, context, text, headings)
         self._add_anchors(result, context, text, line_texts, sections)
         result.summary = self._summarise(result, decoded)
@@ -465,7 +495,9 @@ class TextParser:
         )
         result.warn(WarningCode.ENCODING_GUESSED, message, location=context.source_label)
 
-    def _report_binary_content(self, result: ParseResult, context: ParseContext, text: str) -> None:
+    def _report_binary_content(
+        self, result: ParseResult, context: ParseContext, count: int
+    ) -> None:
         """Record NUL *characters* in the decoded text, without diagnosing them.
 
         Counted on the decoded text rather than the raw bytes: a perfectly
@@ -475,18 +507,34 @@ class TextParser:
         possible cause among several — a wide encoding this parser could not
         identify is another — and the parser has observed neither, so the item
         states what was counted and leaves the cause to the reader.
+
+        Reported twice over, because it is now two different facts. The
+        unsupported item is the observation, unchanged: this file held NUL and
+        was not interpreted as a binary format. The warning is the *edit* --
+        the one place this parser does not record what it read -- and it is a
+        warning rather than an item because a reader comparing an excerpt with
+        the file has to be told the recorded text differs from it.
         """
-        count = text.count("\x00")
         if not count:
             return
         result.mark_unsupported(
             "binary_content",
-            f"{count} NUL character(s) are present in the decoded text. Plain text does "
+            f"{count} NUL character(s) were present in the decoded text. Plain text does "
             f"not normally contain NUL, so this may be a binary format, or text in an "
             f"encoding this parser did not identify; that is an observation, not a "
-            f"conclusion. The bytes were decoded and recorded as-is, and no attempt was "
-            f"made to interpret them as a binary format.",
+            f"conclusion. No attempt was made to interpret the file as a binary format.",
             location=context.source_label,
+        )
+        result.warn(
+            WarningCode.ENCODING_GUESSED,
+            f"{count} NUL character(s) were replaced with a space before the text was "
+            f"recorded, so the recorded text is not byte-for-byte what the file holds. "
+            f"A space rather than a deletion, so line and character positions still "
+            f"match. The substitution is not cosmetic: a NUL cannot be stored in a "
+            f"PostgreSQL text column or a jsonb document, and keeping it would fail the "
+            f"whole parse with a database error instead of recording the file.",
+            location=context.source_label,
+            severity="error",
         )
 
     def _report_shape(
