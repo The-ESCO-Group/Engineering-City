@@ -62,7 +62,9 @@
       "UpdateFindingReviewPayload"
     ],
     "approval": [
+      "ApprovalDecision",
       "ApprovalDecisionRequest",
+      "ApprovalGateKey",
       "ApprovalKind",
       "ApprovalRead",
       "ApprovalStatus"
@@ -908,6 +910,18 @@
       ],
       "description": "The addressing scheme used by an :class:`~app.models.evidence.EvidenceAnchor`."
     },
+    "ApprovalDecision": {
+      "description": "What a reviewer chose. Maps onto :class:`ApprovalStatus`.",
+      "enum": [
+        "approve",
+        "reject",
+        "request_changes",
+        "accept_risk",
+        "defer"
+      ],
+      "title": "ApprovalDecision",
+      "type": "string"
+    },
     "ApprovalDecisionRequest": {
       "description": "A human decision.\n\n``approved`` is required and has no default: approving must always be an\nexplicit act, never the result of an omitted field.",
       "properties": {
@@ -927,6 +941,19 @@
       ],
       "title": "ApprovalDecisionRequest",
       "type": "object"
+    },
+    "ApprovalGateKey": {
+      "description": "The six configurable gates a project passes through.",
+      "enum": [
+        "project_profile",
+        "devices_io_tags",
+        "logic_and_delivery",
+        "qa_and_risk",
+        "import_verification",
+        "release"
+      ],
+      "title": "ApprovalGateKey",
+      "type": "string"
     },
     "ApprovalKind": {
       "title": "ApprovalKind",
@@ -956,6 +983,66 @@
           "format": "uuid",
           "title": "Project Id",
           "type": "string"
+        },
+        "gate_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gate Id"
+        },
+        "gate_key": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalGateKey"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "revision_number": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision Number"
+        },
+        "release_candidate_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Release Candidate Id"
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalDecision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "task_id": {
           "anyOf": [
@@ -1162,6 +1249,7 @@
         "changeset.submitted",
         "changeset.merged",
         "changeset.rejected",
+        "changeset.abandoned",
         "revision.created",
         "tag.renamed",
         "gate.decided",
@@ -1732,6 +1820,7 @@
         "changeset.validation_failed",
         "changeset.submitted",
         "changeset.reviewed",
+        "changeset.abandoned",
         "changeset.merged",
         "revision.created",
         "gate.status_changed",

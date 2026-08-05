@@ -460,7 +460,7 @@ def test_creating_a_traceable_object_with_no_basis_is_rejected(
     """
     changeset = _submitted(db, project, _create_tag())
     operation = changeset.operations[0]
-    operation.after = changesets.proposed_values(operation)
+    operation.basis = []
     db.flush()
 
     result = merge.merge_changeset(db, changeset=changeset)

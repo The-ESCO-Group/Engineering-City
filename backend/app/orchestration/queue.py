@@ -34,6 +34,7 @@ from app.core.clock import utcnow
 from app.core.config import Settings
 from app.core.enums import TaskKind, TaskStatus
 from app.core.logging import get_logger
+from app.database.locking import lock_project_root
 from app.models.project import Project
 from app.models.task import Task, TaskDependency
 
@@ -113,25 +114,29 @@ class DatabaseTaskQueue:
             idempotency_key=request.idempotency_key,
             max_attempts=request.max_attempts or self.settings.task_max_attempts,
         )
-        self.db.add(task)
-
         try:
             # A SAVEPOINT, so losing the uniqueness race undoes only this INSERT.
-            # A plain rollback here would discard the caller's whole
-            # transaction — inside start_run that is every task, dependency,
-            # audit row and event created so far, and the function would carry on
-            # referencing ids that no longer exist.
+            # The object is added *inside* it. ``begin_nested`` unconditionally
+            # flushes pending ORM state before opening the savepoint; adding the
+            # task earlier put the uniqueness violation in the outer transaction
+            # and poisoned all work the caller had already staged.
             with self.db.begin_nested():
+                self.db.add(task)
                 self.db.flush()
         except IntegrityError:
             # Lost the race. The other writer's row is the one that counts.
-            self.db.expunge(task)
+            if task in self.db:
+                self.db.expunge(task)
             duplicate = self.db.execute(
                 select(Task).where(
                     Task.project_id == project_id,
                     Task.idempotency_key == request.idempotency_key,
                 )
-            ).scalar_one()
+            ).scalar_one_or_none()
+            if duplicate is None:
+                # The violated constraint belonged to caller-owned pending
+                # state, not this idempotency key. Preserve the real error.
+                raise
             logger.info(
                 "task already enqueued by a concurrent writer",
                 extra={"task_id": str(duplicate.id), "key": request.idempotency_key},
@@ -175,32 +180,59 @@ class DatabaseTaskQueue:
         # work to do. Runnable tasks are filtered in Python because the
         # dependency rule is not expressible as a simple join, and the queue is
         # small enough per project that scanning it is cheaper than a stalled run.
-        candidates = self.db.execute(
-            select(Task)
-            .join(Project, Project.id == Task.project_id)
-            .where(
-                Task.status == TaskStatus.QUEUED,
-                Task.locked_by.is_(None),
-                (Task.available_at.is_(None)) | (Task.available_at <= now),
-                Project.is_paused.is_(False),
-                Project.status.notin_(
-                    ["archived", "completed", "failed"],
-                ),
-            )
-            .order_by(Task.priority, Task.created_at)
-        ).scalars()
+        candidates = list(
+            self.db.execute(
+                select(Task)
+                .join(Project, Project.id == Task.project_id)
+                .where(
+                    Task.status == TaskStatus.QUEUED,
+                    Task.locked_by.is_(None),
+                    (Task.available_at.is_(None)) | (Task.available_at <= now),
+                    Project.is_paused.is_(False),
+                    Project.status.notin_(
+                        ["archived", "completed", "failed"],
+                    ),
+                )
+                .order_by(Task.priority, Task.created_at)
+            ).scalars()
+        )
 
         claimed: list[Task] = []
         for task in candidates:
             if len(claimed) >= limit:
                 break
+            # A cheap first pass avoids taking a project write lock for work
+            # that is plainly blocked.  A positive answer is never trusted:
+            # acquire the root, refresh the task and reread dependencies before
+            # the claim transition so a reopening gate cannot slip between the
+            # dependency check and the lease.
             if not self.dependencies_satisfied(task):
+                continue
+            project = lock_project_root(self.db, task.project_id)
+            if project is None or not project.accepts_work:
+                continue
+            task = self.db.execute(
+                select(Task)
+                .where(Task.id == task.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).scalar_one()
+            if (
+                task.status is not TaskStatus.QUEUED
+                or task.locked_by is not None
+                or (task.available_at is not None and task.available_at > now)
+                or not self.dependencies_satisfied(task)
+            ):
                 continue
 
             lease_until = now + timedelta(seconds=self.settings.task_lease_seconds)
             result = self.db.execute(
                 update(Task)
-                .where(Task.id == task.id, Task.status == TaskStatus.QUEUED)
+                .where(
+                    Task.id == task.id,
+                    Task.status == TaskStatus.QUEUED,
+                    Task.locked_by.is_(None),
+                )
                 .values(
                     status=TaskStatus.RUNNING,
                     locked_by=worker_id,
@@ -238,12 +270,8 @@ class DatabaseTaskQueue:
         a failed task with a reason rather than a task that sits queued and
         silent while the project still reports itself as running.
         """
-        by_id = {dependency.depends_on_id: dependency for dependency in task.dependencies}
-        if not by_id:
-            return []
-
         blocking: list[Task] = []
-        for upstream in self.db.execute(select(Task).where(Task.id.in_(list(by_id)))).scalars():
+        for _, upstream in self._dependency_rows(task):
             if upstream.status is TaskStatus.COMPLETED:
                 continue
             if upstream.is_terminal:
@@ -259,17 +287,31 @@ class DatabaseTaskQueue:
         A task whose hard prerequisite failed cannot do its job, so it is failed
         with that reason rather than run against missing input or left queued.
         """
-        by_id = {
-            dependency.depends_on_id: dependency
-            for dependency in task.dependencies
-            if dependency.hard
-        }
-        if not by_id:
-            return []
         return [
             upstream
-            for upstream in self.db.execute(select(Task).where(Task.id.in_(list(by_id)))).scalars()
-            if upstream.status in {TaskStatus.FAILED, TaskStatus.CANCELLED}
+            for dependency, upstream in self._dependency_rows(task)
+            if dependency.hard
+            and upstream.status in {TaskStatus.FAILED, TaskStatus.CANCELLED}
+        ]
+
+    def incomplete_hard_dependencies(self, task: Task) -> list[Task]:
+        """Authoritative hard prerequisites that are no longer complete."""
+        return [
+            upstream
+            for dependency, upstream in self._dependency_rows(task)
+            if dependency.hard and upstream.status is not TaskStatus.COMPLETED
+        ]
+
+    def _dependency_rows(self, task: Task) -> list[tuple[TaskDependency, Task]]:
+        return [
+            (dependency, upstream)
+            for dependency, upstream in self.db.execute(
+                select(TaskDependency, Task)
+                .join(Task, Task.id == TaskDependency.depends_on_id)
+                .where(TaskDependency.task_id == task.id)
+                .order_by(TaskDependency.id)
+                .execution_options(populate_existing=True)
+            ).all()
         ]
 
     def heartbeat(self, task: Task) -> None:
@@ -282,6 +324,96 @@ class DatabaseTaskQueue:
         self.db.flush()
 
     # -- finishing -------------------------------------------------------
+    def acquire_execution(self, task: Task, *, worker_id: str, attempt: int) -> bool:
+        """Revalidate a claimed attempt immediately before any side effect.
+
+        Claiming and handler dispatch deliberately use different transactions.
+        A cancellation or lease sweep can win in that gap, while the dispatch
+        Session still holds a stale ``RUNNING`` identity.  This conditional
+        no-op update both refreshes that identity and proves that this exact
+        worker attempt still owns a live lease before presence, events or the
+        handler are allowed to run.
+        """
+        now = utcnow()
+        transition = self.db.execute(
+            update(Task)
+            .where(
+                Task.id == task.id,
+                Task.status == TaskStatus.RUNNING,
+                Task.locked_by == worker_id,
+                Task.attempts == attempt,
+                Task.lease_expires_at.isnot(None),
+                Task.lease_expires_at >= now,
+            )
+            .values(locked_by=worker_id)
+            .execution_options(synchronize_session=False)
+        )
+        won = int(getattr(transition, "rowcount", 0) or 0) == 1
+        self.db.refresh(task)
+        return won
+
+    def acquire_finalization(self, task: Task, *, worker_id: str, attempt: int) -> bool:
+        """Atomically claim the right to publish one handler outcome.
+
+        The worker intentionally commits ``task.started`` before running the
+        handler and the Session keeps ORM instances live across that commit. A
+        cancellation or lease recovery can therefore replace this attempt while
+        the handler is working. This compare-and-set is a real ``UPDATE`` rather
+        than ``SELECT FOR UPDATE`` so it also serialises writers on SQLite,
+        where row-locking selects are ignored.
+        """
+        transition = self.db.execute(
+            update(Task)
+            .where(
+                Task.id == task.id,
+                Task.status == TaskStatus.RUNNING,
+                Task.locked_by == worker_id,
+                Task.attempts == attempt,
+            )
+            # A no-op value change acquires the write lock without deciding the
+            # outcome. The existing helpers below remain the single source of
+            # retry/backoff and terminal-state semantics.
+            .values(locked_by=worker_id)
+            .execution_options(synchronize_session=False)
+        )
+        won = int(getattr(transition, "rowcount", 0) or 0) == 1
+        self.db.refresh(task)
+        return won
+
+    def requeue_claim_after_dependency_change(
+        self,
+        task: Task,
+        *,
+        worker_id: str,
+        attempt: int,
+        reason: str,
+    ) -> bool:
+        """Discard a claimed attempt whose hard prerequisite reopened."""
+        transition = self.db.execute(
+            update(Task)
+            .where(
+                Task.id == task.id,
+                Task.status == TaskStatus.RUNNING,
+                Task.locked_by == worker_id,
+                Task.attempts == attempt,
+            )
+            .values(
+                status=TaskStatus.QUEUED,
+                available_at=None,
+                finished_at=None,
+                blocked_reason="",
+                error_code="dependency_reopened",
+                error_message=reason,
+                locked_by=None,
+                locked_at=None,
+                lease_expires_at=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        changed = int(getattr(transition, "rowcount", 0) or 0) == 1
+        self.db.refresh(task)
+        return changed
+
     def complete(self, task: Task, result: dict[str, Any] | None = None) -> None:
         task.status = TaskStatus.COMPLETED
         task.result = result or {}
@@ -344,13 +476,29 @@ class DatabaseTaskQueue:
         task.blocked_reason = reason
         self._release(task)
 
-    def cancel(self, task: Task, reason: str = "") -> None:
-        if task.is_terminal:
-            return
-        task.status = TaskStatus.CANCELLED
-        task.blocked_reason = reason
-        task.finished_at = utcnow()
-        self._release(task)
+    def cancel(self, task: Task, reason: str = "") -> bool:
+        """Cancel a nonterminal task without overwriting a concurrent finish."""
+        transition = self.db.execute(
+            update(Task)
+            .where(
+                Task.id == task.id,
+                Task.status.notin_(
+                    [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
+                ),
+            )
+            .values(
+                status=TaskStatus.CANCELLED,
+                blocked_reason=reason,
+                finished_at=utcnow(),
+                locked_by=None,
+                locked_at=None,
+                lease_expires_at=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        changed = int(getattr(transition, "rowcount", 0) or 0) == 1
+        self.db.refresh(task)
+        return changed
 
     def unblock(self, task: Task) -> None:
         """Return a blocked or approval-gated task to the queue."""
@@ -379,7 +527,7 @@ class DatabaseTaskQueue:
         at claim time, so a crash costs one attempt, not two.
         """
         now = utcnow()
-        expired = list(
+        candidates = list(
             self.db.execute(
                 select(Task).where(
                     Task.status == TaskStatus.RUNNING,
@@ -389,27 +537,52 @@ class DatabaseTaskQueue:
             ).scalars()
         )
 
-        for task in expired:
+        expired: list[Task] = []
+        for task in candidates:
+            values: dict[str, Any]
             if task.attempts >= task.max_attempts:
-                task.status = TaskStatus.FAILED
-                task.finished_at = now
-                task.error_code = "lease_expired"
-                task.error_message = (
-                    "The worker holding this task stopped responding and no attempts remain."
-                )
+                values = {
+                    "status": TaskStatus.FAILED,
+                    "finished_at": now,
+                    "error_code": "lease_expired",
+                    "error_message": (
+                        "The worker holding this task stopped responding and no attempts remain."
+                    ),
+                }
             else:
-                task.status = TaskStatus.QUEUED
-                task.available_at = now
-                task.error_code = "lease_expired"
-                task.error_message = (
-                    "The worker holding this task stopped responding; it was requeued."
+                values = {
+                    "status": TaskStatus.QUEUED,
+                    "available_at": now,
+                    "error_code": "lease_expired",
+                    "error_message": (
+                        "The worker holding this task stopped responding; it was requeued."
+                    ),
+                }
+            transition = self.db.execute(
+                update(Task)
+                .where(
+                    Task.id == task.id,
+                    Task.status == TaskStatus.RUNNING,
+                    Task.locked_by == task.locked_by,
+                    Task.attempts == task.attempts,
+                    Task.lease_expires_at == task.lease_expires_at,
+                    Task.lease_expires_at < now,
                 )
-            task.locked_by = None
-            task.locked_at = None
-            task.lease_expires_at = None
+                .values(
+                    **values,
+                    locked_by=None,
+                    locked_at=None,
+                    lease_expires_at=None,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if int(getattr(transition, "rowcount", 0) or 0) != 1:
+                self.db.refresh(task)
+                continue
+            self.db.refresh(task)
+            expired.append(task)
 
         if expired:
-            self.db.flush()
             logger.warning(
                 "requeued tasks abandoned by a stopped worker",
                 extra={"count": len(expired), "task_ids": [str(t.id) for t in expired]},

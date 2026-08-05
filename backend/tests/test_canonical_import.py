@@ -18,8 +18,11 @@ from app.core.enums import (
     SignalDirection,
     SignalType,
     TagScope,
+    ValidationDiscipline,
+    ValidationSeverity,
 )
 from app.core.services.canonical_import import import_latest_parsed_artifacts
+from app.models.delivery import HMIBinding, HMIObjectInstance, HMIScreen
 from app.models.file import ParsedArtifact, UploadedFile
 from app.models.plant import AddressAssignment, Device, HardwareModule, IOPoint, Signal
 from app.models.plc import (
@@ -32,7 +35,9 @@ from app.models.plc import (
     Routine,
 )
 from app.models.project import Project
+from app.models.release import ValidationResult
 from app.models.tags import AOIDefinitionReference, Tag, UDTDefinition, UDTMember
+from app.validation import run_validation
 
 
 def _artifact(
@@ -246,6 +251,235 @@ def test_explicit_io_columns_create_a_complete_physical_binding_without_safety_g
         row.origin is LogicOrigin.PARSED_FROM_SOURCE
         for row in (device, signal, module, point, tag, assignment)
     )
+
+
+def test_device_tag_column_preserves_the_device_signal_and_assignment_model(
+    db: Session,
+    project: Project,
+) -> None:
+    """A common compact I/O schedule must not lose its physical model.
+
+    ``Device Tag`` is an explicit device identity as well as the controller tag
+    in this schedule shape.  Both rows deliberately claim the same terminal so
+    the canonical model must retain two assignments; collapsing them would hide
+    the exact conflict the I/O validator is meant to report.
+    """
+    rows = [
+        {
+            "Module": "DI_401",
+            "Slot": "1",
+            "Channel": "10",
+            "Address": "Local:1:I.Data.10",
+            "Signal Type": "DI 24VDC sinking",
+            "Device Tag": "GD401_CLOSED",
+            "Description": "Reject guard closed",
+        },
+        {
+            "Module": "DI_401",
+            "Slot": "1",
+            "Channel": "10",
+            "Address": "Local:1:I.Data.10",
+            "Signal Type": "DI 24VDC sinking",
+            "Device Tag": "MTR403_FAULT",
+            "Description": "Conveyor 403 drive fault",
+        },
+    ]
+    _artifact(
+        db,
+        project,
+        file_kind=FileKind.CSV,
+        role=DocumentRole.IO_LIST,
+        content={
+            "headers": list(rows[0]),
+            "rows": [
+                {"row": number, "record": record}
+                for number, record in enumerate(rows, start=2)
+            ],
+        },
+        name="compact_io.csv",
+    )
+
+    import_latest_parsed_artifacts(db, project.id)
+
+    devices = list(db.scalars(select(Device).order_by(Device.tag_prefix)))
+    signals = list(db.scalars(select(Signal).order_by(Signal.name)))
+    points = list(db.scalars(select(IOPoint)))
+    assignments = list(db.scalars(select(AddressAssignment)))
+    tags = list(db.scalars(select(Tag).order_by(Tag.name)))
+
+    assert [item.tag_prefix for item in devices] == ["GD401_CLOSED", "MTR403_FAULT"]
+    assert [item.name for item in signals] == ["GD401_CLOSED", "MTR403_FAULT"]
+    assert [item.name for item in tags] == ["GD401_CLOSED", "MTR403_FAULT"]
+    assert len(points) == 1
+    assert points[0].address == "Local:1:I.Data.10"
+    assert len(assignments) == 2
+    assert {item.io_point_id for item in assignments} == {points[0].id}
+
+
+def test_declared_hmi_xml_imports_screens_objects_and_truthful_bindings(
+    db: Session,
+    project: Project,
+) -> None:
+    known = Tag(
+        project_id=project.id,
+        name="LINE_RUNNING",
+        scope=TagScope.CONTROLLER,
+        base_data_type=BaseDataType.BOOL,
+    )
+    db.add(known)
+    db.flush()
+    elements = [
+        {
+            "tag": "Display",
+            "xpath": "/Project/Displays/Display",
+            "attributes": {
+                "Name": "Line_Overview",
+                "Number": "10",
+                "Width": "800",
+                "Height": "600",
+                "Type": "Replace",
+            },
+        },
+        {
+            "tag": "Description",
+            "xpath": "/Project/Displays/Display/Description",
+            "attributes": {},
+            "text": "Line overview",
+        },
+        {
+            "tag": "MultiStateIndicator",
+            "xpath": "/Project/Displays/Display/GraphicElements/MultiStateIndicator",
+            "attributes": {"Name": "ind_Running", "Left": "20", "Top": "60"},
+        },
+        {
+            "tag": "Connection",
+            "xpath": (
+                "/Project/Displays/Display/GraphicElements/MultiStateIndicator/Connection"
+            ),
+            "attributes": {
+                "Name": "Indicator",
+                "Expression": "{::[Line]LINE_RUNNING}",
+            },
+        },
+        {
+            "tag": "MomentaryPushButton",
+            "xpath": "/Project/Displays/Display/GraphicElements/MomentaryPushButton",
+            "attributes": {"Name": "btn_Missing"},
+        },
+        {
+            "tag": "Connection",
+            "xpath": (
+                "/Project/Displays/Display/GraphicElements/MomentaryPushButton/Connection"
+            ),
+            "attributes": {
+                "Name": "Value",
+                "Expression": "{::[Line]MISSING_COMMAND}",
+            },
+        },
+    ]
+    _artifact(
+        db,
+        project,
+        file_kind=FileKind.XML,
+        role=DocumentRole.HMI_EXPORT,
+        content={"elements": elements},
+        name="HMI_Screens.xml",
+    )
+
+    first = import_latest_parsed_artifacts(db, project.id)
+    second = import_latest_parsed_artifacts(db, project.id)
+
+    screen = db.scalar(select(HMIScreen))
+    objects = list(db.scalars(select(HMIObjectInstance).order_by(HMIObjectInstance.key)))
+    bindings = {item.tag_name: item for item in db.scalars(select(HMIBinding))}
+    assert screen is not None
+    assert (screen.key, screen.width, screen.height) == ("Line_Overview", 800, 600)
+    assert [item.key for item in objects] == ["btn_Missing", "ind_Running"]
+    assert len(bindings) == 2
+    missing = bindings["MISSING_COMMAND"]
+    running = bindings["LINE_RUNNING"]
+    assert (missing.tag_name, missing.access, missing.is_resolved) == (
+        "MISSING_COMMAND",
+        "write",
+        False,
+    )
+    assert (running.tag_name, running.access, running.tag_id, running.is_resolved) == (
+        "LINE_RUNNING",
+        "read",
+        known.id,
+        True,
+    )
+    assert first.created_count == 5
+    assert second.created_count == 0
+    assert second.updated_count == 0
+
+
+def test_imported_hmi_read_binding_to_missing_tag_reaches_persisted_validation(
+    db: Session,
+    project: Project,
+) -> None:
+    display_path = "/Project/Displays/Display"
+    object_path = f"{display_path}/GraphicElements/NumericDisplay"
+    _artifact(
+        db,
+        project,
+        file_kind=FileKind.XML,
+        role=DocumentRole.HMI_EXPORT,
+        name="HMI_Screens.xml",
+        content={
+            "elements": [
+                {
+                    "tag": "Display",
+                    "xpath": display_path,
+                    "attributes": {"Name": "Line4_Overview", "Number": "10"},
+                },
+                {
+                    "tag": "NumericDisplay",
+                    "xpath": object_path,
+                    "attributes": {"Name": "num_CasesAccumulated"},
+                },
+                {
+                    "tag": "Connection",
+                    "xpath": f"{object_path}/Connection",
+                    "attributes": {
+                        "Name": "Value",
+                        "Expression": "{::[Line4]Accum_Case_Count}",
+                    },
+                },
+            ]
+        },
+    )
+
+    import_latest_parsed_artifacts(db, project.id)
+
+    object_instance = db.scalar(select(HMIObjectInstance))
+    binding = db.scalar(select(HMIBinding))
+    assert object_instance is not None and object_instance.key == "num_CasesAccumulated"
+    assert binding is not None
+    assert (binding.tag_name, binding.access, binding.tag_id, binding.is_resolved) == (
+        "Accum_Case_Count",
+        "read",
+        None,
+        False,
+    )
+
+    run = run_validation(
+        db,
+        project=project,
+        disciplines=[ValidationDiscipline.CROSS_DISCIPLINE],
+    )
+    result = db.scalar(
+        select(ValidationResult).where(
+            ValidationResult.validation_run_id == run.id,
+            ValidationResult.code == "cross.hmi_read_binding_unresolved",
+        )
+    )
+
+    assert result is not None
+    assert result.severity is ValidationSeverity.WARNING
+    assert result.object_id == binding.id
+    assert "Line4_Overview" in result.message
+    assert "Accum_Case_Count" in result.message
 
 
 def test_source_import_does_not_overwrite_human_or_generated_key_owners(

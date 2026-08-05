@@ -381,6 +381,13 @@ class LogicInstruction(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMix
     branch structure; :class:`LogicBranch` describes that structure itself. Both
     are needed — the coordinates make rendering a flat pass, the tree makes the
     nesting checkable.
+
+    The coordinates alone are not quite enough, which is what ``branch_id`` is
+    for. They say *this instruction is on leg 1 of a level-2 branch* but not
+    which leg of the level-1 branch that level-2 branch hangs off, so a nested
+    branch opening on a non-zero leg of its parent has no way to say so and a
+    renderer has to assume the leg it is already on. Naming the leg row removes
+    the assumption.
     """
 
     __tablename__ = "logic_instructions"
@@ -405,6 +412,17 @@ class LogicInstruction(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMix
     #: depth this instruction sits on.
     branch_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     branch_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    #: The :class:`LogicBranch` leg this instruction sits on, which fixes the
+    #: whole path from the main rung line rather than just the last step of it.
+    #: Null on the main line, and null on every row written before this column
+    #: existed — a reader must fall back to the coordinates rather than treat
+    #: null as "the main line". Cascades: an instruction cannot outlive the leg
+    #: it is on, and ``SET NULL`` would silently promote it to the main line,
+    #: which is a different rung.
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID, ForeignKey("logic_branches.id", ondelete="CASCADE"), nullable=True, index=True
+    )
 
     #: Destructive means the instruction *writes* its operand — the coil of an
     #: OTE, OTL or OTU, the destination of a MOV or a CPT. Two destructive

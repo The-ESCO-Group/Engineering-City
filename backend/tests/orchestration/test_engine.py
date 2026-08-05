@@ -38,20 +38,25 @@ import app.orchestration.steps  # noqa: F401
 from app.core.clock import utcnow
 from app.core.config import Settings
 from app.core.enums import (
+    ApprovalGateKey,
     ApprovalKind,
     ApprovalStatus,
     AuditAction,
     EventType,
+    GateStatus,
     ProjectStatus,
     TaskKind,
     TaskStatus,
 )
 from app.core.errors import ConflictError
 from app.core.services import parsing
+from app.database.session import get_session_factory
+from app.engineering import gates
 from app.models.approval import Approval
 from app.models.audit import AuditEntry
 from app.models.event import Event
 from app.models.project import Project
+from app.models.revision import ApprovalGate
 from app.models.task import Task, TaskDependency
 from app.models.user import User
 from app.orchestration import engine, worker
@@ -363,6 +368,114 @@ def test_start_run_refuses_a_second_concurrent_run(
     assert len(_events(db, ingested_project, EventType.WORKFLOW_STARTED)) == 1
 
 
+@pytest.mark.parametrize(
+    "active_status",
+    [
+        TaskStatus.QUEUED,
+        TaskStatus.RUNNING,
+        TaskStatus.BLOCKED,
+        TaskStatus.AWAITING_APPROVAL,
+    ],
+)
+def test_awaiting_review_cannot_start_over_any_nonterminal_workflow_task(
+    db: Session,
+    ingested_project: Project,
+    settings: Settings,
+    seeded: dict[str, User],
+    active_status: TaskStatus,
+) -> None:
+    first = _start_run(db, ingested_project, settings, seeded["engineer"])
+    active = first.tasks[0]
+    for task in first.tasks:
+        task.status = TaskStatus.CANCELLED
+        task.finished_at = utcnow()
+    active.status = active_status
+    active.finished_at = None
+    ingested_project.status = ProjectStatus.AWAITING_REVIEW
+    db.commit()
+
+    with pytest.raises(ConflictError, match="still active"):
+        engine.start_run(db, ingested_project, settings, actor=seeded["engineer"])
+    db.rollback()
+
+    assert {task.id for task in _tasks(db, ingested_project)} == {
+        task.id for task in first.tasks
+    }
+    assert len(_events(db, ingested_project, EventType.WORKFLOW_STARTED)) == 1
+
+
+def test_awaiting_review_cannot_start_over_a_pending_gate_decision(
+    db: Session, ingested_project: Project, settings: Settings, seeded: dict[str, User]
+) -> None:
+    first = _start_run(db, ingested_project, settings, seeded["engineer"])
+    for task in first.tasks:
+        task.status = TaskStatus.CANCELLED
+        task.finished_at = utcnow()
+    request = Approval(
+        project_id=ingested_project.id,
+        kind=ApprovalKind.GATE_DECISION,
+        status=ApprovalStatus.PENDING,
+        gate_key=ApprovalGateKey.PROJECT_PROFILE,
+        revision_number=ingested_project.current_revision_number,
+        title="Approval gate: Project profile",
+        question="Is this profile fit to proceed?",
+    )
+    db.add(request)
+    ingested_project.status = ProjectStatus.AWAITING_REVIEW
+    db.commit()
+
+    with pytest.raises(ConflictError, match="still active"):
+        engine.start_run(db, ingested_project, settings, actor=seeded["engineer"])
+    db.rollback()
+
+    assert {task.id for task in _tasks(db, ingested_project)} == {
+        task.id for task in first.tasks
+    }
+    assert len(_events(db, ingested_project, EventType.WORKFLOW_STARTED)) == 1
+
+
+def test_awaiting_review_can_restart_after_all_work_and_gate_requests_are_terminal(
+    db: Session, ingested_project: Project, settings: Settings, seeded: dict[str, User]
+) -> None:
+    first = _start_run(db, ingested_project, settings, seeded["engineer"])
+    for task in first.tasks:
+        task.status = TaskStatus.CANCELLED
+        task.finished_at = utcnow()
+    ingested_project.status = ProjectStatus.AWAITING_REVIEW
+    db.commit()
+
+    second = _start_run(db, ingested_project, settings, seeded["engineer"])
+
+    assert second.run_id != first.run_id
+    assert {task.id for task in second.tasks}.isdisjoint({task.id for task in first.tasks})
+
+
+def test_start_run_refreshes_a_stale_project_before_creating_a_second_graph(
+    db: Session, ingested_project: Project, settings: Settings, seeded: dict[str, User]
+) -> None:
+    """A request loaded before the winning start must observe that winner."""
+    # End the arranging read transaction while deliberately retaining this
+    # Session's stale, expire_on_commit=False Project identity.
+    db.commit()
+    with get_session_factory()() as winner:
+        current_project = winner.get(Project, ingested_project.id)
+        current_actor = winner.get(User, seeded["engineer"].id)
+        assert current_project is not None
+        assert current_actor is not None
+        first = engine.start_run(winner, current_project, settings, actor=current_actor)
+        winner.commit()
+        first_task_ids = {task.id for task in first.tasks}
+
+    assert ingested_project.status is not ProjectStatus.RUNNING, "the caller must be stale"
+    with pytest.raises(ConflictError, match="already in progress"):
+        engine.start_run(db, ingested_project, settings, actor=seeded["engineer"])
+    db.rollback()
+
+    db.expire_all()
+    assert {task.id for task in _tasks(db, ingested_project)} == first_task_ids
+    assert len(_events(db, ingested_project, EventType.WORKFLOW_STARTED)) == 1
+
+
 def test_start_run_refuses_a_project_with_nothing_to_analyse(
     db: Session, project: Project, settings: Settings, seeded: dict[str, User]
 ) -> None:
@@ -507,6 +620,28 @@ def test_pausing_an_already_paused_project_is_refused(
     assert len(_audit(db, ingested_project, AuditAction.ANALYSIS_PAUSED)) == 1
 
 
+def test_pause_refreshes_a_stale_project_and_does_not_emit_a_duplicate_transition(
+    db: Session, ingested_project: Project, settings: Settings, seeded: dict[str, User]
+) -> None:
+    _start_run(db, ingested_project, settings, seeded["engineer"])
+    with get_session_factory()() as winner:
+        current_project = winner.get(Project, ingested_project.id)
+        current_actor = winner.get(User, seeded["engineer"].id)
+        assert current_project is not None
+        assert current_actor is not None
+        engine.pause(winner, current_project, actor=current_actor, reason="first pause")
+        winner.commit()
+
+    assert ingested_project.is_paused is False, "the caller must be stale"
+    with pytest.raises(ConflictError, match="already paused"):
+        engine.pause(db, ingested_project, actor=seeded["engineer"], reason="duplicate")
+    db.rollback()
+
+    db.expire_all()
+    assert ingested_project.is_paused is True
+    assert len(_events(db, ingested_project, EventType.WORKFLOW_PAUSED)) == 1
+
+
 def test_pausing_a_project_that_is_not_running_is_refused(
     db: Session, project: Project, seeded: dict[str, User]
 ) -> None:
@@ -565,6 +700,31 @@ def test_resuming_a_project_that_is_not_paused_is_refused(
     assert _events(db, ingested_project, EventType.WORKFLOW_RESUMED) == []
 
 
+def test_resume_refreshes_a_stale_project_and_does_not_emit_a_duplicate_transition(
+    db: Session, ingested_project: Project, settings: Settings, seeded: dict[str, User]
+) -> None:
+    _start_run(db, ingested_project, settings, seeded["engineer"])
+    engine.pause(db, ingested_project, actor=seeded["engineer"])
+    db.commit()
+
+    with get_session_factory()() as winner:
+        current_project = winner.get(Project, ingested_project.id)
+        current_actor = winner.get(User, seeded["engineer"].id)
+        assert current_project is not None
+        assert current_actor is not None
+        engine.resume(winner, current_project, actor=current_actor, reason="first resume")
+        winner.commit()
+
+    assert ingested_project.is_paused is True, "the caller must be stale"
+    with pytest.raises(ConflictError, match="not paused"):
+        engine.resume(db, ingested_project, actor=seeded["engineer"], reason="duplicate")
+    db.rollback()
+
+    db.expire_all()
+    assert ingested_project.is_paused is False
+    assert len(_events(db, ingested_project, EventType.WORKFLOW_RESUMED)) == 1
+
+
 # ---------------------------------------------------------------------------
 # cancel
 # ---------------------------------------------------------------------------
@@ -594,6 +754,177 @@ def test_cancel_stops_every_unfinished_task_and_says_why(
     events = _events(db, ingested_project, EventType.WORKFLOW_CANCELLED)
     assert len(events) == 1
     assert events[0].payload["task_count"] == stopped
+
+
+def test_cancel_closes_every_gate_request_and_recovery_cannot_resurrect_it(
+    db: Session, ingested_project: Project, settings: Settings, seeded: dict[str, User]
+) -> None:
+    """A cancelled run stays cancelled even when restart reconciliation runs."""
+    summary = _start_run(db, ingested_project, settings, seeded["engineer"])
+    gate = next(
+        item
+        for item in gates.ensure_gates(db, project=ingested_project)
+        if item.gate_key is ApprovalGateKey.PROJECT_PROFILE
+    )
+    gate.status = GateStatus.AWAITING_DECISION
+    gate_task = Task(
+        project_id=ingested_project.id,
+        run_id=summary.run_id,
+        kind=TaskKind.EVALUATE_APPROVAL_GATE,
+        title="Evaluate project profile gate",
+        status=TaskStatus.AWAITING_APPROVAL,
+        attempts=1,
+        payload={"gate_key": ApprovalGateKey.PROJECT_PROFILE.value},
+        idempotency_key=f"{summary.run_id}:test-gate",
+    )
+    db.add(gate_task)
+    requests = [
+        Approval(
+            project_id=ingested_project.id,
+            gate_key=ApprovalGateKey.PROJECT_PROFILE,
+            kind=ApprovalKind.GATE_DECISION,
+            status=ApprovalStatus.PENDING,
+            revision_number=ingested_project.current_revision_number,
+            title="Approval gate: Project profile",
+            question="Is this profile fit to proceed?",
+        )
+        for _ in range(2)
+    ]
+    db.add_all(requests)
+    db.flush()
+    gate.approval_id = requests[0].id
+    db.commit()
+
+    stopped = engine.cancel(
+        db,
+        ingested_project,
+        settings,
+        actor=seeded["engineer"],
+        reason="The client withdrew this run.",
+    )
+    db.commit()
+
+    assert stopped == len(summary.tasks) + 1
+    db.expire_all()
+    stored_gate_task = db.get(Task, gate_task.id)
+    stored_gate = db.get(ApprovalGate, gate.id)
+    assert stored_gate_task is not None and stored_gate_task.status is TaskStatus.CANCELLED
+    assert stored_gate is not None and stored_gate.approval_id is None
+    for request in requests:
+        stored = db.get(Approval, request.id)
+        assert stored is not None
+        assert stored.status is ApprovalStatus.CANCELLED
+        assert stored.decision is None
+        assert stored.decided_by_id is None
+        assert stored.decided_at is not None
+        assert "client withdrew" in stored.decision_notes.lower()
+
+    entry = _audit(db, ingested_project, AuditAction.ANALYSIS_CANCELLED)[-1]
+    assert entry.details["cancelled_gate_approvals"] == 2
+    assert set(entry.details["cancelled_gate_approval_ids"]) == {
+        str(request.id) for request in requests
+    }
+    assert _events(db, ingested_project, EventType.APPROVAL_DECIDED) == []
+    assert _audit(db, ingested_project, AuditAction.APPROVAL_DECIDED) == []
+
+    # Both the direct repair hook and startup recovery used to turn the gate
+    # task live again from the durable gate projection.
+    assert engine.reconcile_gate_tasks(db, ingested_project) == 0
+    db.commit()
+    assert worker.recover(settings) == 0
+    assert worker.drain(settings).claimed == 0
+
+    db.expire_all()
+    assert db.get(Task, gate_task.id).status is TaskStatus.CANCELLED  # type: ignore[union-attr]
+    assert db.scalar(
+        select(Approval.id).where(
+            Approval.project_id == ingested_project.id,
+            Approval.kind == ApprovalKind.GATE_DECISION,
+            Approval.status == ApprovalStatus.PENDING,
+        )
+    ) is None
+
+
+def test_restart_requeues_a_failed_gate_task_when_the_gate_is_authoritatively_skipped(
+    db: Session, project: Project, settings: Settings
+) -> None:
+    gate = next(
+        item
+        for item in gates.ensure_gates(db, project=project)
+        if item.gate_key is ApprovalGateKey.DEVICES_IO_TAGS
+    )
+    gate.is_enabled = False
+    gate.disabled_reason = "This discipline is explicitly outside the engagement."
+    task = Task(
+        project_id=project.id,
+        run_id=uuid.uuid4(),
+        kind=TaskKind.EVALUATE_APPROVAL_GATE,
+        title="Evaluate devices, I/O and tags gate",
+        status=TaskStatus.FAILED,
+        attempts=1,
+        error_code="worker_crashed",
+        error_message="The previous process stopped during finalization.",
+        payload={"gate_key": ApprovalGateKey.DEVICES_IO_TAGS.value},
+        idempotency_key=f"restart-gate:{uuid.uuid4()}",
+    )
+    db.add(task)
+    db.commit()
+
+    assert worker.recover(settings) == 0
+    db.expire_all()
+    recovered = db.get(Task, task.id)
+    assert recovered is not None
+    assert recovered.status is TaskStatus.QUEUED
+    assert recovered.error_code == ""
+
+    tick = worker.tick(settings, WORKER_ID)
+    assert tick.completed == 1
+    db.expire_all()
+    assert db.get(Task, task.id).status is TaskStatus.COMPLETED  # type: ignore[union-attr]
+
+
+def test_restart_reconciliation_visits_project_roots_in_deterministic_order(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_ids = [
+        uuid.UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+        uuid.UUID("11111111-1111-1111-1111-111111111111"),
+        uuid.UUID("99999999-9999-9999-9999-999999999999"),
+    ]
+    # Insert in deliberately non-sorted order; SQL result order is not a lock
+    # ordering guarantee on either supported database.
+    for index, project_id in enumerate(project_ids):
+        db.add(
+            Project(
+                id=project_id,
+                name=f"Recovery order project {index}",
+                status=ProjectStatus.DRAFT,
+            )
+        )
+        db.add(
+            Task(
+                project_id=project_id,
+                run_id=uuid.uuid4(),
+                kind=TaskKind.EVALUATE_APPROVAL_GATE,
+                title="Evaluate project profile gate",
+                status=TaskStatus.QUEUED,
+                payload={"gate_key": ApprovalGateKey.PROJECT_PROFILE.value},
+                idempotency_key=f"recovery-order:{index}",
+            )
+        )
+    db.commit()
+
+    visited: list[uuid.UUID] = []
+
+    def record_visit(_: Session, current_project: Project, **__: object) -> int:
+        visited.append(current_project.id)
+        return 0
+
+    monkeypatch.setattr(engine, "reconcile_gate_tasks", record_visit)
+
+    assert engine.reconcile_all_gate_tasks(db) == 0
+    assert visited == sorted(project_ids, key=str)
 
 
 def test_cancel_leaves_completed_work_alone(

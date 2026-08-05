@@ -58,13 +58,14 @@ def test_findings_are_not_writable_through_a_change_set() -> None:
 def test_the_allowlist_is_the_mapper_minus_the_denylist(object_type: ObjectType) -> None:
     """The shape matters more than the contents.
 
-    Derived rather than enumerated, so a column added to a model tomorrow is
-    writable without anyone remembering to update a list — and the protected
-    columns stay unwritable without anyone remembering either.
+    Derived rather than enumerated, so ordinary model additions remain writable
+    while service-owned and explicitly held-closed fields stay out.
     """
     mapper = sa_inspect(registry.model_for(object_type))
     columns = {column.key for column in mapper.columns}
-    assert registry.allowed_fields(object_type) == columns - registry.PROTECTED_FIELDS
+    assert registry.allowed_fields(object_type) == (
+        columns - registry.PROTECTED_FIELDS - registry.restricted_fields(object_type)
+    )
 
 
 @pytest.mark.parametrize("object_type", WRITABLE, ids=lambda t: t.value)
@@ -89,6 +90,20 @@ def test_ordinary_engineering_fields_stay_writable() -> None:
     """The denylist is targeted; it is not a general lock on the model."""
     allowed = registry.allowed_fields(ObjectType.TAG)
     assert {"name", "description", "role", "base_data_type", "device_id"} <= allowed
+
+
+def test_instruction_branch_identity_is_held_closed_until_branch_validation_exists() -> None:
+    """A new foreign key must not become a write surface before its invariants do.
+
+    The generic reference checker cannot validate ``LogicBranch`` because branch
+    rows are not registered change-set objects.  Until import and generation use
+    branch identities, clients keep supplying the established coordinates.
+    """
+    assert "branch_id" not in registry.allowed_fields(ObjectType.LOGIC_INSTRUCTION)
+    assert registry.restricted_fields(ObjectType.LOGIC_INSTRUCTION) == frozenset({"branch_id"})
+    reason = registry.field_write_restriction(ObjectType.LOGIC_INSTRUCTION, "branch_id")
+    assert "branch identity" in reason
+    assert "branch_level and branch_index" in reason
 
 
 def test_required_fields_are_the_columns_nothing_else_supplies() -> None:

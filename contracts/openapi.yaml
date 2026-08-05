@@ -580,6 +580,160 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/external-agents:
+    post:
+      tags:
+      - external agents
+      summary: Deploy one short-lived OpenAI or Claude SDK agent
+      operationId: deploy_external_agent_api_projects__project_id__external_agents_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalAgentDeployRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalAgentDeployResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/external-agents/session/context:
+    get:
+      tags:
+      - external agents
+      summary: Read the bounded project context granted to this SDK mission
+      operationId: external_agent_context_api_external_agents_session_context_get
+      parameters:
+      - name: evidence_offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Evidence Offset
+      - name: evidence_limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 200
+          title: Evidence Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalAgentContextRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/external-agents/session/progress:
+    post:
+      tags:
+      - external agents
+      summary: Publish SDK agent progress and its semantic city location
+      operationId: external_agent_progress_api_external_agents_session_progress_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalAgentProgressRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentInstanceRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/external-agents/session/submit:
+    post:
+      tags:
+      - external agents
+      summary: Submit one idempotent SDK result through native ESCO action gates
+      operationId: external_agent_submit_api_external_agents_session_submit_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalAgentSubmissionRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalAgentSubmissionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/external-agents/{instance_id}:
+    delete:
+      tags:
+      - external agents
+      summary: Revoke an external SDK mission immediately
+      operationId: revoke_external_agent_api_projects__project_id__external_agents__instance_id__delete
+      parameters:
+      - name: instance_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Instance Id
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalAgentRevokeResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/projects/{project_id}/requirements:
     get:
       tags:
@@ -645,6 +799,77 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RequirementDecisionRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/projects/{project_id}/validation-results:
+    get:
+      tags:
+      - validation
+      summary: Newest deterministic validation results, including recorded waivers
+      operationId: list_validation_results_api_projects__project_id__validation_results_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ValidationResultRead'
+                title: Response List Validation Results Api Projects  Project Id  Validation Results Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/validation-results/{result_id}/waiver:
+    post:
+      tags:
+      - validation
+      summary: Accept one current validation risk as a named reviewer
+      operationId: waive_validation_result_api_validation_results__result_id__waiver_post
+      parameters:
+      - name: result_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Result Id
+      - name: User-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User-Agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidationWaiverRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationWaiverRead'
         '422':
           description: Validation Error
           content:
@@ -1975,6 +2200,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/approval-gates/{gate_id}/approvals/{approval_id}/decision:
+    post:
+      tags:
+      - approvals
+      summary: Record an explicit workflow gate decision
+      description: 'Record any supported gate verdict against an exact gate/request pair.
+
+
+        The gate and approval identifiers are both in the route so a stale client
+
+        cannot accidentally apply a decision to a newer request for the same gate.
+
+        ``record_decision`` remains the sole state transition authority.'
+      operationId: decide_gate_api_approval_gates__gate_id__approvals__approval_id__decision_post
+      parameters:
+      - name: gate_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Gate Id
+      - name: approval_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Approval Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalGateDecisionRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRead'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/projects/{project_id}/reports:
     get:
       tags:
@@ -2800,6 +3073,16 @@ components:
       - file_whole
       title: AnchorType
       description: The addressing scheme used by an :class:`~app.models.evidence.EvidenceAnchor`.
+    ApprovalDecision:
+      type: string
+      enum:
+      - approve
+      - reject
+      - request_changes
+      - accept_risk
+      - defer
+      title: ApprovalDecision
+      description: What a reviewer chose. Maps onto :class:`ApprovalStatus`.
     ApprovalDecisionRequest:
       properties:
         approved:
@@ -2820,6 +3103,31 @@ components:
         ``approved`` is required and has no default: approving must always be an
 
         explicit act, never the result of an omitted field.'
+    ApprovalGateDecisionRequest:
+      properties:
+        decision:
+          $ref: '#/components/schemas/ApprovalDecision'
+        comment:
+          type: string
+          maxLength: 4000
+          title: Comment
+          default: ''
+      type: object
+      required:
+      - decision
+      title: ApprovalGateDecisionRequest
+      description: An explicit decision on one of the six production workflow gates.
+    ApprovalGateKey:
+      type: string
+      enum:
+      - project_profile
+      - devices_io_tags
+      - logic_and_delivery
+      - qa_and_risk
+      - import_verification
+      - release
+      title: ApprovalGateKey
+      description: The six configurable gates a project passes through.
     ApprovalKind:
       type: string
       enum:
@@ -2845,6 +3153,31 @@ components:
           type: string
           format: uuid
           title: Project Id
+        gate_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Gate Id
+        gate_key:
+          anyOf:
+          - $ref: '#/components/schemas/ApprovalGateKey'
+          - type: 'null'
+        revision_number:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Revision Number
+        release_candidate_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Release Candidate Id
+        decision:
+          anyOf:
+          - $ref: '#/components/schemas/ApprovalDecision'
+          - type: 'null'
         task_id:
           anyOf:
           - type: string
@@ -3566,6 +3899,7 @@ components:
       - changeset.validation_failed
       - changeset.submitted
       - changeset.reviewed
+      - changeset.abandoned
       - changeset.merged
       - revision.created
       - gate.status_changed
@@ -3752,6 +4086,298 @@ components:
       - validation_level
       - created_at
       title: ExportArtifactRead
+    ExternalAgentContextRead:
+      properties:
+        instance:
+          $ref: '#/components/schemas/AgentInstanceRead'
+        provider:
+          $ref: '#/components/schemas/ProviderKind'
+        model:
+          type: string
+          title: Model
+        mission:
+          type: string
+          title: Mission
+        project:
+          additionalProperties: true
+          type: object
+          title: Project
+        files:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Files
+        requirements:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Requirements
+        evidence_anchors:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Evidence Anchors
+        evidence_total:
+          type: integer
+          title: Evidence Total
+        evidence_offset:
+          type: integer
+          title: Evidence Offset
+        evidence_limit:
+          type: integer
+          title: Evidence Limit
+        allowed_actions:
+          items:
+            type: string
+          type: array
+          title: Allowed Actions
+        response_schema:
+          additionalProperties: true
+          type: object
+          title: Response Schema
+        rules:
+          type: string
+          title: Rules
+      type: object
+      required:
+      - instance
+      - provider
+      - model
+      - mission
+      - project
+      - files
+      - requirements
+      - evidence_anchors
+      - evidence_total
+      - evidence_offset
+      - evidence_limit
+      - allowed_actions
+      - response_schema
+      - rules
+      title: ExternalAgentContextRead
+    ExternalAgentDeployRequest:
+      properties:
+        provider:
+          type: string
+          enum:
+          - openai
+          - anthropic
+          title: Provider
+        display_name:
+          type: string
+          maxLength: 80
+          minLength: 1
+          title: Display Name
+        specialty:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Specialty
+        mission:
+          type: string
+          maxLength: 4000
+          minLength: 1
+          title: Mission
+        model:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Model
+        initial_location:
+          $ref: '#/components/schemas/SemanticLocation'
+          default: project_intake
+        ttl_seconds:
+          type: integer
+          maximum: 86400.0
+          minimum: 300.0
+          title: Ttl Seconds
+          default: 3600
+        acknowledge_external_processing:
+          type: boolean
+          const: true
+          title: Acknowledge External Processing
+          description: Explicit acknowledgement that the SDK worker may send the returned project context
+            to the selected external provider.
+      type: object
+      required:
+      - provider
+      - display_name
+      - specialty
+      - mission
+      - model
+      - acknowledge_external_processing
+      title: ExternalAgentDeployRequest
+    ExternalAgentDeployResponse:
+      properties:
+        instance:
+          $ref: '#/components/schemas/AgentInstanceRead'
+        agent_token:
+          type: string
+          title: Agent Token
+          description: 'Shown once. Send as `Authorization: Bearer <token>` to mission endpoints.'
+        token_expires_at:
+          type: string
+          format: date-time
+          title: Token Expires At
+        provider:
+          $ref: '#/components/schemas/ProviderKind'
+        model:
+          type: string
+          title: Model
+        mission:
+          type: string
+          title: Mission
+        allowed_actions:
+          items:
+            type: string
+          type: array
+          title: Allowed Actions
+        endpoints:
+          $ref: '#/components/schemas/ExternalAgentEndpoints'
+      type: object
+      required:
+      - instance
+      - agent_token
+      - token_expires_at
+      - provider
+      - model
+      - mission
+      - allowed_actions
+      - endpoints
+      title: ExternalAgentDeployResponse
+    ExternalAgentEndpoints:
+      properties:
+        context:
+          type: string
+          title: Context
+        progress:
+          type: string
+          title: Progress
+        submit:
+          type: string
+          title: Submit
+      type: object
+      required:
+      - context
+      - progress
+      - submit
+      title: ExternalAgentEndpoints
+    ExternalAgentProgressRequest:
+      properties:
+        status:
+          $ref: '#/components/schemas/AgentStatus'
+        location:
+          $ref: '#/components/schemas/SemanticLocation'
+        activity:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Activity
+        message:
+          type: string
+          maxLength: 4000
+          title: Message
+          default: ''
+      type: object
+      required:
+      - status
+      - location
+      - activity
+      title: ExternalAgentProgressRequest
+    ExternalAgentRevokeResponse:
+      properties:
+        instance_id:
+          type: string
+          format: uuid
+          title: Instance Id
+        status:
+          $ref: '#/components/schemas/AgentStatus'
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - instance_id
+      - status
+      - message
+      title: ExternalAgentRevokeResponse
+    ExternalAgentSubmissionRequest:
+      properties:
+        submission_id:
+          type: string
+          format: uuid
+          title: Submission Id
+        rationale:
+          type: string
+          maxLength: 4000
+          minLength: 1
+          title: Rationale
+        actions:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          maxItems: 100
+          title: Actions
+        warnings:
+          items:
+            type: string
+            maxLength: 4000
+          type: array
+          maxItems: 100
+          title: Warnings
+        prompt_tokens:
+          type: integer
+          maximum: 200000.0
+          minimum: 0.0
+          title: Prompt Tokens
+          default: 0
+        completion_tokens:
+          type: integer
+          maximum: 200000.0
+          minimum: 0.0
+          title: Completion Tokens
+          default: 0
+        latency_ms:
+          type: integer
+          maximum: 86400000.0
+          minimum: 0.0
+          title: Latency Ms
+          default: 0
+      type: object
+      required:
+      - submission_id
+      - rationale
+      - actions
+      title: ExternalAgentSubmissionRequest
+    ExternalAgentSubmissionResponse:
+      properties:
+        run:
+          $ref: '#/components/schemas/AgentRunDetail'
+        accepted_actions:
+          type: integer
+          title: Accepted Actions
+        rejected_actions:
+          type: integer
+          title: Rejected Actions
+        execution:
+          additionalProperties: true
+          type: object
+          title: Execution
+        replayed:
+          type: boolean
+          title: Replayed
+          default: false
+      type: object
+      required:
+      - run
+      - accepted_actions
+      - rejected_actions
+      - execution
+      title: ExternalAgentSubmissionResponse
     FileDetail:
       properties:
         id:
@@ -4439,6 +5065,66 @@ components:
         requires an explicit supersede path and a fresh approval, so an agent
 
         cannot quietly edit something an engineer signed off.'
+    ObjectType:
+      type: string
+      enum:
+      - project_profile
+      - project_question
+      - project_decision
+      - requirement
+      - acceptance_criterion
+      - assumption
+      - constraint
+      - clarification
+      - area
+      - unit
+      - equipment_module
+      - device
+      - device_type
+      - network_node
+      - module
+      - io_point
+      - signal
+      - address_assignment
+      - tag
+      - tag_alias
+      - tag_group
+      - data_type_definition
+      - udt_definition
+      - aoi_reference
+      - controller_task
+      - program
+      - routine
+      - logic_network
+      - logic_rung
+      - logic_instruction
+      - interlock
+      - permissive
+      - cause_effect_entry
+      - mode_definition
+      - state_definition
+      - transition_definition
+      - sequence_step
+      - fault_definition
+      - reset_behavior
+      - hmi_screen
+      - hmi_binding
+      - alarm_definition
+      - test_case
+      - finding
+      - export_artifact
+      - release_candidate
+      title: ObjectType
+      description: 'Stable names for canonical objects.
+
+
+        Used wherever a reference has to be polymorphic — evidence links, change
+
+        operations, impact analysis. A string rather than a foreign key per target
+
+        so that adding an object type does not require a schema change everywhere
+
+        it could be cited.'
     OkResponse:
       properties:
         ok:
@@ -4973,6 +5659,14 @@ components:
       - expansion
       - other
       title: ProjectType
+    ProviderKind:
+      type: string
+      enum:
+      - mock
+      - ollama
+      - openai
+      - anthropic
+      title: ProviderKind
     QuestionCategory:
       type: string
       enum:
@@ -5844,6 +6538,34 @@ components:
         Anything other than ``STANDARD`` puts the project into manual-review-only
 
         mode unless an administrator has enabled a qualified workflow.'
+    SemanticLocation:
+      type: string
+      enum:
+      - project_intake
+      - requirements_hall
+      - project_core
+      - tag_foundry
+      - automation_core
+      - ladder_logic_lab
+      - electrical_works
+      - hmi_district
+      - alarm_center
+      - qa_campus
+      - testing_grounds
+      - approval_plaza
+      - documentation_quarter
+      - release_logistics
+      - template_library
+      - data_center
+      title: SemanticLocation
+      description: 'Where in the city an agent is working.
+
+
+        The backend broadcasts these names and never pixel coordinates: where a
+
+        district *is* on screen is the frontend''s business, and coupling the
+
+        backend to a layout would make moving a building a backend change.'
     StartRunRequest:
       properties:
         force_reparse:
@@ -6491,6 +7213,21 @@ components:
       - display_name
       - is_active
       title: UserSummary
+    ValidationDiscipline:
+      type: string
+      enum:
+      - requirements
+      - tags
+      - io
+      - plc_logic
+      - interlocks
+      - hmi
+      - alarms
+      - testing
+      - documentation
+      - release
+      - cross_discipline
+      title: ValidationDiscipline
     ValidationError:
       properties:
         loc:
@@ -6538,6 +7275,146 @@ components:
         parses back into the same model, which is not the same as proving Studio
 
         5000 will import it.'
+    ValidationResultRead:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        validation_run_id:
+          type: string
+          format: uuid
+          title: Validation Run Id
+        code:
+          type: string
+          title: Code
+        discipline:
+          $ref: '#/components/schemas/ValidationDiscipline'
+        severity:
+          $ref: '#/components/schemas/ValidationSeverity'
+        message:
+          type: string
+          title: Message
+        detail:
+          additionalProperties: true
+          type: object
+          title: Detail
+        object_type:
+          anyOf:
+          - $ref: '#/components/schemas/ObjectType'
+          - type: 'null'
+        object_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Object Id
+        object_label:
+          type: string
+          title: Object Label
+          default: ''
+        suggested_action:
+          type: string
+          title: Suggested Action
+          default: ''
+        requires_human_decision:
+          type: boolean
+          title: Requires Human Decision
+        is_waived:
+          type: boolean
+          title: Is Waived
+        waived_by_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Waived By Id
+        waiver_reason:
+          type: string
+          title: Waiver Reason
+          default: ''
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - project_id
+      - validation_run_id
+      - code
+      - discipline
+      - severity
+      - message
+      - requires_human_decision
+      - is_waived
+      - created_at
+      - updated_at
+      title: ValidationResultRead
+    ValidationSeverity:
+      type: string
+      enum:
+      - error
+      - warning
+      - information
+      - unsupported
+      - human_review_required
+      title: ValidationSeverity
+    ValidationWaiverRead:
+      properties:
+        result:
+          $ref: '#/components/schemas/ValidationResultRead'
+        waived_by_id:
+          type: string
+          format: uuid
+          title: Waived By Id
+        waived_at:
+          type: string
+          format: date-time
+          title: Waived At
+        decision_replayed:
+          type: boolean
+          title: Decision Replayed
+          default: false
+        unblocked_task_count:
+          type: integer
+          title: Unblocked Task Count
+          default: 0
+      type: object
+      required:
+      - result
+      - waived_by_id
+      - waived_at
+      title: ValidationWaiverRead
+    ValidationWaiverRequest:
+      properties:
+        confirm:
+          type: boolean
+          const: true
+          title: Confirm
+        reason:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Reason
+        expected_updated_at:
+          type: string
+          format: date-time
+          title: Expected Updated At
+      type: object
+      required:
+      - confirm
+      - reason
+      - expected_updated_at
+      title: ValidationWaiverRequest
     WorkflowControlRequest:
       properties:
         reason:

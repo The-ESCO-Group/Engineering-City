@@ -41,7 +41,6 @@ from __future__ import annotations
 
 from app.engineering import gates, impact, release
 from app.engineering.changesets import (
-    BASIS_KEY,
     TEMP_REFERENCE_PREFIX,
     abandon,
     build_changeset,
@@ -101,7 +100,6 @@ from app.engineering.revisions import (
 )
 
 __all__ = [
-    "BASIS_KEY",
     "FORCED_STALE_REVISION_CODE",
     "GATE_SPECS",
     "MERGEABLE_STATUSES",

@@ -20,14 +20,15 @@ import time
 import uuid
 from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.base.presence import begin_task_presence, finish_task_presence
 from app.core.config import Settings
 from app.core.enums import EventType, TaskStatus
 from app.core.logging import get_logger, set_request_context
+from app.database.locking import lock_project_root
 from app.database.session import session_scope
-from app.models.project import Project
 from app.models.task import Task
 from app.orchestration import engine, handlers
 from app.orchestration.events import record_event
@@ -63,10 +64,44 @@ def run_one(db: Session, task: Task, settings: Settings) -> str:
     file would take the whole project's review with it.
     """
     queue = DatabaseTaskQueue(db, settings)
-    project = db.get(Project, task.project_id)
+    task_id = task.id
+    project_id = task.project_id
+    claim_owner = task.locked_by
+    claim_attempt = task.attempts
+
+    # ``tick`` commits the claim before opening this dispatch Session. Between
+    # those transactions an operator can cancel the run or recovery can replace
+    # the lease. Always take the project root first, then conditionally prove
+    # ownership of this exact RUNNING attempt before emitting presence/events or
+    # invoking a handler. This also gives dependency-failure finalization the
+    # same Project -> Task lock order as cancellation and gate transitions.
+    project = lock_project_root(db, project_id)
     if project is None:  # pragma: no cover - FK makes this unreachable
-        queue.fail(task, code="project_missing", message="Project no longer exists.", retry=False)
+        db.rollback()
         return TaskStatus.FAILED.value
+    owns_execution = claim_owner is not None and queue.acquire_execution(
+        task,
+        worker_id=claim_owner,
+        attempt=claim_attempt,
+    )
+    if not owns_execution:
+        # Do not even tidy presence here: this stale attempt never acquired the
+        # right to publish side effects, and a newer owner may already be using
+        # the same agent instance. Reflect the durable winner only.
+        db.rollback()
+        current = db.get(Task, task_id)
+        if current is None:  # pragma: no cover - project FK/cascade owns deletion
+            return TaskStatus.CANCELLED.value
+        logger.info(
+            "skipped stale task dispatch",
+            extra={
+                "task_id": str(task_id),
+                "attempt": claim_attempt,
+                "current_attempt": current.attempts,
+                "current_status": current.status.value,
+            },
+        )
+        return current.status.value
 
     set_request_context(project_id=str(project.id))
 
@@ -137,6 +172,84 @@ def run_one(db: Session, task: Task, settings: Settings) -> str:
         outcome = handlers.HandlerResult.failed("handler_error", f"{type(exc).__name__}: {exc}")
     duration_ms = int((time.perf_counter() - started) * 1000)
 
+    # The task may have been cancelled or recovered while its handler was
+    # running. Reacquire the project root first, then use an atomic claimed-
+    # attempt transition for the task. The UPDATE inside acquire_finalization
+    # is what closes the race on SQLite, where SELECT FOR UPDATE is ignored.
+    project = lock_project_root(db, project.id)
+    if project is None:  # pragma: no cover - the task FK prevents this
+        db.rollback()
+        return TaskStatus.FAILED.value
+
+    reopened = queue.incomplete_hard_dependencies(task)
+    if reopened:
+        # The handler ran against a prerequisite snapshot that is no longer
+        # authoritative (most importantly, an approval gate reopened).  Roll
+        # back every handler write before changing queue state, then requeue the
+        # exact claimed attempt under a fresh project-root lock.
+        task_id = task.id
+        project_id = project.id
+        names = "; ".join(
+            f"{upstream.title} ({upstream.status.value})" for upstream in reopened[:3]
+        )
+        detail = f"A hard prerequisite reopened while this task was running: {names}"
+        db.rollback()
+
+        locked_project = lock_project_root(db, project_id)
+        current = db.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
+        if locked_project is None or current is None:  # pragma: no cover - FK/cascade guard
+            return TaskStatus.CANCELLED.value
+        queue.requeue_claim_after_dependency_change(
+            current,
+            worker_id=claim_owner or "",
+            attempt=claim_attempt,
+            reason=detail,
+        )
+        if current.status is not TaskStatus.RUNNING:
+            finish_task_presence(db, current)
+        logger.info(
+            "discarded task outcome after a hard dependency reopened",
+            extra={
+                "task_id": str(current.id),
+                "attempt": claim_attempt,
+                "current_status": current.status.value,
+                "dependency_ids": [str(upstream.id) for upstream in reopened],
+            },
+        )
+        return current.status.value
+
+    owns_outcome = claim_owner is not None and queue.acquire_finalization(
+        task,
+        worker_id=claim_owner,
+        attempt=claim_attempt,
+    )
+    if not owns_outcome:
+        # Nothing produced by an attempt that lost its lease may land under a
+        # newer queue state. Roll the handler transaction back, then reflect the
+        # durable winner without publishing a stale task outcome event.
+        task_id = task.id
+        db.rollback()
+        current = db.get(Task, task_id)
+        if current is None:  # pragma: no cover - project FK/cascade owns deletion
+            return TaskStatus.CANCELLED.value
+        if current.status is not TaskStatus.RUNNING:
+            finish_task_presence(db, current)
+        logger.info(
+            "discarded stale task outcome",
+            extra={
+                "task_id": str(current.id),
+                "attempt": claim_attempt,
+                "current_attempt": current.attempts,
+                "current_status": current.status.value,
+            },
+        )
+        return current.status.value
+
     for request in outcome.enqueue:
         if isinstance(request, EnqueueRequest):
             queue.enqueue(project.id, request)
@@ -183,6 +296,7 @@ def run_one(db: Session, task: Task, settings: Settings) -> str:
         },
     )
 
+    engine.reconcile_gate_tasks(db, project)
     engine.refresh_project_status(db, project)
     logger.info(
         "task finished",
@@ -259,9 +373,17 @@ def recover(settings: Settings) -> int:
     restart: a task left ``running`` by a killed process returns to the queue
     instead of sitting there forever.
     """
+    # The lease sweep writes Task rows. Gate reconciliation serialises at the
+    # Project row and can then write Task rows. Keeping both phases in one
+    # transaction creates the inverse Task -> Project order and a real deadlock
+    # against cancellation/finalization (Project -> Task). Commit the atomic
+    # lease CAS phase before beginning the separately idempotent projection
+    # repair phase.
     with session_scope() as db:
-        queue = DatabaseTaskQueue(db, settings)
-        return queue.requeue_expired()
+        requeued = DatabaseTaskQueue(db, settings).requeue_expired()
+    with session_scope() as db:
+        engine.reconcile_all_gate_tasks(db)
+    return requeued
 
 
 class Worker:

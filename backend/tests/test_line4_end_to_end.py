@@ -65,7 +65,6 @@ from app.core.config import Settings, get_settings
 from app.core.enums import (
     SEVERITY_ORDER,
     VALIDATION_LEVEL_ORDER,
-    ApprovalDecision,
     ApprovalGateKey,
     ApprovalKind,
     ApprovalStatus,
@@ -85,9 +84,7 @@ from app.core.enums import (
 from app.core.services import users as user_service
 from app.core.storage import ProjectStorage
 from app.database import session as db_session
-from app.engineering import gates
 from app.models import Base
-from app.models.approval import Approval
 from app.models.file import UploadedFile
 from app.models.finding import Finding
 from app.models.plc import LogicRung, Program, Routine
@@ -97,7 +94,6 @@ from app.models.requirements import Clarification, Requirement
 from app.models.revision import ApprovalGate
 from app.models.tags import Tag
 from app.models.task import Task
-from app.models.user import User
 from app.orchestration import worker
 from app.orchestration.queue import DatabaseTaskQueue
 
@@ -411,19 +407,8 @@ def _decide_approvals(
     client: TestClient,
     project_id: uuid.UUID,
     auth: dict[str, str],
-    reviewer_id: uuid.UUID,
-    settings: Settings,
 ) -> list[str]:
-    """Settle everything in front of a human, through the doors that exist.
-
-    Finding approvals go through ``POST /api/approvals/{id}/decision``, which is
-    what a reviewer clicking approve actually calls. Gate decisions do not:
-    there is no HTTP route that reaches
-    :func:`app.engineering.gates.record_decision`, so this calls the service
-    directly. That absence is a product gap, and
-    :func:`test_a_gate_decision_has_an_http_door` asserts it rather than letting
-    this helper quietly paper over it.
-    """
+    """Settle eligible human decisions through the same HTTP doors as the UI."""
     listing = client.get(f"/api/projects/{project_id}/approvals", headers=auth)
     assert listing.status_code == 200, listing.text
     acts: list[str] = []
@@ -431,101 +416,32 @@ def _decide_approvals(
     for row in listing.json():
         if row["status"] != ApprovalStatus.PENDING.value:
             continue
-        if row["kind"] == ApprovalKind.GATE_DECISION.value:
-            continue
         if not row["decision_allowed"]:
             # Senior review has not finished for this finding. The row is
             # visible and undecidable, which is the product working.
             continue
-        decision = client.post(
-            f"/api/approvals/{row['id']}/decision",
-            headers=auth,
-            json={"approved": True, "notes": "Reviewed against the source documents."},
-        )
+        if row["kind"] == ApprovalKind.GATE_DECISION.value:
+            assert row["gate_id"], f"gate approval {row['id']} has no exact gate binding"
+            decision = client.post(
+                f"/api/approval-gates/{row['gate_id']}/approvals/{row['id']}/decision",
+                headers=auth,
+                json={
+                    "decision": "approve",
+                    "comment": (
+                        "Checked against the functional description, interlock matrix, "
+                        "and current validation evidence."
+                    ),
+                },
+            )
+        else:
+            decision = client.post(
+                f"/api/approvals/{row['id']}/decision",
+                headers=auth,
+                json={"approved": True, "notes": "Reviewed against the source documents."},
+            )
         assert decision.status_code == 200, decision.text
         acts.append(f"decided approval: {row['title'][:80]}")
-
-    acts.extend(_decide_gates(project_id, reviewer_id, settings))
     return acts
-
-
-def _decide_gates(project_id: uuid.UUID, reviewer_id: uuid.UUID, settings: Settings) -> list[str]:
-    """Approve every gate that is waiting on a decision.
-
-    Through :func:`app.engineering.gates.record_decision`, which is the only
-    thing that settles a gate: a fixture that set the status directly would
-    prove nothing about a gate recomputed from the model on every read.
-
-    The approvals endpoint returns the gated tasks to the queue itself once
-    nothing is pending; the gate service does not, because it has no workflow
-    dependency, so that step is taken here the way the endpoint takes it.
-    """
-    from app.orchestration import engine as workflow_engine
-
-    session = db_session.get_session_factory()()
-    acts: list[str] = []
-    try:
-        project = session.get(Project, project_id)
-        reviewer = session.get(User, reviewer_id)
-        assert project is not None and reviewer is not None
-        for gate in gates.evaluate_all(session, project=project):
-            if gate.status is not GateStatus.AWAITING_DECISION:
-                continue
-            approval = session.execute(
-                select(Approval).where(
-                    Approval.project_id == project_id,
-                    Approval.gate_key == gate.gate_key,
-                    Approval.status == ApprovalStatus.PENDING,
-                )
-            ).scalar_one_or_none()
-            if approval is None:
-                continue
-            gates.record_decision(
-                session,
-                gate=gate,
-                approval=approval,
-                decision=ApprovalDecision.APPROVE,
-                user=reviewer,
-                comment="Checked against the functional description and the interlock matrix.",
-            )
-            acts.append(f"approved gate {gate.gate_key.value}")
-        if acts:
-            workflow_engine.unblock_approval_tasks(session, project, settings)
-            workflow_engine.refresh_project_status(session, project)
-        session.commit()
-    finally:
-        session.close()
-    return acts
-
-
-def _unblock_settled_checkpoints(project_id: uuid.UUID, settings: Settings) -> int:
-    """Return checkpoint tasks to the queue once what blocked them is settled.
-
-    A clarification answered through the API unblocks its own checkpoint. A
-    cross-discipline validation blocked on an error does not: the error has to
-    stop being true. Nothing here forces one back into the queue that is still
-    blocked for a live reason — the handler re-runs and blocks again if so.
-    """
-    session = db_session.get_session_factory()()
-    moved = 0
-    try:
-        project = session.get(Project, project_id)
-        assert project is not None
-        queue = DatabaseTaskQueue(session, settings)
-        blocked = session.execute(
-            select(Task).where(
-                Task.project_id == project_id,
-                Task.status == TaskStatus.BLOCKED,
-                Task.kind == TaskKind.RESOLVE_CLARIFICATIONS,
-            )
-        ).scalars()
-        for task in blocked:
-            queue.unblock(task)
-            moved += 1
-        session.commit()
-    finally:
-        session.close()
-    return moved
 
 
 def _run_project(
@@ -535,7 +451,6 @@ def _run_project(
     project_id: uuid.UUID,
     engineer_auth: dict[str, str],
     reviewer_auth: dict[str, str],
-    reviewer_id: uuid.UUID,
 ) -> tuple[int, list[str]]:
     """Work, answer, decide, repeat — until nothing is waiting on a human."""
     acts: list[str] = []
@@ -543,11 +458,11 @@ def _run_project(
     for _ in range(MAX_ROUNDS):
         rounds += 1
         worker.drain(settings)
-        moved = _resolve_clarifications(client, project_id, engineer_auth)
-        moved += _decide_requirements(client, project_id, reviewer_auth)
-        moved += _decide_approvals(client, project_id, reviewer_auth, reviewer_id, settings)
-        acts.extend(moved)
-        if not moved and not _unblock_settled_checkpoints(project_id, settings):
+        this_round = _resolve_clarifications(client, project_id, engineer_auth)
+        this_round += _decide_requirements(client, project_id, reviewer_auth)
+        this_round += _decide_approvals(client, project_id, reviewer_auth)
+        acts.extend(this_round)
+        if not this_round:
             break
     worker.drain(settings)
     return rounds, acts
@@ -595,6 +510,18 @@ def _validation_report(result: ValidationResult) -> Report:
 
 
 def _snapshot(settings: Settings, project_id: uuid.UUID, rounds: int, acts: list[str]) -> Scenario:
+    """Freeze what the run produced, as an engineer would read it at the end.
+
+    Findings accumulate across the whole run, so all of them are taken. Only the
+    **newest** validation run is: a production run validates several times as
+    the model grows, and an earlier run describes a revision that no longer
+    exists. Judging the fixture's ground truth against superseded results would
+    report defects the project had already moved past.
+
+    Waived results are excluded for the same reason — a waiver is a named
+    human's decision that the finding is carried knowingly, and re-reporting it
+    would count somebody's signature as a defect.
+    """
     session = db_session.get_session_factory()()
     try:
         project = session.get(Project, project_id)
@@ -813,7 +740,9 @@ def scenario(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Scenario]:
     Base.metadata.create_all(engine)
     db_session.configure(engine)
     try:
-        engineer_id, reviewer_id = _bootstrap(settings)
+        # The engineer is identified by the account they sign in as; only the
+        # reviewer's id is needed directly, to add them to the project.
+        _, reviewer_id = _bootstrap(settings)
         with _client(settings) as client:
             engineer_auth = _token(client, "line4.engineer@test.internal")
             reviewer_auth = _token(client, "line4.reviewer@test.internal")
@@ -837,9 +766,7 @@ def scenario(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Scenario]:
                 project_id=project_id,
                 engineer_auth=engineer_auth,
                 reviewer_auth=reviewer_auth,
-                reviewer_id=reviewer_id,
             )
-        assert engineer_id is not None
         yield _snapshot(settings, project_id, rounds, acts)
     finally:
         db_session.reset()
@@ -1032,7 +959,12 @@ def _matching(
 ) -> list[Report]:
     return [
         report
-        for report in scenario.judged
+        # Positive planted-issue checks must see review-level validation too.
+        # ``scenario.judged`` deliberately contains only findings and release
+        # blockers for the false-positive controls, so using it here hid a
+        # correctly persisted WARNING (mapped to MEDIUM) for an unresolved HMI
+        # read binding.
+        for report in scenario.reports
         if report.names(*subjects)
         and report.at_least(severity)
         and (not codes or any(code in report.code for code in codes))
@@ -1077,17 +1009,6 @@ def test_planted_issue_1_the_missing_accumulation_interlock_is_reported(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Planted issue 2 is not found, and cannot be: the canonical importer collapses two "
-        "I/O rows sharing Local:1:I.Data.10 into one IOPoint (the second row updates the "
-        "first), and io.duplicate_point_assignment only compares AddressAssignment rows. The "
-        "Line 4 I/O list has no device column, so the importer creates no Device, no Signal "
-        "and no AddressAssignment at all — GD401_CLOSED and MTR403_FAULT end up as two tags "
-        "silently bound to one terminal, with nothing that looks at that."
-    ),
-)
 def test_planted_issue_2_the_duplicate_io_assignment_is_reported(scenario: Scenario) -> None:
     """Two safety-relevant devices on one physical channel. High."""
     matches = _matching(
@@ -1149,17 +1070,6 @@ def test_planted_issue_3_is_not_inflated_into_a_release_blocker(scenario: Scenar
     assert not inflated, "; ".join(str(report) for report in inflated)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Planted issue 4 is not found at a severity anyone acts on. ALM_CYL402_FAIL is "
-        "defined in Alarm_Register.csv, declared in the L5X, bound on the HMI and written by "
-        "no rung. The alarm register never reaches the evidence graph — its 'Alarm ID' header "
-        "matches none of the graph's alarm-name aliases, so all seven rows are dropped — and "
-        "logic.alarm_trigger_never_written needs AlarmDefinition rows the canonical importer "
-        "does not create. All that survives is tags.orphaned_tag at information severity."
-    ),
-)
 def test_planted_issue_4_the_alarm_that_can_never_annunciate_is_reported(
     scenario: Scenario,
 ) -> None:
@@ -1172,17 +1082,6 @@ def test_planted_issue_4_the_alarm_that_can_never_annunciate_is_reported(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Planted issue 5 is not found, and nothing in the platform could find it. The "
-        "FactoryTalk display export is parsed into generic XML elements, but the evidence "
-        "graph only reads elements whose tag normalises to 'alarm', so the 29 Connection "
-        "expressions are never read; the canonical importer creates no HMIScreen, "
-        "HMIObjectInstance or HMIBinding from an HMI export at all. The string "
-        "Accum_Case_Count does not appear anywhere in the model, at any severity."
-    ),
-)
 def test_planted_issue_5_the_hmi_binding_to_a_missing_tag_is_reported(
     scenario: Scenario,
 ) -> None:
@@ -1375,40 +1274,28 @@ def test_no_decoy_is_reported(
 # ---------------------------------------------------------------------------
 # Gates, release and the end state
 # ---------------------------------------------------------------------------
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Step 8 has no door. No HTTP route reaches app.engineering.gates.record_decision: "
-        "POST /api/approvals/{id}/decision settles the Approval row and leaves the "
-        "ApprovalGate untouched, so a reviewer using the product cannot pass a gate at all. "
-        "This test drives the service directly to get the scenario moving; that is a "
-        "workaround, and this assertion is what says so."
-    ),
-)
 def test_a_gate_decision_has_an_http_door(scenario: Scenario) -> None:
-    """The six gates are the product's centrepiece and need an endpoint."""
+    """The six gates are reachable through an exact gate/request HTTP binding."""
     from app.main import create_app
 
     application = create_app(scenario.settings, run_bootstrap=False)
-    paths = {
-        route.path  # type: ignore[attr-defined]
-        for route in application.routes
-        if hasattr(route, "path")
-    }
-    gate_routes = {path for path in paths if "gate" in path.lower()}
-
-    assert gate_routes, f"no gate route among {len(paths)} paths"
+    # FastAPI 0.116+ keeps included routers lazy, so ``application.routes``
+    # contains ``_IncludedRouter`` placeholders until route resolution.  The
+    # generated OpenAPI paths are the stable public surface this test means to
+    # inspect.
+    paths = set(application.openapi()["paths"])
+    expected = "/api/approval-gates/{gate_id}/approvals/{approval_id}/decision"
+    assert expected in paths, f"{expected} is absent from {len(paths)} paths"
 
 
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "Gate 2 never becomes decidable. Its equipment_model_recorded criterion needs at "
-        "least one Device, and nothing produces one: the Line 4 I/O list's 'Device Tag' "
-        "column is claimed by the importer's 'tag' alias, so no Device, Signal or "
-        "AddressAssignment is created, and the Tag Architecture Agent proposes tags rather "
-        "than equipment. The gate reports not_ready for ever and every later gate reports "
-        "'an earlier gate is undecided'."
+        "The fixture intentionally contains two devices assigned to Local:1:I.Data.10. "
+        "The canonical importer now preserves both assignments and deterministic validation "
+        "correctly blocks gate 2 until an engineer fixes that conflict or a named reviewer "
+        "records a waiver. This scenario performs neither remediation, so approving gate 2 "
+        "would be a safety regression rather than a successful end state."
     ),
 )
 def test_a_human_approves_gate_two(scenario: Scenario) -> None:
@@ -1424,12 +1311,9 @@ def test_a_human_approves_gate_two(scenario: Scenario) -> None:
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "Gate 3 cannot pass, and the reason is a cycle in the plan. Its "
-        "hmi_screens_recorded criterion needs HMIScreen rows; the only thing that creates "
-        "them is the HMI delivery agent; and the DELIVERY task depends on the "
-        "LOGIC_AND_DELIVERY gate task. Any project whose target platform names an HMI "
-        "deadlocks here. test_production_workflow.py does not see it because its fixture "
-        "declares HmiProduct.NONE."
+        "The delivery/HMI dependency cycle is fixed, but this deliberately defective fixture "
+        "still carries unwaived release-blocking validation results. The workflow must not "
+        "assemble or seal a candidate while those earlier safety gates remain unsettled."
     ),
 )
 def test_generators_assemble_the_package_and_a_release_candidate_is_sealed(
@@ -1458,9 +1342,10 @@ def test_generators_assemble_the_package_and_a_release_candidate_is_sealed(
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "Step 16 is unreachable while gates 2 and 3 are. The run parks at the first "
-        "undecidable gate and the project's terminal status is whichever engineering phase "
-        "it stopped in, never READY_FOR_EXPORT."
+        "This fixture deliberately leaves true validation errors unresolved and unwaived, so "
+        "the safe terminal state is blocked rather than export-ready. Separately, a genuinely "
+        "finalized archive converges to COMPLETED; READY_FOR_EXPORT is the pre-finalization "
+        "state, not the durable post-delivery status."
     ),
 )
 def test_the_project_reaches_ready_for_export(scenario: Scenario) -> None:
@@ -1547,6 +1432,11 @@ def interrupted(tmp_path: Path) -> Iterator[tuple[Settings, uuid.UUID, Engine]]:
     settings = _settings(tmp_path / "restart", "restart.sqlite3")
     engine = db_session.build_engine(settings)
     Base.metadata.create_all(engine)
+    # ``db_session`` is process-global, and the module-scoped scenario holds it
+    # for every other test in this file. Put its engine back rather than
+    # resetting to none, so this fixture cannot decide the outcome of a test
+    # that merely happens to run after it.
+    previous = db_session.get_engine()
     db_session.configure(engine)
     try:
         _, reviewer_id = _bootstrap(settings)
@@ -1564,7 +1454,7 @@ def interrupted(tmp_path: Path) -> Iterator[tuple[Settings, uuid.UUID, Engine]]:
             assert run.status_code == 201, run.text
         yield settings, project_id, engine
     finally:
-        db_session.reset()
+        db_session.configure(previous)
         engine.dispose()
 
 

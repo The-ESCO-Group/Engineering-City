@@ -40,7 +40,10 @@ from app.agents.delivery.release_container import (
 from app.core.clock import ensure_utc, utcnow
 from app.core.config import Settings, get_settings
 from app.core.enums import (
+    ApprovalDecision,
     ApprovalGateKey,
+    ApprovalKind,
+    ApprovalStatus,
     AuditAction,
     GateStatus,
     ObjectApprovalState,
@@ -48,8 +51,10 @@ from app.core.enums import (
 )
 from app.core.errors import ConflictError, NotFoundError
 from app.core.storage import CHUNK_BYTES, ProjectStorage
+from app.database.locking import lock_project_root
 from app.engineering import gates
 from app.engineering.revisions import current_revision_number
+from app.models.approval import Approval
 from app.models.project import Project
 from app.models.release import ExportArtifact, ReleaseCandidate, ReleaseManifest
 from app.models.release_archive import ReleaseArchive
@@ -105,15 +110,11 @@ class VerifiedArchiveDownload:
             self.handle.close()
 
 
-def get_release_archive(
-    db: Session, release_candidate_id: uuid.UUID
-) -> ReleaseArchive | None:
+def get_release_archive(db: Session, release_candidate_id: uuid.UUID) -> ReleaseArchive | None:
     """Return the persisted archive for a candidate, if finalization occurred."""
 
     return db.execute(
-        select(ReleaseArchive).where(
-            ReleaseArchive.release_candidate_id == release_candidate_id
-        )
+        select(ReleaseArchive).where(ReleaseArchive.release_candidate_id == release_candidate_id)
     ).scalar_one_or_none()
 
 
@@ -174,14 +175,31 @@ def finalize_release_archive(
     """
 
     active = settings or get_settings()
-    locked = db.execute(
-        select(ReleaseCandidate)
-        .where(ReleaseCandidate.id == candidate.id)
-        .with_for_update()
+    # Resolve only the parent identity first, then take the canonical
+    # Project -> Candidate lock order used by revisions and gate decisions.
+    # Both rows are refreshed because API/task sessions commonly preload them
+    # and SELECT FOR UPDATE does not replace an existing SQLAlchemy identity.
+    candidate_id = candidate.id
+    project_id = db.execute(
+        select(ReleaseCandidate.project_id).where(ReleaseCandidate.id == candidate_id)
     ).scalar_one_or_none()
-    if locked is None:
-        raise NotFoundError("Release candidate", candidate.id)
-    candidate = locked
+    if project_id is None:
+        raise NotFoundError("Release candidate", candidate_id)
+    project = lock_project_root(db, project_id)
+    if project is None:  # pragma: no cover - the candidate FK prevents this
+        raise NotFoundError("Project", project_id)
+    locked_candidate = db.execute(
+        select(ReleaseCandidate)
+        .where(
+            ReleaseCandidate.id == candidate_id,
+            ReleaseCandidate.project_id == project.id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+    if locked_candidate is None:
+        raise NotFoundError("Release candidate", candidate_id)
+    candidate = locked_candidate
 
     existing = get_release_archive(db, candidate.id)
     if existing is not None:
@@ -190,16 +208,8 @@ def finalize_release_archive(
         db.flush()
         return existing
 
-    project = db.execute(
-        select(Project).where(Project.id == candidate.project_id).with_for_update()
-    ).scalar_one_or_none()
-    if project is None:  # pragma: no cover - the candidate FK prevents this
-        raise NotFoundError("Project", candidate.project_id)
-
     manifest = db.execute(
-        select(ReleaseManifest).where(
-            ReleaseManifest.release_candidate_id == candidate.id
-        )
+        select(ReleaseManifest).where(ReleaseManifest.release_candidate_id == candidate.id)
     ).scalar_one_or_none()
     artifacts = tuple(
         db.execute(
@@ -395,9 +405,7 @@ def open_verified_archive(
         raise
 
 
-def _assert_release_gate(
-    db: Session, *, project: Project, candidate: ReleaseCandidate
-) -> None:
+def _assert_release_gate(db: Session, *, project: Project, candidate: ReleaseCandidate) -> None:
     blocker = gates.gate_blocking(
         db,
         project=project,
@@ -426,16 +434,16 @@ def _assert_release_gate(
         )
 
     if not gate.is_enabled:
-        if not gate.disabled_reason.strip():
-            raise ReleaseArchiveRefused(
-                "release_gate_unstated_skip",
-                "The final release gate is disabled without a stated reason.",
-                project_id=str(project.id),
-            )
-        return
+        raise ReleaseArchiveRefused(
+            "release_gate_required",
+            "The final release gate cannot be disabled or skipped for customer delivery.",
+            project_id=str(project.id),
+            disabled_reason=gate.disabled_reason,
+        )
 
     head_revision = current_revision_number(db, project.id)
     decider = db.get(User, gate.decided_by_id) if gate.decided_by_id is not None else None
+    approval = db.get(Approval, gate.approval_id) if gate.approval_id is not None else None
     if (
         gate.status is not GateStatus.PASSED
         or gate.decided_by_id is None
@@ -444,6 +452,19 @@ def _assert_release_gate(
         or gate.decided_at is None
         or gate.decided_revision_number != head_revision
         or not gate.decision_comment.strip()
+        or approval is None
+        or approval.project_id != project.id
+        or approval.kind is not ApprovalKind.GATE_DECISION
+        or approval.gate_key is not ApprovalGateKey.RELEASE
+        or approval.revision_number != head_revision
+        or approval.status not in {ApprovalStatus.APPROVED, ApprovalStatus.RISK_ACCEPTED}
+        or approval.decision not in {
+            ApprovalDecision.APPROVE,
+            ApprovalDecision.ACCEPT_RISK,
+        }
+        or approval.decided_by_id != gate.decided_by_id
+        or approval.decided_at is None
+        or approval.release_candidate_id != candidate.id
     ):
         raise ReleaseArchiveRefused(
             "release_gate_incomplete",
@@ -453,6 +474,12 @@ def _assert_release_gate(
             current_revision_number=head_revision,
             has_named_decider=decider is not None and bool(decider.display_name.strip()),
             has_comment=bool(gate.decision_comment.strip()),
+            approval_release_candidate_id=(
+                str(approval.release_candidate_id)
+                if approval is not None and approval.release_candidate_id is not None
+                else None
+            ),
+            requested_release_candidate_id=str(candidate.id),
         )
 
 
@@ -463,10 +490,14 @@ def _assert_frozen_release(
     *,
     db: Session,
 ) -> User:
-    if candidate.status not in {
-        ReleaseCandidateStatus.APPROVED,
-        ReleaseCandidateStatus.RELEASED,
-    } or candidate.approval_state is not ObjectApprovalState.APPROVED:
+    if (
+        candidate.status
+        not in {
+            ReleaseCandidateStatus.APPROVED,
+            ReleaseCandidateStatus.RELEASED,
+        }
+        or candidate.approval_state is not ObjectApprovalState.APPROVED
+    ):
         raise ReleaseArchiveRefused(
             "candidate_not_approved",
             "Only a human-approved release candidate can be finalized.",
@@ -724,9 +755,7 @@ def _adopt_exact_existing(target: Path, built: ReleaseZipArtifact) -> None:
     _seal_read_only(target)
 
 
-def _inspect_package_path(
-    storage: ProjectStorage, relative_path: PurePosixPath
-) -> Path:
+def _inspect_package_path(storage: ProjectStorage, relative_path: PurePosixPath) -> Path:
     root = storage.root.resolve()
     current = root
     for component in relative_path.parts:
@@ -762,9 +791,7 @@ def _inspect_package_path(
     return current
 
 
-def _inspect_publish_path(
-    storage: ProjectStorage, relative_path: PurePosixPath
-) -> Path:
+def _inspect_publish_path(storage: ProjectStorage, relative_path: PurePosixPath) -> Path:
     root = storage.root.resolve()
     current = root
     for component in relative_path.parts[:-1]:
@@ -905,9 +932,7 @@ def _file_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
     )
 
 
-def _converge_candidate_status(
-    candidate: ReleaseCandidate, finalized_at: datetime
-) -> None:
+def _converge_candidate_status(candidate: ReleaseCandidate, finalized_at: datetime) -> None:
     if candidate.status is ReleaseCandidateStatus.APPROVED:
         candidate.status = ReleaseCandidateStatus.RELEASED
     if candidate.released_at is None:

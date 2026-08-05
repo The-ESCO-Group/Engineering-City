@@ -26,13 +26,14 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 import app.orchestration.steps  # noqa: F401  (importing registers the handlers)
 from app.core.clock import utcnow
 from app.core.config import Settings
 from app.core.enums import (
+    AgentKind,
     ApprovalKind,
     DocumentRole,
     EventType,
@@ -45,6 +46,9 @@ from app.core.enums import (
 )
 from app.core.services import files as file_service
 from app.core.services import parsing
+from app.database.session import get_session_factory
+from app.engineering import gates
+from app.models.agent import AgentInstance
 from app.models.approval import Approval
 from app.models.event import Event
 from app.models.evidence import EvidenceAnchor
@@ -345,6 +349,391 @@ def test_started_and_completed_events_are_persisted_for_every_completed_task(
 # ---------------------------------------------------------------------------
 # Handler results
 # ---------------------------------------------------------------------------
+def test_cancellation_after_claim_but_before_dispatch_prevents_all_worker_side_effects(
+    db: Session,
+    project: Project,
+    seeded: dict[str, User],
+    settings: Settings,
+) -> None:
+    """A stale dispatch Session cannot start work after cancellation won."""
+    handler_calls: list[uuid.UUID] = []
+
+    def handler(context: TaskContext) -> HandlerResult:
+        handler_calls.append(context.task.id)
+        return HandlerResult.completed(should_never_land=True)
+
+    with installed_handler(SPARE_KIND, handler):
+        queue = DatabaseTaskQueue(db, settings)
+        task = queue.enqueue(
+            project.id,
+            EnqueueRequest(
+                kind=SPARE_KIND,
+                title="Claimed immediately before cancellation",
+                idempotency_key=f"cancel-before-dispatch:{uuid.uuid4()}",
+                agent_kind=AgentKind.PLC_REVIEW.value,
+            ),
+        )
+        db.commit()
+        assert [item.id for item in queue.claim(WORKER_ID)] == [task.id]
+        db.commit()
+
+        # Dispatch loaded the claimed row, but has not emitted presence or run
+        # the handler. The operator then commits cancellation independently.
+        with get_session_factory()() as dispatch:
+            stale_task = dispatch.get(Task, task.id)
+            assert stale_task is not None
+            assert stale_task.status is TaskStatus.RUNNING
+            dispatch.commit()
+
+            with get_session_factory()() as canceller:
+                current_project = canceller.get(Project, project.id)
+                current_actor = canceller.get(User, seeded["engineer"].id)
+                assert current_project is not None
+                assert current_actor is not None
+                assert (
+                    workflow_engine.cancel(
+                        canceller,
+                        current_project,
+                        settings,
+                        actor=current_actor,
+                        reason="Cancelled between claim and dispatch.",
+                    )
+                    == 1
+                )
+                canceller.commit()
+
+            assert worker.run_one(dispatch, stale_task, settings) == TaskStatus.CANCELLED.value
+            dispatch.commit()
+
+    db.expire_all()
+    current = db.get(Task, task.id)
+    assert current is not None
+    assert current.status is TaskStatus.CANCELLED
+    assert current.result == {}
+    assert handler_calls == []
+    assert db.scalars(
+        select(Event.event_type).where(
+            Event.task_id == task.id,
+            Event.event_type.in_([EventType.TASK_ASSIGNED, EventType.TASK_STARTED]),
+        )
+    ).all() == []
+    assert db.scalar(
+        select(func.count(AgentInstance.id)).where(AgentInstance.project_id == project.id)
+    ) == 0
+
+
+def test_dependency_failure_cannot_overwrite_a_cancellation_committed_after_claim(
+    db: Session,
+    project: Project,
+    settings: Settings,
+) -> None:
+    """The dependency-failure path obeys Project -> Task and a claimed CAS."""
+    queue = DatabaseTaskQueue(db, settings)
+    upstream = queue.enqueue(
+        project.id,
+        EnqueueRequest(
+            kind=SPARE_KIND,
+            title="Failed prerequisite",
+            idempotency_key=f"failed-prerequisite:{uuid.uuid4()}",
+        ),
+    )
+    upstream.status = TaskStatus.FAILED
+    upstream.finished_at = utcnow()
+    downstream = queue.enqueue(
+        project.id,
+        EnqueueRequest(
+            kind=SPARE_KIND,
+            title="Dependent claimed from a terminal prerequisite",
+            idempotency_key=f"cancelled-dependent:{uuid.uuid4()}",
+            depends_on=[upstream.id],
+        ),
+    )
+    db.commit()
+    assert [item.id for item in queue.claim(WORKER_ID)] == [downstream.id]
+    db.commit()
+
+    with get_session_factory()() as dispatch:
+        stale_task = dispatch.get(Task, downstream.id)
+        assert stale_task is not None
+        assert stale_task.status is TaskStatus.RUNNING
+        dispatch.commit()
+
+        with get_session_factory()() as canceller:
+            current = canceller.get(Task, downstream.id)
+            assert current is not None
+            assert DatabaseTaskQueue(canceller, settings).cancel(
+                current, "The operator cancelled the dependent task."
+            )
+            canceller.commit()
+
+        assert worker.run_one(dispatch, stale_task, settings) == TaskStatus.CANCELLED.value
+        dispatch.commit()
+
+    db.expire_all()
+    current = db.get(Task, downstream.id)
+    assert current is not None
+    assert current.status is TaskStatus.CANCELLED
+    assert current.error_code == ""
+    assert db.scalars(
+        select(Event.id).where(
+            Event.task_id == downstream.id,
+            Event.event_type == EventType.TASK_FAILED,
+        )
+    ).all() == []
+
+
+@pytest.mark.parametrize(
+    "handler_outcome",
+    ["completed", "blocked", "awaiting_approval", "failed"],
+)
+def test_cancellation_committed_during_a_handler_beats_every_stale_outcome(
+    db: Session,
+    project: Project,
+    seeded: dict[str, User],
+    settings: Settings,
+    handler_outcome: str,
+) -> None:
+    """A worker may not resurrect a task cancelled while its handler runs."""
+    reason = "The operator cancelled this run while its agent was working."
+    follow_up_key = f"stale-follow-up:{handler_outcome}:{uuid.uuid4()}"
+
+    def handler(_: TaskContext) -> HandlerResult:
+        # This is a genuinely independent transaction. The worker committed its
+        # start event before dispatching here, so cancellation can durably win
+        # while this attempt still holds stale ORM identities.
+        with get_session_factory()() as canceller:
+            current_project = canceller.get(Project, project.id)
+            current_actor = canceller.get(User, seeded["engineer"].id)
+            assert current_project is not None
+            assert current_actor is not None
+            assert (
+                workflow_engine.cancel(
+                    canceller,
+                    current_project,
+                    settings,
+                    actor=current_actor,
+                    reason=reason,
+                )
+                == 1
+            )
+            canceller.commit()
+
+        if handler_outcome == "completed":
+            outcome = HandlerResult.completed(stale_output=True)
+        elif handler_outcome == "blocked":
+            outcome = HandlerResult.blocked("stale block", stale_output=True)
+        elif handler_outcome == "awaiting_approval":
+            outcome = HandlerResult.awaiting_approval(
+                "stale approval request", stale_output=True
+            )
+        else:
+            outcome = HandlerResult.failed(
+                "stale_failure", "stale failure", stale_output=True
+            )
+        outcome.enqueue.append(
+            EnqueueRequest(
+                kind=SPARE_KIND,
+                title="A stale attempt must not enqueue this task",
+                idempotency_key=follow_up_key,
+            )
+        )
+        return outcome
+
+    with installed_handler(SPARE_KIND, handler):
+        task = enqueue(
+            db,
+            project,
+            settings,
+            kind=SPARE_KIND,
+            key=f"stale-cancel:{handler_outcome}:{uuid.uuid4()}",
+            max_attempts=2,
+        )
+        tick = worker.tick(settings, WORKER_ID)
+
+    assert tick.claimed == 1
+    assert tick.completed == 0
+    assert tick.failed == 0
+    assert tick.blocked == 0
+    assert tick.awaiting_approval == 0
+
+    db.expire_all()
+    current = db.get(Task, task.id)
+    assert current is not None
+    assert current.status is TaskStatus.CANCELLED
+    assert current.blocked_reason == reason
+    assert current.result == {}
+    assert current.finished_at is not None
+    assert db.scalar(select(Task.id).where(Task.idempotency_key == follow_up_key)) is None
+
+    stale_events = db.scalars(
+        select(Event).where(
+            Event.task_id == task.id,
+            Event.event_type.in_(
+                [EventType.TASK_COMPLETED, EventType.TASK_BLOCKED, EventType.TASK_FAILED]
+            ),
+        )
+    ).all()
+    assert stale_events == []
+
+
+@pytest.mark.parametrize(
+    ("max_attempts", "recovered_status", "reported_failures"),
+    [
+        (2, TaskStatus.QUEUED, 0),
+        (1, TaskStatus.FAILED, 1),
+    ],
+)
+def test_lease_recovery_committed_during_a_handler_beats_its_stale_success(
+    db: Session,
+    project: Project,
+    settings: Settings,
+    max_attempts: int,
+    recovered_status: TaskStatus,
+    reported_failures: int,
+) -> None:
+    """Recovered attempts cannot publish output after losing their lease."""
+    follow_up_key = f"stale-lease-follow-up:{max_attempts}:{uuid.uuid4()}"
+
+    def handler(context: TaskContext) -> HandlerResult:
+        with get_session_factory()() as recovery:
+            current = recovery.get(Task, context.task.id)
+            assert current is not None
+            current.lease_expires_at = utcnow() - timedelta(seconds=1)
+            recovery.flush()
+            assert DatabaseTaskQueue(recovery, settings).requeue_expired() == 1
+            recovery.commit()
+
+        outcome = HandlerResult.completed(stale_output=True)
+        outcome.enqueue.append(
+            EnqueueRequest(
+                kind=SPARE_KIND,
+                title="A recovered stale attempt must not enqueue this task",
+                idempotency_key=follow_up_key,
+            )
+        )
+        return outcome
+
+    with installed_handler(SPARE_KIND, handler):
+        task = enqueue(
+            db,
+            project,
+            settings,
+            kind=SPARE_KIND,
+            key=f"stale-lease:{max_attempts}:{uuid.uuid4()}",
+            max_attempts=max_attempts,
+        )
+        tick = worker.tick(settings, WORKER_ID)
+
+    assert tick.claimed == 1
+    assert tick.completed == 0
+    assert tick.failed == reported_failures
+    assert tick.blocked == 0
+    assert tick.awaiting_approval == 0
+
+    db.expire_all()
+    current = db.get(Task, task.id)
+    assert current is not None
+    assert current.status is recovered_status
+    assert current.attempts == 1
+    assert current.error_code == "lease_expired"
+    assert current.result == {}
+    assert current.locked_by is None
+    assert current.lease_expires_at is None
+    if recovered_status is TaskStatus.FAILED:
+        assert current.finished_at is not None
+    else:
+        assert current.available_at is not None
+        assert current.finished_at is None
+    assert db.scalar(select(Task.id).where(Task.idempotency_key == follow_up_key)) is None
+
+    completed_events = db.scalars(
+        select(Event).where(
+            Event.task_id == task.id,
+            Event.event_type == EventType.TASK_COMPLETED,
+        )
+    ).all()
+    assert completed_events == []
+
+
+def test_a_gate_reopened_during_its_dependent_handler_discards_the_stale_outcome(
+    db: Session,
+    project: Project,
+    settings: Settings,
+) -> None:
+    """Finalization must recheck the gate dependency under the project root."""
+    run_id = uuid.uuid4()
+    gates.ensure_gates(db, project=project)
+    gate_task = enqueue(
+        db,
+        project,
+        settings,
+        kind=TaskKind.EVALUATE_APPROVAL_GATE,
+        key=f"gate-before-dependent:{run_id}",
+        payload={"gate_key": "project_profile"},
+    )
+    gate_task.run_id = run_id
+    gate_task.status = TaskStatus.COMPLETED
+    gate_task.attempts = 1
+    gate_task.finished_at = utcnow()
+    db.commit()
+
+    follow_up_key = f"stale-gate-follow-up:{run_id}"
+
+    def handler(_: TaskContext) -> HandlerResult:
+        with get_session_factory()() as reopening:
+            reopening.execute(
+                update(Project)
+                .where(Project.id == project.id)
+                .values(current_revision_number=Project.current_revision_number + 1)
+            )
+            current_project = reopening.get(Project, project.id)
+            assert current_project is not None
+            assert workflow_engine.reconcile_gate_tasks(reopening, current_project) >= 1
+            current_gate_task = reopening.get(Task, gate_task.id)
+            assert current_gate_task is not None
+            assert current_gate_task.status is TaskStatus.BLOCKED
+            reopening.commit()
+
+        outcome = HandlerResult.completed(stale_output=True)
+        outcome.enqueue.append(
+            EnqueueRequest(
+                kind=SPARE_KIND,
+                title="A stale dependent must not enqueue this",
+                idempotency_key=follow_up_key,
+            )
+        )
+        return outcome
+
+    with installed_handler(SPARE_KIND, handler):
+        dependent = enqueue(
+            db,
+            project,
+            settings,
+            kind=SPARE_KIND,
+            key=f"dependent-during-gate-reopen:{run_id}",
+        )
+        DatabaseTaskQueue(db, settings).add_dependency(dependent, gate_task.id)
+        db.commit()
+        tick = worker.tick(settings, WORKER_ID)
+
+    assert tick.claimed == 1
+    assert tick.completed == 0
+    db.expire_all()
+    current = db.get(Task, dependent.id)
+    assert current is not None
+    assert current.status is TaskStatus.QUEUED
+    assert current.error_code == "dependency_reopened"
+    assert "hard prerequisite reopened" in current.error_message.lower()
+    assert current.result == {}
+    assert db.scalar(select(Task.id).where(Task.idempotency_key == follow_up_key)) is None
+    assert db.scalar(
+        select(func.count(Event.id)).where(
+            Event.task_id == dependent.id,
+            Event.event_type == EventType.TASK_COMPLETED,
+        )
+    ) == 0
+
+
 def test_a_handler_that_returns_blocked_parks_the_task_with_its_reason(
     db: Session, project: Project, settings: Settings
 ) -> None:
@@ -771,6 +1160,32 @@ def test_finalising_completes_and_reports_the_finding_counts(
 # ---------------------------------------------------------------------------
 # Restart recovery
 # ---------------------------------------------------------------------------
+def test_recover_commits_task_lease_writes_before_project_gate_reconciliation(
+    db: Session,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recovery phases cannot retain a Task lock while acquiring Project."""
+    sessions: list[Session] = []
+
+    def track_sweep(queue: DatabaseTaskQueue) -> int:
+        sessions.append(queue.db)
+        return 4
+
+    def track_reconciliation(session: Session) -> int:
+        assert sessions
+        assert not sessions[0].in_transaction(), "the lease transaction must already be closed"
+        sessions.append(session)
+        return 0
+
+    monkeypatch.setattr(DatabaseTaskQueue, "requeue_expired", track_sweep)
+    monkeypatch.setattr(workflow_engine, "reconcile_all_gate_tasks", track_reconciliation)
+
+    assert worker.recover(settings) == 4
+    assert len(sessions) == 2
+    assert sessions[0] is not sessions[1]
+
+
 def test_a_task_abandoned_by_a_stopped_worker_is_requeued_and_the_run_finishes(
     db: Session, ingested_project: Project, seeded: dict[str, User], settings: Settings
 ) -> None:

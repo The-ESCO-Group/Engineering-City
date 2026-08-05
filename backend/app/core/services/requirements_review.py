@@ -57,6 +57,8 @@ def _unblock_profile_work(db: Session, project: Project, settings: Settings) -> 
                         TaskKind.DESIGN_TAGS,
                         TaskKind.DESIGN_PLC_ARCHITECTURE,
                         TaskKind.GENERATE_LOGIC,
+                        TaskKind.VALIDATE_CROSS_DISCIPLINE,
+                        TaskKind.EVALUATE_APPROVAL_GATE,
                     )
                 ),
             )

@@ -50,6 +50,7 @@ from app.generators.plc.instructions import (
     spec_for,
 )
 from app.models.core import EngineeringObjectMixin
+from app.models.delivery import HMIBinding, HMIObjectInstance, HMIScreen
 from app.models.file import ParsedArtifact, UploadedFile
 from app.models.plant import AddressAssignment, Device, HardwareModule, IOPoint, Signal
 from app.models.plc import (
@@ -79,6 +80,7 @@ _TAG_OPERAND = re.compile(
     r"^(?:Program:(?P<program>[A-Za-z_][A-Za-z0-9_]*)\.)?"
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?:[.\[].*)?$"
 )
+_FACTORYTALK_REFERENCE = re.compile(r"^\{::\[[^\]]+\](?P<reference>[^}]+)\}$")
 
 _TASK_TYPES = {
     "CONTINUOUS": ControllerTaskType.CONTINUOUS,
@@ -242,6 +244,21 @@ def _header_map(headers: Any) -> dict[str, str]:
                 resolved[field_name] = available[key]
                 claimed.add(key)
                 break
+
+    # ``Device Tag`` is intentionally shared.  Many real I/O schedules use one
+    # column as both the controller tag and the only explicit identity for the
+    # field device/signal on that row.  Treating the header as a tag *only*
+    # discarded the plant side of an otherwise complete schedule: no Device,
+    # Signal or AddressAssignment rows were created, so the devices/I-O/tags
+    # approval gate could never become ready.  Sharing is safe here because the
+    # source explicitly calls the value a device tag; no identity is derived
+    # from a naming convention.  More-specific Device/Signal columns still win.
+    device_tag = available.get(_normalise("device tag"))
+    if device_tag is not None:
+        resolved.setdefault("tag", device_tag)
+        resolved.setdefault("device", device_tag)
+        resolved.setdefault("device_prefix", device_tag)
+        resolved.setdefault("signal", device_tag)
     return resolved
 
 
@@ -370,7 +387,7 @@ def _latest_inputs(db: Session, project_id: uuid.UUID) -> list[tuple[UploadedFil
 
 
 def import_latest_parsed_artifacts(db: Session, project_id: uuid.UUID) -> CanonicalImportResult:
-    """Import current L5X and declared I/O-list parser output for ``project_id``.
+    """Import current L5X, I/O-list and HMI-export facts for ``project_id``.
 
     The caller owns the surrounding transaction.  This function flushes so all
     returned rows and relationships have stable identifiers, but never commits.
@@ -393,8 +410,267 @@ def import_latest_parsed_artifacts(db: Session, project_id: uuid.UUID) -> Canoni
         ):
             result.artifact_ids.append(artifact.id)
             _import_io_csv(ctx)
+        elif (
+            artifact.artifact_kind == FileKind.XML.value
+            and record.file_kind is FileKind.XML
+            and record.document_role is DocumentRole.HMI_EXPORT
+        ):
+            result.artifact_ids.append(artifact.id)
+            _import_hmi_xml(ctx)
     db.flush()
     return result
+
+
+def _import_hmi_xml(ctx: _Context) -> None:
+    """Import explicit FactoryTalk-style display and connection facts.
+
+    The generic XML parser deliberately preserves product-specific elements
+    instead of pretending every XML document is an HMI export.  The intake role
+    supplies that missing context here.  Only explicit ``Display`` elements and
+    ``Connection`` children are imported; a graphic with no declared binding is
+    not assigned one, and a reference that resolves to no canonical tag remains
+    an unresolved binding for validation to report.
+    """
+    elements = _as_list(_as_dict(ctx.artifact.content).get("elements"))
+    by_path = {
+        _text(element.get("xpath")): element
+        for element in elements
+        if _text(element.get("xpath"))
+    }
+    display_elements = [
+        element for element in elements if _normalise(_text(element.get("tag"))) == "display"
+    ]
+    screens: list[tuple[str, HMIScreen]] = []
+    for fallback_ordinal, element in enumerate(display_elements):
+        path = _text(element.get("xpath"))
+        attributes = _as_dict(element.get("attributes"))
+        name = _text(attributes.get("Name") or attributes.get("name"))
+        if not name or len(name) > 60:
+            ctx.issue(
+                "invalid_hmi_screen_identity",
+                "HMI Display name is missing or exceeds the canonical 60-character key limit.",
+                path,
+            )
+            continue
+        description = _text(_as_dict(by_path.get(f"{path}/Description")).get("text"))
+        screen_rows = list(
+            ctx.db.execute(
+                select(HMIScreen)
+                .where(HMIScreen.project_id == ctx.project.id, HMIScreen.key == name)
+                .order_by(HMIScreen.created_at, HMIScreen.id)
+            ).scalars()
+        )
+        existing, occupied = _occupant(screen_rows, ctx, path)
+        values = {
+            "name": name[:120],
+            "title": name[:200],
+            "description": description,
+            "screen_type": _text(attributes.get("Type") or attributes.get("type"))[:40],
+            "width": _int(attributes.get("Width") or attributes.get("width")),
+            "height": _int(attributes.get("Height") or attributes.get("height")),
+            "ordinal": _int(attributes.get("Number") or attributes.get("number"))
+            or fallback_ordinal,
+        }
+        if existing is not None:
+            screen = _update(ctx, existing, values, path)
+        elif occupied:
+            screen = screen_rows[0]
+        else:
+            screen = _create(
+                ctx,
+                HMIScreen(project_id=ctx.project.id, key=name, **values),
+                path,
+            )
+        if screen.deleted_at is None:
+            screens.append((path, screen))
+
+    all_tags = list(
+        ctx.db.execute(
+            select(Tag)
+            .where(Tag.project_id == ctx.project.id, Tag.deleted_at.is_(None))
+            .order_by(Tag.created_at, Tag.id)
+        ).scalars()
+    )
+    programs = list(
+        ctx.db.execute(
+            select(Program)
+            .where(Program.project_id == ctx.project.id, Program.deleted_at.is_(None))
+            .order_by(Program.created_at, Program.id)
+        ).scalars()
+    )
+    for display_path, screen in screens:
+        connections = [
+            element
+            for element in elements
+            if _normalise(_text(element.get("tag"))) == "connection"
+            and _text(element.get("xpath")).startswith(f"{display_path}/")
+        ]
+        object_ordinals: dict[str, int] = {}
+        objects: dict[str, HMIObjectInstance] = {}
+        for connection in connections:
+            connection_path = _text(connection.get("xpath"))
+            object_path = connection_path.rsplit("/", 1)[0]
+            object_source = _as_dict(by_path.get(object_path))
+            object_attributes = _as_dict(object_source.get("attributes"))
+            object_key = _text(object_attributes.get("Name") or object_attributes.get("name"))
+            if not object_key:
+                # A screen-level connection is representable without inventing
+                # a graphic object.  The binding below keeps object_instance_id
+                # null while remaining attributable to this screen.
+                object_instance: HMIObjectInstance | None = None
+                object_type = ""
+            elif len(object_key) > 60:
+                ctx.issue(
+                    "invalid_hmi_object_identity",
+                    "HMI graphic object name exceeds the canonical 60-character key limit.",
+                    object_path,
+                )
+                object_instance = None
+                object_type = _text(object_source.get("tag"))[:60]
+            else:
+                object_type = _text(object_source.get("tag"))[:60]
+                object_instance = objects.get(object_path)
+                if object_instance is None:
+                    object_rows = list(
+                        ctx.db.execute(
+                            select(HMIObjectInstance)
+                            .where(
+                                HMIObjectInstance.screen_id == screen.id,
+                                HMIObjectInstance.key == object_key,
+                            )
+                            .order_by(HMIObjectInstance.created_at, HMIObjectInstance.id)
+                        ).scalars()
+                    )
+                    object_existing, object_occupied = _occupant(
+                        object_rows, ctx, object_path
+                    )
+                    label = _text(_as_dict(by_path.get(f"{object_path}/Caption")).get("text"))
+                    ordinal = object_ordinals.get(display_path, 0)
+                    object_ordinals[display_path] = ordinal + 1
+                    values = {
+                        "object_type": object_type,
+                        "label": label[:120],
+                        "x": _int(object_attributes.get("Left") or object_attributes.get("left")),
+                        "y": _int(object_attributes.get("Top") or object_attributes.get("top")),
+                        "width": _int(
+                            object_attributes.get("Width") or object_attributes.get("width")
+                        ),
+                        "height": _int(
+                            object_attributes.get("Height") or object_attributes.get("height")
+                        ),
+                        "ordinal": ordinal,
+                    }
+                    if object_existing is not None:
+                        object_instance = _update(
+                            ctx, object_existing, values, object_path
+                        )
+                    elif object_occupied:
+                        object_instance = object_rows[0]
+                    else:
+                        object_instance = _create(
+                            ctx,
+                            HMIObjectInstance(
+                                project_id=ctx.project.id,
+                                screen_id=screen.id,
+                                key=object_key,
+                                **values,
+                            ),
+                            object_path,
+                        )
+                    objects[object_path] = object_instance
+
+            attributes = _as_dict(connection.get("attributes"))
+            expression = _text(attributes.get("Expression") or attributes.get("expression"))
+            property_name = _text(attributes.get("Name") or attributes.get("name"))[:60]
+            reference = _hmi_tag_reference(expression)
+            tag = _resolve_hmi_tag(reference, all_tags, programs)
+            access = _hmi_access(object_type)
+            binding_rows = list(
+                ctx.db.execute(
+                    select(HMIBinding)
+                    .where(
+                        HMIBinding.project_id == ctx.project.id,
+                        HMIBinding.screen_id == screen.id,
+                        HMIBinding.object_instance_id
+                        == (object_instance.id if object_instance is not None else None),
+                        HMIBinding.property_name == property_name,
+                    )
+                    .order_by(HMIBinding.created_at, HMIBinding.id)
+                ).scalars()
+            )
+            binding_existing, binding_occupied = _occupant(
+                binding_rows, ctx, connection_path
+            )
+            binding_values: dict[str, Any] = {
+                "tag_name": reference[:120],
+                "tag_id": tag.id if tag is not None else None,
+                "is_resolved": tag is not None,
+                "access": access,
+                "expression": expression[:300],
+                "unresolved_reason": (
+                    "" if tag is not None else "No unique canonical tag matches this HMI reference."
+                ),
+            }
+            if binding_existing is not None:
+                _update(ctx, binding_existing, binding_values, connection_path)
+            elif not binding_occupied:
+                _create(
+                    ctx,
+                    HMIBinding(
+                        project_id=ctx.project.id,
+                        screen_id=screen.id,
+                        object_instance_id=(
+                            object_instance.id if object_instance is not None else None
+                        ),
+                        property_name=property_name,
+                        **binding_values,
+                    ),
+                    connection_path,
+                )
+
+
+def _hmi_tag_reference(expression: str) -> str:
+    match = _FACTORYTALK_REFERENCE.fullmatch(expression.strip())
+    return match.group("reference").strip() if match is not None else ""
+
+
+def _resolve_hmi_tag(
+    reference: str,
+    tags: list[Tag],
+    programs: list[Program],
+) -> Tag | None:
+    if not reference:
+        return None
+    program_id: uuid.UUID | None = None
+    name = reference
+    if reference.casefold().startswith("program:") and "." in reference:
+        program_name, name = reference[8:].split(".", 1)
+        matching_programs = [
+            program for program in programs if program.name.casefold() == program_name.casefold()
+        ]
+        if len(matching_programs) != 1:
+            return None
+        program_id = matching_programs[0].id
+    base_name = name.split(".", 1)[0].split("[", 1)[0]
+    candidates = [
+        tag
+        for tag in tags
+        if tag.name.casefold() == base_name.casefold()
+        and (
+            (program_id is None and tag.scope is TagScope.CONTROLLER)
+            or (program_id is not None and tag.scope_program_id == program_id)
+        )
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _hmi_access(object_type: str) -> str:
+    folded = object_type.casefold()
+    if any(marker in folded for marker in ("button", "input", "entry", "selector")):
+        return "write"
+    if any(marker in folded for marker in ("indicator", "display", "gauge", "trend")):
+        return "read"
+    return ""
 
 
 def _import_l5x(ctx: _Context) -> None:

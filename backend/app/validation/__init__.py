@@ -46,6 +46,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.clock import utcnow
@@ -189,6 +190,14 @@ def run_validation(
     Does not commit. The caller owns the transaction, so the run and its results
     land if and only if the events describing them do.
     """
+    # Validation and reviewer waivers both use the project as their root lock.
+    # This makes "newest completed run for the current revision" stable until
+    # either transaction commits and prevents a reviewer from signing a result
+    # that becomes stale during the decision itself.
+    project = db.execute(
+        select(Project).where(Project.id == project.id).with_for_update()
+    ).scalar_one()
+
     selected = validators_for(disciplines)
     covered = (
         tuple(dict.fromkeys(validator.discipline for validator in selected))

@@ -671,6 +671,21 @@ def test_a_complete_profile_plans_the_production_sequence(
     assert {edge.depends_on_id for edge in final.dependencies} == {validation.id}
     assert {edge.depends_on_id for edge in qa_gate.dependencies} == {final.id}
 
+    logic = next(task for task in summary.tasks if task.kind is TaskKind.GENERATE_LOGIC)
+    delivery = next(task for task in summary.tasks if task.kind is TaskKind.DELIVERY)
+    logic_validation = next(
+        task for task in summary.tasks if task.idempotency_key.endswith(":validate-logic")
+    )
+    logic_gate = next(
+        task
+        for task in summary.tasks
+        if task.kind is TaskKind.EVALUATE_APPROVAL_GATE
+        and task.payload.get("gate_key") == ApprovalGateKey.LOGIC_AND_DELIVERY.value
+    )
+    assert {edge.depends_on_id for edge in delivery.dependencies} == {logic.id}
+    assert {edge.depends_on_id for edge in logic_validation.dependencies} == {delivery.id}
+    assert {edge.depends_on_id for edge in logic_gate.dependencies} == {logic_validation.id}
+
 
 def test_planned_specialists_are_stable_members_of_the_parent_run_and_block_senior_review(
     db: Session, production_project: Project, seeded: dict[str, User], settings: Settings

@@ -48,14 +48,17 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agents.base.presence import provision_workflow_agents
+from app.agents.base.presence import announce_agent_presence, provision_workflow_agents
 from app.core.clock import utcnow
 from app.core.config import Settings
 from app.core.enums import (
     AgentKind,
     ApprovalGateKey,
+    ApprovalKind,
+    ApprovalStatus,
     AuditAction,
     EventType,
+    GateStatus,
     ProjectStatus,
     TaskKind,
     TaskStatus,
@@ -63,10 +66,12 @@ from app.core.enums import (
 from app.core.errors import ConflictError
 from app.core.logging import get_logger
 from app.core.services import parsing
+from app.database.locking import lock_project_root
 from app.engineering import gates
 from app.models.approval import Approval
 from app.models.profile import ProjectProfile
 from app.models.project import Project
+from app.models.revision import ApprovalGate
 from app.models.task import Task
 from app.models.user import User
 from app.orchestration.events import record_event
@@ -239,6 +244,15 @@ def start_run(
     generation step at all: the refusal is structural rather than a check inside
     a task that would otherwise have run.
     """
+    # Every project-scoped workflow transition starts at the project row.  The
+    # caller commonly hands us an ORM identity loaded before another request
+    # committed, so checking it before this refresh would allow two stale
+    # ``planned`` snapshots to create two independent run graphs.
+    locked_project = lock_project_root(db, project.id)
+    if locked_project is None:  # pragma: no cover - callers authorise an existing project
+        raise ConflictError("The project being started no longer exists.")
+    project = locked_project
+
     if project.is_archived:
         raise ConflictError("Archived projects are read-only.")
     if project.status is ProjectStatus.RUNNING:
@@ -248,6 +262,37 @@ def start_run(
     if project.status not in STARTABLE:
         raise ConflictError(
             f"A run cannot be started while the project is '{project.status.value}'."
+        )
+
+    # Project status is a UI projection and can legitimately be
+    # ``awaiting_review`` while a gate task is parked. It is therefore not a
+    # sufficient one-active-run guard. Under the project-root lock, inspect the
+    # durable work and decision rows themselves before creating any new graph.
+    # Fully completed/failed/cancelled runs remain restartable.
+    active_workflow_task = db.execute(
+        select(Task.id)
+        .where(
+            Task.project_id == project.id,
+            Task.run_id.isnot(None),
+            Task.status.notin_(
+                [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
+            ),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    pending_gate_approval = db.execute(
+        select(Approval.id)
+        .where(
+            Approval.project_id == project.id,
+            Approval.kind == ApprovalKind.GATE_DECISION,
+            Approval.status == ApprovalStatus.PENDING,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if active_workflow_task is not None or pending_gate_approval is not None:
+        raise ConflictError(
+            "A workflow run is still active for this project. Complete or cancel it "
+            "before starting another."
         )
 
     files = parsing.parseable_files(db, project.id)
@@ -387,7 +432,7 @@ def start_run(
     # roster immediately instead of creating one generic-looking worker only
     # when its turn reaches the CPU.  This also binds each agent-owned task to
     # the stable instance that will run it.
-    provision_workflow_agents(db, project, created)
+    provisioned_agents = provision_workflow_agents(db, project, created, announce=False)
     for task in created:
         record_event(
             db,
@@ -403,6 +448,12 @@ def start_run(
                 "agent_kind": task.agent_kind or "",
             },
         )
+    # Publish the complete city roster only after the workflow's task-created
+    # sequence.  Consumers can then treat WORKFLOW_STARTED + task_count
+    # TASK_CREATED events as one contiguous, deterministic snapshot while every
+    # task still carries its stable agent binding.
+    for instance in provisioned_agents:
+        announce_agent_presence(db, instance)
 
     logger.info(
         "workflow run started",
@@ -667,35 +718,42 @@ def _plan_production(
             depends_on=[architecture.id],
         )
     )
+
+    # Delivery is part of the design this gate approves.  In particular, HMI,
+    # alarm, electrical and test plugins inspect/materialise the cross-domain
+    # model that ``LOGIC_AND_DELIVERY`` evaluates.  Putting DELIVERY behind that
+    # gate formed a hard cycle: the gate waited for delivery-domain rows while
+    # the task able to produce or inspect them waited for the gate.  Run it
+    # after logic and before the validation snapshot used by the gate instead.
+    delivery = enqueue(
+        EnqueueRequest(
+            kind=TaskKind.DELIVERY,
+            title="Produce reports and testing documentation",
+            description="Run installed delivery agents over the generated model before "
+            "the logic-and-delivery approval gate is evaluated.",
+            idempotency_key=f"{prefix}:delivery",
+            agent_kind=AgentKind.DELIVERY.value,
+            run_id=run_id,
+            priority=70,
+            depends_on=[logic.id],
+        )
+    )
     logic_validation = _validation_task(
         enqueue,
         title="Validate the logic and delivery model",
         key="validate-logic",
         run_id=run_id,
         prefix=prefix,
-        priority=70,
-        depends_on=[logic.id],
+        priority=72,
+        depends_on=[delivery.id],
     )
     logic_gate = _gate_task(
         enqueue,
         ApprovalGateKey.LOGIC_AND_DELIVERY,
         run_id=run_id,
         prefix=prefix,
-        priority=72,
+        priority=74,
         depends_on=[logic_validation.id],
-    )
-
-    delivery = enqueue(
-        EnqueueRequest(
-            kind=TaskKind.DELIVERY,
-            title="Produce reports and testing documentation",
-            description="Run installed delivery agents over the approved model.",
-            idempotency_key=f"{prefix}:delivery",
-            agent_kind=AgentKind.DELIVERY.value,
-            run_id=run_id,
-            priority=74,
-            depends_on=[logic_gate.id],
-        )
     )
 
     validation = _validation_task(
@@ -705,7 +763,7 @@ def _plan_production(
         run_id=run_id,
         prefix=prefix,
         priority=76,
-        depends_on=[delivery.id],
+        depends_on=[logic_gate.id],
     )
     final_senior = enqueue(
         EnqueueRequest(
@@ -883,6 +941,11 @@ def pause(db: Session, project: Project, *, actor: User, reason: str = "") -> Pr
     A task already running is allowed to finish; killing it mid-write would leave
     partial state that the restart-recovery path then has to reason about.
     """
+    locked_project = lock_project_root(db, project.id)
+    if locked_project is None:  # pragma: no cover - callers authorise an existing project
+        raise ConflictError("The project being paused no longer exists.")
+    project = locked_project
+
     if project.is_paused:
         raise ConflictError("Project is already paused.")
     if project.status is not ProjectStatus.RUNNING:
@@ -915,12 +978,28 @@ def pause(db: Session, project: Project, *, actor: User, reason: str = "") -> Pr
 
 
 def resume(db: Session, project: Project, *, actor: User, reason: str = "") -> Project:
+    locked_project = lock_project_root(db, project.id)
+    if locked_project is None:  # pragma: no cover - callers authorise an existing project
+        raise ConflictError("The project being resumed no longer exists.")
+    project = locked_project
+
     if not project.is_paused:
         raise ConflictError("Project is not paused.")
 
     project.is_paused = False
     project.paused_at = None
+
+    # ``defer`` is an explicit workflow pause, not a request to ask the same
+    # question again on the next worker tick. Resuming clears only the gate's
+    # pointer; the deferred approval row remains immutable history, and the gate
+    # task is re-queued below to raise a fresh request.
+    for gate in _active_gate_rows(db, project):
+        approval = db.get(Approval, gate.approval_id) if gate.approval_id else None
+        if approval is not None and approval.status is ApprovalStatus.DEFERRED:
+            gate.approval_id = None
     db.flush()
+
+    reconcile_gate_tasks(db, project, resume_deferred=True)
 
     audit.record(
         db,
@@ -950,19 +1029,42 @@ def cancel(
     Completed work is kept: findings already produced and approved remain valid,
     because cancelling a run is not the same as retracting what it found.
     """
+    # Workflow controls and reviewer-driven task completion share this root
+    # lock. Refreshing matters because ProjectWrite loaded the same ORM identity
+    # before this service acquired the lock.
+    locked_project = lock_project_root(db, project.id)
+    if locked_project is None:  # pragma: no cover - callers authorise an existing project
+        raise ConflictError("The project being cancelled no longer exists.")
+    project = locked_project
+    effective_reason = reason.strip() or "The run was cancelled."
+    cancelled_gate_requests = gates.cancel_pending_gate_requests(
+        db,
+        project=project,
+        reason=(
+            "Cancelled because the workflow run was cancelled. "
+            f"Reason: {effective_reason}"
+        ),
+    )
     queue = DatabaseTaskQueue(db, settings)
     unfinished = list(
         db.execute(
-            select(Task).where(
+            select(Task)
+            .where(
                 Task.project_id == project.id,
                 Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]),
             )
+            .order_by(Task.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         ).scalars()
     )
+    stopped = 0
     for task in unfinished:
-        queue.cancel(task, reason or "The run was cancelled.")
+        stopped += int(queue.cancel(task, effective_reason))
 
-    project.status = ProjectStatus.PLANNED if unfinished else project.status
+    project.status = (
+        ProjectStatus.PLANNED if stopped or cancelled_gate_requests else project.status
+    )
     project.is_paused = False
     project.paused_at = None
     db.flush()
@@ -974,17 +1076,27 @@ def cancel(
         project_id=project.id,
         target_type="project",
         target_id=project.id,
-        summary=f"Cancelled the review, stopping {len(unfinished)} task(s)",
-        details={"reason": reason, "cancelled_tasks": len(unfinished)},
+        summary=(
+            f"Cancelled the review, stopping {stopped} task(s) and closing "
+            f"{len(cancelled_gate_requests)} pending gate approval(s)"
+        ),
+        details={
+            "reason": effective_reason,
+            "cancelled_tasks": stopped,
+            "cancelled_gate_approvals": len(cancelled_gate_requests),
+            "cancelled_gate_approval_ids": [
+                str(approval.id) for approval in cancelled_gate_requests
+            ],
+        },
     )
     record_event(
         db,
         project_id=project.id,
         event_type=EventType.WORKFLOW_CANCELLED,
         actor_user_id=actor.id,
-        payload={"reason": reason, "task_count": len(unfinished)},
+        payload={"reason": effective_reason, "task_count": stopped},
     )
-    return len(unfinished)
+    return stopped
 
 
 # ---------------------------------------------------------------------------
@@ -1121,6 +1233,7 @@ def unblock_approval_tasks(db: Session, project: Project, settings: Settings) ->
         select(Approval.id).where(Approval.project_id == project.id, Approval.status == "pending")
     ).first()
     if still_pending is not None:
+        reconcile_gate_tasks(db, project)
         return 0
 
     queue = DatabaseTaskQueue(db, settings)
@@ -1129,17 +1242,188 @@ def unblock_approval_tasks(db: Session, project: Project, settings: Settings) ->
             select(Task).where(
                 Task.project_id == project.id,
                 Task.status == TaskStatus.AWAITING_APPROVAL,
+                Task.kind != TaskKind.EVALUATE_APPROVAL_GATE,
             )
         ).scalars()
     )
     for task in waiting:
         queue.unblock(task)
-    if waiting:
+    gate_transitions = reconcile_gate_tasks(db, project)
+    if waiting or gate_transitions:
         logger.info(
             "approval gate cleared",
-            extra={"project_id": str(project.id), "resumed_tasks": len(waiting)},
+            extra={
+                "project_id": str(project.id),
+                "resumed_tasks": len(waiting) + gate_transitions,
+            },
         )
-    return len(waiting)
+    return len(waiting) + gate_transitions
+
+
+def reconcile_gate_tasks(db: Session, project: Project, *, resume_deferred: bool = False) -> int:
+    """Make active gate-task state match the durable six-gate projection.
+
+    This is intentionally safe to run after every task and at worker startup.
+    It repairs the two otherwise permanent failure modes: a rejected/reopened
+    gate whose task was left BLOCKED or COMPLETED, and an approval settled just
+    before a process restart whose task was left AWAITING_APPROVAL.
+    """
+    gate_rows = {gate.gate_key: gate for gate in gates.evaluate_all(db, project=project)}
+    tasks = _active_gate_tasks(db, project)
+    changed = 0
+
+    for task in tasks:
+        # Cancellation is an operator-owned terminal decision.  Gate
+        # reconciliation repairs interrupted/reopened work; it must never turn
+        # a deliberately stopped run back into live work.
+        if task.status is TaskStatus.CANCELLED:
+            continue
+        gate_key = _task_gate_key(task)
+        gate = gate_rows.get(gate_key) if gate_key is not None else None
+        if gate is None:
+            continue
+
+        if gate.status in {GateStatus.PASSED, GateStatus.SKIPPED}:
+            if task.status in {
+                TaskStatus.BLOCKED,
+                TaskStatus.AWAITING_APPROVAL,
+                TaskStatus.FAILED,
+            }:
+                _requeue_gate_task(task)
+                changed += 1
+            continue
+
+        if gate.status is GateStatus.AWAITING_DECISION:
+            if task.status is not TaskStatus.AWAITING_APPROVAL:
+                task.status = TaskStatus.AWAITING_APPROVAL
+                task.blocked_reason = f"'{gate.title}' is awaiting a named reviewer decision."
+                _release_task_lease(task)
+                changed += 1
+            continue
+
+        if gate.status is GateStatus.READY:
+            if task.status not in {TaskStatus.QUEUED, TaskStatus.RUNNING}:
+                _requeue_gate_task(task)
+                changed += 1
+            continue
+
+        # Future gate tasks that never ran stay queued behind their dependency.
+        # A gate task that already ran, however, must visibly hold rather than
+        # masquerade as complete after rejection, requested changes or reopening.
+        if task.attempts == 0 and task.status is TaskStatus.QUEUED:
+            continue
+        reason = _gate_blocked_reason(gate)
+        if task.status is not TaskStatus.BLOCKED or task.blocked_reason != reason:
+            task.status = TaskStatus.BLOCKED
+            task.blocked_reason = reason
+            _release_task_lease(task)
+            changed += 1
+
+        approval = db.get(Approval, gate.approval_id) if gate.approval_id else None
+        if (
+            approval is not None
+            and approval.status is ApprovalStatus.DEFERRED
+            and not resume_deferred
+        ):
+            project.is_paused = True
+            project.paused_at = project.paused_at or utcnow()
+
+    if changed:
+        db.flush()
+    return changed
+
+
+def reconcile_all_gate_tasks(db: Session) -> int:
+    """Restart reconciliation for every project carrying production gate tasks."""
+    # Multiple recovery workers must acquire project roots in the same order;
+    # database result order without ORDER BY is explicitly undefined. Sorting
+    # UUID text is stable across SQLite and PostgreSQL representations.
+    project_ids = sorted(
+        db.execute(
+            select(Task.project_id).where(Task.kind == TaskKind.EVALUATE_APPROVAL_GATE).distinct()
+        ).scalars(),
+        key=str,
+    )
+    total = 0
+    for project_id in project_ids:
+        project = db.get(Project, project_id)
+        if project is not None and project.status is not ProjectStatus.ARCHIVED:
+            total += reconcile_gate_tasks(db, project)
+    return total
+
+
+def _active_gate_tasks(db: Session, project: Project) -> list[Task]:
+    latest = db.execute(
+        select(Task.run_id)
+        .where(
+            Task.project_id == project.id,
+            Task.kind == TaskKind.EVALUATE_APPROVAL_GATE,
+        )
+        .order_by(Task.created_at.desc(), Task.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest is None:
+        return []
+    return list(
+        db.execute(
+            select(Task).where(
+                Task.project_id == project.id,
+                Task.run_id == latest,
+                Task.kind == TaskKind.EVALUATE_APPROVAL_GATE,
+            )
+        ).scalars()
+    )
+
+
+def _active_gate_rows(db: Session, project: Project) -> list[ApprovalGate]:
+    keys = {_task_gate_key(task) for task in _active_gate_tasks(db, project)}
+    wanted = {key for key in keys if key is not None}
+    if not wanted:
+        return []
+    return list(
+        db.execute(
+            select(ApprovalGate).where(
+                ApprovalGate.project_id == project.id,
+                ApprovalGate.gate_key.in_(wanted),
+            )
+        ).scalars()
+    )
+
+
+def _task_gate_key(task: Task) -> ApprovalGateKey | None:
+    try:
+        return ApprovalGateKey(str(task.payload.get("gate_key", "")))
+    except ValueError:
+        return None
+
+
+def _gate_blocked_reason(gate: ApprovalGate) -> str:
+    detail = next(
+        (
+            str(item.get("detail") or item.get("statement", ""))
+            for item in gate.unmet_criteria
+            if item.get("detail") or item.get("statement")
+        ),
+        "The gate criteria are not met.",
+    )
+    return f"'{gate.title}' is {gate.status.value}: {detail}"
+
+
+def _requeue_gate_task(task: Task) -> None:
+    task.status = TaskStatus.QUEUED
+    task.result = {}
+    task.blocked_reason = ""
+    task.error_code = ""
+    task.error_message = ""
+    task.available_at = None
+    task.finished_at = None
+    _release_task_lease(task)
+
+
+def _release_task_lease(task: Task) -> None:
+    task.locked_by = None
+    task.locked_at = None
+    task.lease_expires_at = None
 
 
 def active_run_id(db: Session, project_id: uuid.UUID) -> uuid.UUID | None:
