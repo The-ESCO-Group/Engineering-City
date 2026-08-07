@@ -159,7 +159,7 @@ Archive bytes, size, SHA-256, candidate manifest, approver, provenance, and down
 .\scripts\product\test.ps1 -IncludeE2E
 .\scripts\product\test.ps1 -IncludeLiveE2E
 pwsh -NoProfile -File .\scripts\product\tests\common.tests.ps1
-.\.venv\Scripts\python.exe -m pytest backend\tests_delivery -q
+.venv\Scripts\python.exe -m pytest backend\tests_delivery -q
 cargo test --locked --manifest-path desktop\src-tauri\Cargo.toml
 cargo clippy --locked --all-targets --manifest-path desktop\src-tauri\Cargo.toml -- -D warnings
 ```
