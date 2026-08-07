@@ -26,6 +26,7 @@ from app.api.routes import approvals as approval_routes
 from app.api.routes import auth as auth_routes
 from app.api.routes import engineering as engineering_routes
 from app.api.routes import events as event_routes
+from app.api.routes import external_agents as external_agent_routes
 from app.api.routes import files as file_routes
 from app.api.routes import findings as finding_routes
 from app.api.routes import health as health_routes
@@ -34,6 +35,7 @@ from app.api.routes import projects as project_routes
 from app.api.routes import releases as release_routes
 from app.api.routes import reports as report_routes
 from app.api.routes import requirements as requirement_routes
+from app.api.routes import validations as validation_routes
 from app.api.routes import workflow as workflow_routes
 from app.core.bootstrap import bootstrap
 from app.core.config import Settings, get_settings
@@ -147,7 +149,9 @@ def create_app(
     app.include_router(auth_routes.router, prefix=prefix)
     app.include_router(project_routes.router, prefix=prefix)
     app.include_router(engineering_routes.router, prefix=prefix)
+    app.include_router(external_agent_routes.router, prefix=prefix)
     app.include_router(requirement_routes.router, prefix=prefix)
+    app.include_router(validation_routes.router, prefix=prefix)
     app.include_router(release_routes.router, prefix=prefix)
     app.include_router(file_routes.router, prefix=prefix)
     app.include_router(workflow_routes.router, prefix=prefix)

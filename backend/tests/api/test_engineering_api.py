@@ -210,3 +210,61 @@ def test_named_answer_persists_a_citable_decision(
     db.refresh(blocked_task)
     assert blocked_task.status is TaskStatus.QUEUED
     assert blocked_task.blocked_reason == ""
+
+
+def test_answer_requeues_stale_validation_and_gate_evaluations(
+    engineer_client: object,
+    db: Session,
+) -> None:
+    """An answered design question must not leave its old validation parked."""
+    created = engineer_client.post(  # type: ignore[attr-defined]
+        "/api/projects",
+        json={"name": "Validation convergence", "engineering_profile": _profile()},
+    )
+    project_id = created.json()["id"]
+    design = Task(
+        project_id=project_id,
+        kind=TaskKind.DESIGN_TAGS,
+        title="Partial tag design",
+        status=TaskStatus.COMPLETED,
+        idempotency_key="test:clarification:completed-design",
+    )
+    validation = Task(
+        project_id=project_id,
+        kind=TaskKind.VALIDATE_CROSS_DISCIPLINE,
+        title="Revalidate answered questions",
+        status=TaskStatus.BLOCKED,
+        blocked_reason="requirements.unanswered_question",
+        idempotency_key="test:clarification:validation",
+    )
+    gate = Task(
+        project_id=project_id,
+        kind=TaskKind.EVALUATE_APPROVAL_GATE,
+        title="Re-evaluate gate readiness",
+        status=TaskStatus.BLOCKED,
+        blocked_reason="A blocking question is unanswered.",
+        idempotency_key="test:clarification:gate",
+    )
+    db.add_all([design, validation, gate])
+    db.flush()
+    question = ProjectQuestion(
+        project_id=project_id,
+        reference="Q-DESIGN",
+        question="Which accepted requirement is this tag based on?",
+        why_it_matters="Validation cannot establish traceability without the answer.",
+        raised_in_task_id=design.id,
+    )
+    db.add(question)
+    db.commit()
+
+    response = engineer_client.post(  # type: ignore[attr-defined]
+        f"/api/project-questions/{question.id}/resolve",
+        json={"answer": "Use accepted requirement REQ-001.", "resolution": "answered"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["unblocked_task_count"] == 2
+    db.expire_all()
+    assert db.get(Task, design.id).status is TaskStatus.COMPLETED  # type: ignore[union-attr]
+    assert db.get(Task, validation.id).status is TaskStatus.QUEUED  # type: ignore[union-attr]
+    assert db.get(Task, gate.id).status is TaskStatus.QUEUED  # type: ignore[union-attr]

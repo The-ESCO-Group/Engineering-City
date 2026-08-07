@@ -58,9 +58,7 @@ _GENERATABLE = frozenset(
         ReleaseCandidateStatus.VALIDATION_FAILED,
     }
 )
-_FINALIZABLE = frozenset(
-    {ReleaseCandidateStatus.APPROVED, ReleaseCandidateStatus.RELEASED}
-)
+_FINALIZABLE = frozenset({ReleaseCandidateStatus.APPROVED, ReleaseCandidateStatus.RELEASED})
 
 
 def _archive_read(archive: ReleaseArchive) -> ReleaseArchiveRead:
@@ -75,10 +73,7 @@ def _content_disposition(filename: str) -> str:
         safe.encode("ascii", "ignore").decode("ascii"),
         fallback="release.zip",
     )
-    return (
-        f'attachment; filename="{ascii_name}"; '
-        f"filename*=UTF-8''{quote(safe, safe='')}"
-    )
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(safe, safe='')}"
 
 
 def _candidate_read(
@@ -238,9 +233,7 @@ def list_release_candidates(
     total = int(db.execute(select(func.count()).select_from(statement.subquery())).scalar() or 0)
     candidates = list(
         db.execute(
-            statement.order_by(ReleaseCandidate.candidate_number.desc())
-            .limit(limit)
-            .offset(offset)
+            statement.order_by(ReleaseCandidate.candidate_number.desc()).limit(limit).offset(offset)
         ).scalars()
     )
     candidate_ids = [candidate.id for candidate in candidates]
@@ -248,9 +241,7 @@ def list_release_candidates(
         {
             row.release_candidate_id: row
             for row in db.execute(
-                select(ReleaseArchive).where(
-                    ReleaseArchive.release_candidate_id.in_(candidate_ids)
-                )
+                select(ReleaseArchive).where(ReleaseArchive.release_candidate_id.in_(candidate_ids))
             ).scalars()
         }
         if candidate_ids
@@ -331,9 +322,7 @@ def list_release_artifacts(
         roles=permissions.READ_ROLES,
         operation="view release artifacts",
     )
-    statement = select(ExportArtifact).where(
-        ExportArtifact.release_candidate_id == candidate.id
-    )
+    statement = select(ExportArtifact).where(ExportArtifact.release_candidate_id == candidate.id)
     total = int(db.execute(select(func.count()).select_from(statement.subquery())).scalar() or 0)
     rows = db.execute(
         statement.order_by(ExportArtifact.import_order, ExportArtifact.relative_path)

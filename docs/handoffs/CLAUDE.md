@@ -5,57 +5,57 @@ engineering,generators,validation,adapters}`, `backend/app/agents/{base,review}`
 `backend/tests`, `contracts`, `templates`, `infra/backend`, `scripts/backend`,
 `docs/backend`.
 
-**Last updated:** production-platform Milestone 0
-**Contract version:** `1.0.0`
-**Tests:** 1043 passing · ruff, mypy clean · 72/72 live-process smoke checks
+**Last updated:** 2026-08-05, at commit `01e289f`
+**Contract version:** `1.1.0` — note the bump; it was `1.0.0` when this file last
+said so
+**Endpoints:** 65 HTTP + 1 WebSocket at `01e289f`; 68 + 1 in the working tree
+(see [Uncommitted](#uncommitted-work-in-the-tree))
+**Checks, re-run against the working tree late on 2026-08-05:** `ruff format` and
+`ruff check` clean · `mypy` clean (186 files) · `alembic` round-trips and
+`alembic check` passes *with* the uncommitted revisions `4f7a9c2d1e6b` and
+`4000cd6b1757` and fails without them · `generate_contracts.py --check` **up to
+date** (both were stale earlier today and someone regenerated them) ·
+`backend/tests/api` + `backend/tests/validation` **361 passed** · full `pytest`
+**one failure**:
+`test_line4_end_to_end.py::test_requirements_are_extracted_and_at_least_one_clarification_is_raised`,
+because the evidence graph no longer reads the Cause and Effect worksheet as
+seven more interlock requirements — the spurious clarifications that satisfied it
+are gone and the one genuine ambiguity (planted issue 6) is still not found. That
+is the same in-flight work that removed the planted-issue-1 and -7 markers, not a
+regression. **Several agents are editing this tree at once**, so re-derive every
+number here rather than quoting it, and do not read "the suite is green" out of
+any version of this file.
+
+Read this file for what the API is and what it will not do. Read
+[`docs/backend/project-core.md`](../backend/project-core.md) before writing to the
+canonical model, and
+[`docs/backend/release-pipeline.md`](../backend/release-pipeline.md) before
+running the release pipeline for real — the second one carries the honest account
+of what has and has not been verified, and it is the one to read before telling a
+customer anything.
+
+| Document | What it is for |
+| --- | --- |
+| `docs/backend/project-core.md` | Changing the canonical model, or adding an agent that writes to it |
+| `docs/backend/release-pipeline.md` | Stages, the six gates, validation levels, the package, and what is unverified |
+| `docs/backend/adr/0001-*.md` | Why the platform was extended rather than forked; revisions, generation, levels, what stays impossible |
+| `docs/backend/adr/0002-*.md` | When a gate decision expires; what level a package may claim; proposal vs outcome on a change operation |
+| `docs/backend/parsers.md`, `evidence.md` | The provenance substrate |
+| `docs/backend/security.md` | Intake, archives, XML, authorisation |
 
 ---
 
-## Scope change — review platform → production platform
+## ⚠ Breaking changes for the frontend
 
-The brief now asks for *“from project description to human-reviewed,
-Rockwell-import-ready engineering package.”* That is a superset of what was
-built, not a replacement for it.
+Three of them, in increasing order of how quietly they break. The third is the
+one that has not been written down before.
 
-**The decision is to extend, not fork.** See
-[`docs/backend/adr/0001-extend-the-review-platform-into-a-production-platform.md`](../backend/adr/0001-extend-the-review-platform-into-a-production-platform.md)
-for the reasoning and for four other decisions that shape everything downstream:
-how revisions are represented, why generation is deterministic code rather than a
-model, why verification is a level rather than a boolean, and what stays
-impossible.
+### 1. Semantic locations (previously documented, one correction)
 
-Everything already delivered keeps its role. Ingestion, the seven parsers and the
-evidence graph become the *provenance substrate* for a canonical engineering
-model; the workflow engine gains task kinds rather than being replaced; the agent
-action contract gains change-set proposals while its refusal rules stay
-untouched.
-
-### Directory mapping
-
-The brief’s suggested directories do not all match this repository. Modules are
-**not** duplicated to preserve the suggested names.
-
-| Brief | This repository |
-| --- | --- |
-| `backend/app/db/**` | `backend/app/database/**` |
-| `backend/app/providers/**` | `backend/app/agents/base/providers/**` |
-| `backend/app/agents/core/**` | `backend/app/agents/review/**` |
-| `backend/tests/core/**` | `backend/tests/**` |
-| `backend/tests/delivery/**` | `backend/tests_delivery/**` |
-| `docs/handoffs/SOL.md` | `docs/handoffs/GPT.md` (same partner agent, pre-existing filename) |
-| `assets/city/**` | `frontend/src/**` |
-
-New packages with no pre-existing equivalent: `backend/app/engineering/`
-(revisions, change sets, merge, impact), `backend/app/generators/{plc,rockwell}/`,
-`backend/app/validation/`, `backend/app/adapters/`, and `templates/`.
-
-### ⚠ Breaking change for the frontend — semantic locations
-
-`AgentInstance.location` and `AgentSpec.home_location` now carry
-`SemanticLocation` values from the brief’s sixteen districts, replacing the four
-ad-hoc strings the review platform used. The backend broadcasts a district name
-and never a coordinate, so where a building sits on screen stays entirely
-yours.
+`AgentInstance.location` and `AgentSpec.home_location` carry `SemanticLocation`
+values from the brief's sixteen districts, replacing the four ad-hoc strings the
+review platform used. The backend broadcasts a district name and never a
+coordinate, so where a building sits on screen stays entirely yours.
 
 | Was | Is now |
 | --- | --- |
@@ -64,81 +64,150 @@ yours.
 | `safety_annex` | `automation_core` |
 | `review_hall` | `qa_campus` |
 
-The full set is `SemanticLocation` in `contracts/domain.schema.json`. Eleven of
-the sixteen districts have no agent standing in them yet; they fill up as the
-production agents land in Milestone 4.
+**Correction:** the full set is in `contracts/events.schema.json`, not
+`contracts/domain.schema.json`. This file previously pointed at the wrong one.
+All sixteen: `project_intake`, `requirements_hall`, `project_core`, `tag_foundry`,
+`automation_core`, `ladder_logic_lab`, `electrical_works`, `hmi_district`,
+`alarm_center`, `qa_campus`, `testing_grounds`, `approval_plaza`,
+`documentation_quarter`, `release_logistics`, `template_library`, `data_center`.
+
+### 2. Enums widened — a `switch` written against the old members now falls through
+
+This is the larger break and it produces **no error anywhere**. Members were
+added, never renamed, so nothing 404s, nothing fails validation, and no type
+check fires. A `switch` with no `default` silently renders nothing; one with a
+`default` renders the fallback for a state that is now normal.
+
+Every one of these is generated into `contracts/`, so regenerating your client
+picks up the values — but not the branches you have to write.
+
+| Enum | Was | Now | Added |
+| --- | --- | --- | --- |
+| `ProjectStatus` | 8 | 17 | `clarification_required`, `tag_and_io_design`, `plc_architecture`, `implementation`, `cross_discipline_review`, `test_development`, `release_validation`, `ready_for_export`, `blocked` |
+| `EventType` | 27 | 47 | `project.question_created`, `project.question_resolved`, `requirement.created`, `workflow.planned`, `workflow.failed`, `task.assigned`, `changeset.created`, `changeset.validation_failed`, `changeset.submitted`, `changeset.reviewed`, `changeset.abandoned`, `changeset.merged`, `revision.created`, `gate.status_changed`, `validation.started`, `validation.completed`, `export.started`, `export.artifact_created`, `release.candidate_created`, `release.ready` |
+| `ApprovalStatus` | 4 | 7 | `changes_requested`, `risk_accepted`, `deferred` |
+| `AuditAction` | 24 | 42 | profile, question, decision, changeset, revision, tag-rename, gate, validation, export, release and workstation actions |
+| `TaskKind` | 11 | 21 | `extract_requirements`, `resolve_clarifications`, `design_tags`, `design_plc_architecture`, `generate_logic`, `validate_cross_discipline`, `evaluate_approval_gate`, `generate_release_candidate`, `verify_import`, `assemble_package` |
+| `ActionType` | 8 | 14 | `create_task_plan`, `request_clarification`, `propose_changeset`, `review_changeset`, `generate_preview`, `complete_task` |
+| `AgentKind` | 5 | 8 | `requirements_planning`, `tag_architecture`, `plc_logic` |
+| `AnchorType` | 23 | 29 | `description_paragraph`, `requirement`, `template`, `human_decision`, `generated_object`, `validation_result` |
+| `ApprovalKind` | 5 | 10 | `gate_decision`, `changeset_merge`, `tag_rename`, `restricted_domain`, `release_candidate` |
+| `EvidenceKind` | 5 | 9 | `template_rule`, `human_decision`, `generated_object`, `validation_output` |
+
+Four things to get right, because each is a specific way this bites:
+
+* **`ProjectStatus` no longer means `running` while a production run is
+  running.** Nine of the seventeen members are engineering *phases*, and
+  `refresh_project_status` reports the phase of the earliest unfinished task
+  rather than a bare `running`. A review run still reports `running`, because the
+  phase members describe design and generation work a review run never does.
+  Treating anything outside your known list as an error will report a healthy,
+  working project as broken. `failed` and `completed` still exist and still mean
+  what they meant; `blocked` and `clarification_required` mean "a human owes an
+  answer", which is a call to action rather than a fault — the Line 4 acceptance
+  run currently ends `blocked`.
+* **`ApprovalStatus.risk_accepted` is not `approved`.** Both let the work
+  proceed, and the whole reason the two are separate members is that a release
+  which went ahead on knowingly carried risk must never afterwards look like one
+  with no risk. Render it distinctly. `changes_requested` and `deferred` mean the
+  request is settled but the *gate* is not — the work went back to the engineers.
+* **Twenty new `EventType` members arrive on the same socket** as the twenty-seven
+  you already handle. An unknown `event_type` must be ignored without breaking the
+  stream, and `seq` must still be advanced, or a client that meets
+  `changeset.merged` stops catching up.
+* **`ApprovalGateKey`, `GateStatus` and `ApprovalDecision` are new enums, not
+  widened ones.** A gate decision is `approve` | `reject` | `request_changes` |
+  `accept_risk` | `defer`, and `reject`, `request_changes` and `accept_risk`
+  **require** a non-empty comment — the API refuses the decision without one.
+
+### 3. Roughly sixty new enums exist and most are **not** in `contracts/domain.schema.json`
+
+`scripts/backend/generate_contracts.py` has a hand-maintained
+`PUBLISHED_ENUMS` tuple, and it still lists the original 25. Everything added
+since — `ObjectType` (46 members), `ValidationLevel`, `ValidationSeverity`,
+`ValidationDiscipline`, `GateStatus`, `ApprovalGateKey`, `ApprovalDecision`,
+`ReleaseCandidateStatus`, `ImportVerificationStatus`, `ChangeOperationType`,
+`ChangeSetStatus`, `ConflictKind`, `MergeOutcome`, `RequirementStatus`,
+`TagScope`, `TagRole`, `SignalType`, and the rest — is absent from the domain
+schema unless it happens to appear inside a published model's own JSON schema.
+Seven leak in that way: `ControllerFamily`, `HmiProduct`, `ProjectType`,
+`ReleaseMode`, `RestrictedDomain`, `SafetyClassification`, `UnitSystem`.
+
+So a generated client will have string types where it should have unions, for
+exactly the enums the release and gate UI needs most. **This is mine to fix** —
+tell me which you want first and I will add them to `PUBLISHED_ENUMS` and
+regenerate rather than you hand-writing them. Do not hand-edit `contracts/`;
+`backend/tests/test_contracts.py` fails on drift.
 
 ---
 
-## Milestone 1 — the canonical engineering model
+## Uncommitted work in the tree
 
-**103 tables**, of which 74 are canonical engineering objects. One migration,
-`792176727e30`, which round-trips (`upgrade` → `check` → `downgrade base` →
-`upgrade`) with no drift against the ORM.
+At the time of writing the working tree is **not clean**, and the extra work is
+not mine. Recorded here so nobody reads a number in this file and finds a
+different one.
 
-**Every engineering object shares a spine** (`app/models/core.py`). The two
-load-bearing columns:
+New, untracked: `backend/app/api/routes/validations.py`,
+`backend/app/api/schemas/validation.py`,
+`backend/app/core/services/validation_review.py`,
+`backend/tests/api/test_validation_api.py`,
+`backend/tests/engineering/test_logic_instruction_branch_gate.py`, and the Alembic
+revision `4f7a9c2d1e6b`. Modified, among others:
+`backend/app/api/routes/approvals.py`, `backend/app/engineering/gates.py`,
+`backend/app/models/{revision,plc}.py`, `backend/app/core/enums.py`. It moved
+twice while this file was being written, so treat every count here as of
+2026-08-05 and re-derive rather than quote.
 
-* `object_revision` — bumped on every update. It is both the optimistic
-  concurrency token and the unit of conflict detection, so a change set written
-  against revision 4 that arrives when the object is at 5 is a conflict
-  established by *comparison* rather than by guesswork.
-* `approval_state` — once `approved`, an object is protected. A later change
-  must supersede it explicitly and win a fresh approval, so an agent cannot
-  quietly edit something an engineer signed off.
+Three endpoints exist in the tree and not at `01e289f`:
 
-**Traceability is a table, not an aspiration.** `object_evidence_links` cites the
-basis for any object — a parsed document anchor, a requirement, an approved
-template rule, or a named human decision. Thirteen object kinds
-(`TRACEABLE_OBJECT_TYPES`) may not be created without one, and the rule is
-enforced twice: in the action schema, where it is cheapest to catch, and again
-at merge.
-
-Notably, a *parser warning* is not an acceptable basis. “The PDF had no text
-layer” is a fact worth recording; it is not a reason for a rung to exist.
-
-**Revisions** (`app/models/revision.py`) are current-state-plus-change-log, per
-ADR 0001. `ProjectRevision` is a numbered merge point, `ChangeSet` is a scoped
-proposal, and every `ChangeOperation` stores the value *before* as well as
-after — which is what makes a diff a query, a rollback data rather than a
-replay, and a merge dry-run meaningful rather than merely reassuring.
-
-**The action contract grew six members** (`app/agents/base/actions.py`), and the
-rules are in the schema rather than in prompt wording:
-
-| Refused | Why |
+| Method | Path |
 | --- | --- |
-| Creating a tag, rung, alarm, HMI binding or test case with no basis | An object that exists for no stated reason cannot be reviewed |
-| An update or delete with no `based_on_object_revision` | A concurrent edit could not be detected, only overwritten |
-| A change set containing a rename, marked as needing no approval | A rename reaches into logic, HMI, alarms, tests and docs; the impact report exists so a reviewer sees that list first |
-| A rejected change set with no stated concern | A bare refusal leaves the author nothing to act on |
-| A plan whose task depends on a task the plan does not define | A dangling dependency leaves the task queued forever, silently |
-| “This is ambiguous” with exactly one reading named | Naming both readings is what makes it answerable |
+| `POST` | `/api/approval-gates/{gate_id}/approvals/{approval_id}/decision` |
+| `GET` | `/api/projects/{project_id}/validation-results` |
+| `POST` | `/api/validation-results/{result_id}/waiver` |
 
-**Two things worth knowing if you touch the schema.**
-`backend/tests/test_project_core_schema.py` is structural: it checks every
-engineering object still carries the versioning columns, is project-scoped and
-indexed, and — the one that matters — that no `Mapped[SomeEnum]` column slipped
-onto a plain `String`. That last defect stores correctly and loads back as a
-`str`, silently breaking identity comparison on every row; it has bitten this
-repository once already.
+All three are routed and reachable (verified: they answer `401`, not `404`). The
+first closes the largest hole this handoff previously reported — a reviewer could
+not pass an approval gate from outside the process at all — and it works:
+`scripts/backend/smoke_production.py` now announces two of its `gap` entries as
+`RESOLVED`, "a reviewer can decide an approval gate through the API" and "a
+validation run completes". Two places still assert the hole exists and need
+updating in the same commit that lands the endpoint: that script's `GATE_WALL`
+constant, and the `xfail` reason on
+`test_line4_end_to_end.py::test_a_gate_decision_has_an_http_door` — which is
+`strict=True` and currently only still xfails because it enumerates
+`application.routes` in a way that does not see routers included with a prefix.
 
-Alembic renders enum columns as `sa.String(length=n)`, via a `render_item` hook
-in `migrations/env.py`. Without it the generated migration is unimportable, and
-with it a historical migration is not pinned to a Python symbol a later refactor
-could rename.
+Two consequences to expect while it is in flight. The ORM gained four columns —
+`change_operations.values`, `change_operations.basis`,
+`merge_results.validation_errors`, `logic_instructions.branch_id` — which had no
+migration at `01e289f`; the untracked revision `4f7a9c2d1e6b` now covers them, so
+`alembic check` passes with the tree as it stands and fails on a clean checkout of
+`01e289f`. And `generate_contracts.py --check` reports all three contract files
+stale, which is what fails `test_contracts.py`. Regenerating the contracts is the
+fix and it belongs in whichever commit lands the endpoints.
 
-### Production milestones
+---
+
+## Production milestones
 
 | Milestone | Scope | State |
 | --- | --- | --- |
-| 0 | Repository audit, ownership map, ADR | ✅ complete |
+| 0 | Repository audit, ownership map, ADR 0001 | ✅ complete |
 | 1 | Canonical project core, revisions, change sets | ✅ complete |
 | 2 | Change-set validation, conflicts, merge, rename impact | ✅ complete |
 | 3 | Logic IR, template registry, cross-discipline validators | ✅ complete |
-| 4 | Requirements / Tag Architecture / PLC Logic agents, approval gates | ⏳ |
-| 5 | Rockwell generators, release core, workstation adapter interface | ✅ generators, adapter, fixture |
-| 6 | Line 4 demo fixture, end-to-end release workflow | ⏳ fixture done |
+| 4 | Requirements / Tag Architecture / PLC Logic agents, six approval gates | ✅ code complete; **not proved end to end** — see the release pipeline doc |
+| 5 | Rockwell generators, release core, workstation adapter interface | ✅ complete |
+| 6 | Line 4 acceptance fixture, end-to-end release workflow | ⚠ fixture and suite exist; the run parks at gate 2 |
+
+Milestone 4 and 6 are marked honestly rather than generously. Every part is
+written, tested in isolation and reachable from the API; what has never happened
+is one production run going from a description to a sealed package. The stops are
+enumerated as `xfail(strict=True)` markers in
+`backend/tests/test_line4_end_to_end.py`, each with its diagnosis, and as `gap`
+entries in `scripts/backend/smoke_production.py`. Those markers are the product's
+state, not a to-do list somebody forgot.
 
 ### Commits
 
@@ -150,500 +219,509 @@ could rename.
 | `7cb7036` | Savepoint-aware event broadcast (two silent defects) |
 | `3ba46e1` | Deterministic Rockwell import-candidate generation |
 | `ee9f51f` | Workstation adapter interface and the Line 4 demo fixture |
+| `cf96d1d` | Rename impact, approval gates, the three engineering agents |
+| `e342ddb` | Alembic could never migrate a PostgreSQL database with a real password |
+| `4337403` | Local end-to-end city workflow |
+| `42bf41a` | Deterministic engineering ZIPs |
+| `1169887` | Production pipeline wired end to end; audit findings cleared |
+| `01e289f` | Current `HEAD` |
+
+Interleaved with these are partner-owned commits (`frontend/`, `desktop/`,
+`scripts/product/`, `backend/app/agents/delivery/`, `backend/app/reporting/`).
+Branches: `master` is the trunk and `origin/HEAD` points at it; there is also an
+`agent/clean-readme` branch, checked out in a worktree.
 
 ---
 
-## Milestones 2, 3 and 5 — what exists now
+## The canonical model, in short
 
-**One door into the model.** `app.engineering` is the only thing that writes to a
-canonical object. Not a style preference: conflict detection, the
-protected-object rule, the traceability rule and the human gate are guarantees
-only if there is no second path. A merge checks scope, detects conflicts,
-validates, applies the human gate, then applies all of it or none of it inside a
-savepoint.
+104 tables and 103 mapped classes, of which **64 carry
+`EngineeringObjectMixin`** and are therefore canonical engineering objects —
+project-scoped, versioned, soft-deletable. Five Alembic revisions at `01e289f`,
+head `38af6b21dc04`; six in the working tree, head `4f7a9c2d1e6b`. (Earlier
+versions of this file said 74 engineering objects; the number was wrong, and
+`backend/tests/test_project_core_schema.py::test_the_engineering_model_is_actually_present`
+is the definition to trust.)
 
-A **dry run takes the same code path** with the savepoint rolled back, and
-records a `MergeResult` of its own. A rehearsal that runs different code proves
-nothing about the real thing, and “we checked and it would have conflicted” is
-information a reviewer wants.
+`ObjectType` has 46 members. Forty-five map to an ORM class in
+`app/engineering/registry.py`; `finding` deliberately does not, because findings
+are written by the agent runner rather than proposed through a change set.
 
-**25 validators, 64 stable result codes.** Severity is a judgement rather than a
-reflex: only `ERROR` blocks a release, because treating every warning as a
-blocker trains people to bypass the gate, and every `ERROR` carries a comment
-saying why proceeding would produce something wrong. An unhandled HMI *write*
-binding is an `ERROR` while an unresolved *read* is a `WARNING` — the write is
-invisible, since the button depresses, the value is accepted, nothing happens,
-and it reaches the plant floor.
+**One door.** `app.engineering` is the only thing that writes to a canonical
+object. Conflict detection, the protected-object rule, the traceability rule and
+the human gate are guarantees only if there is no second path. A merge checks
+scope, detects conflicts, validates, applies the human gate, then applies all of
+it or none of it inside a savepoint. A dry run takes the same code path with the
+savepoint rolled back and records a `MergeResult` of its own.
 
-**Twelve things are reported as `UNSUPPORTED` rather than passed over.**
-Structured-text and function-block routines, Add-On Instructions whose
-destructive operands are unknown, states whose transitions were never recorded,
-HMI expression bindings. “We did not check this” has to stay distinguishable
-from “we checked and it was fine”.
+**Two columns carry the design.** `object_revision` is the optimistic-concurrency
+token and the unit of conflict detection. `approval_state` makes an object
+protected: once `approved` it cannot be edited in place, so an agent cannot
+quietly change something an engineer signed off.
 
-**Generation is byte-identical for a given revision.** No clock, no generated
-ids, no iteration order the code did not choose. That is what makes a manifest
-checksum mean anything and what lets a regenerated package be diffed against an
-approved one. Generated output is round-tripped back through the real L5X parser
-and compared to the model it came from, which earns `ROUND_TRIP_PARSED` and
-nothing above it.
+**Traceability is a table.** `object_evidence_links` cites the basis for an
+object. Thirteen object kinds may not be created without one, and the rule is
+enforced twice — in the action schema, where it is cheapest to catch, and again at
+merge. A parser warning is not an acceptable basis.
 
-**The workstation adapter is off, and with it off
-`ROCKWELL_IMPORT_VERIFIED` is unreachable.** The local adapter cannot be
-constructed unless an administrator enabled it; it may only launch executables
-on an allowlist, matched on the resolved absolute path so a symlink cannot
-smuggle a different binary past it; and a verification job with no named human
-approver refuses to start.
+**25 validators, 63 result codes** (62 discipline-namespaced plus
+`validator.failed`). Only `ERROR` blocks a release. `UNSUPPORTED` is used freely,
+because "we did not check this" has to stay distinguishable from "we checked and
+it was fine".
 
-### Two defects worth recording
+**Six approval gates, 37 criteria.** A gate that is not ready names what is
+missing. A decision is recorded against a revision and re-opens when a later
+merge touches something the gate covers. `set_gate_enabled` has no HTTP surface.
 
-Both were found by attacking the change-set merge, not by any test, and both
-were silent.
+---
+
+## Available endpoints
+
+Every endpoint below is served by the app in this tree. The three marked **new**
+are the uncommitted ones above; everything else is at `01e289f`.
+
+"Read" = any project role. "Write" = project `owner`/`engineer`. "Review" =
+project `owner`/`reviewer`. Where a global role is also required it is named;
+administrators are treated as project owners everywhere.
+
+### System and authentication
+
+| Method | Path | Access |
+| --- | --- | --- |
+| `GET` | `/api/health` | public — liveness, contract version, enabled providers, plugin capabilities |
+| `GET` | `/api/system/capabilities` | public — plugin capabilities and why any are missing |
+| `POST` | `/api/auth/login` | public — returns a token and sets an httpOnly cookie |
+| `POST` | `/api/auth/logout` | authenticated — genuinely revokes, via the `jti` deny-list |
+| `GET` | `/api/auth/me` | authenticated — user and per-project roles |
+| `POST` | `/api/auth/users` | global `administrator` |
+| `GET` | `/api/auth/users` | global `administrator` |
+
+### Projects, membership, files
+
+| Method | Path | Access |
+| --- | --- | --- |
+| `POST` | `/api/projects` | global `engineer` |
+| `GET` | `/api/projects` | authenticated — only projects the caller may see |
+| `GET` | `/api/projects/{project_id}` | read |
+| `PATCH` | `/api/projects/{project_id}` | write — metadata, **not** status |
+| `POST` | `/api/projects/{project_id}/archive` | write |
+| `GET` | `/api/projects/{project_id}/members` | read |
+| `POST` | `/api/projects/{project_id}/members` | write |
+| `POST` | `/api/projects/{project_id}/files` | write |
+| `GET` | `/api/projects/{project_id}/files` | read |
+| `GET` | `/api/files/{file_id}` | read |
+| `GET` | `/api/files/{file_id}/content` | read |
+| `DELETE` | `/api/files/{file_id}` | write |
+| `GET` | `/api/projects/{project_id}/parsers` | read |
+
+### Engineering intake, requirements, clarifications
+
+| Method | Path | Access |
+| --- | --- | --- |
+| `GET` | `/api/projects/{project_id}/engineering-profile` | read |
+| `PUT` | `/api/projects/{project_id}/engineering-profile` | write |
+| `GET` | `/api/projects/{project_id}/requirements` | read — with the exact source citation per requirement |
+| `POST` | `/api/requirements/{requirement_id}/decision` | review **and** global `reviewer` |
+| `GET` | `/api/projects/{project_id}/clarifications` | read — project questions and object ambiguities, with `blocking_count` |
+| `POST` | `/api/project-questions/{question_id}/resolve` | write |
+| `POST` | `/api/clarifications/{clarification_id}/resolve` | write |
+
+Answering a question or resolving a clarification writes a named
+`ProjectDecision` and returns `unblocked_task_count` — the run resumes on its own.
+
+### Workflow
+
+| Method | Path | Access |
+| --- | --- | --- |
+| `POST` | `/api/projects/{project_id}/runs` | write |
+| `POST` | `/api/projects/{project_id}/pause` | write |
+| `POST` | `/api/projects/{project_id}/resume` | write |
+| `POST` | `/api/projects/{project_id}/cancel` | write |
+| `POST` | `/api/projects/{project_id}/recover` | write — requeue tasks abandoned by a stopped worker |
+| `GET` | `/api/projects/{project_id}/workflow` | read |
+| `GET` | `/api/projects/{project_id}/tasks` | read |
+| `GET` | `/api/tasks/{task_id}` | read — with dependency edges |
+
+### Agents, findings, approvals
+
+| Method | Path | Access |
+| --- | --- | --- |
+| `GET` | `/api/agents` | authenticated — every registered agent, and why any is unavailable |
+| `GET` | `/api/projects/{project_id}/agents` | read — presence for the city view |
+| `GET` | `/api/projects/{project_id}/agent-runs` | read |
+| `GET` | `/api/agent-runs/{run_id}` | read — including the actions the backend **refused** |
+| `GET` | `/api/projects/{project_id}/messages` | read |
+| `GET` | `/api/projects/{project_id}/findings` | read — paginated, filterable |
+| `GET` | `/api/findings/{finding_id}` | read — every citation resolved, with `display_location` |
+| `PATCH` | `/api/findings/{finding_id}` | review **and** global `reviewer` |
+| `POST` | `/api/findings/{finding_id}/comment` | read |
+| `GET` | `/api/findings/{finding_id}/comments` | read |
+| `GET` | `/api/projects/{project_id}/recommendations` | read |
+| `GET` | `/api/projects/{project_id}/approvals` | read — `?status=` filters |
+| `GET` | `/api/approvals/{approval_id}` | read — with the evidence snapshot taken when it was raised |
+| `POST` | `/api/approvals/{approval_id}/decision` | review **and** global `reviewer` |
+| `POST` | `/api/approval-gates/{gate_id}/approvals/{approval_id}/decision` | review **and** global `reviewer` — **new** |
+
+### Validation
+
+| Method | Path | Access |
+| --- | --- | --- |
+| `GET` | `/api/projects/{project_id}/validation-results` | read — **new** |
+| `POST` | `/api/validation-results/{result_id}/waiver` | review **and** global `reviewer` — **new** |
+
+### Release
+
+| Method | Path | Access |
+| --- | --- | --- |
+| `GET` | `/api/projects/{project_id}/release-readiness` | read |
+| `POST` | `/api/projects/{project_id}/release-candidates` | write **and** global `engineer` |
+| `GET` | `/api/projects/{project_id}/release-candidates` | read — paginated |
+| `GET` | `/api/release-candidates/{candidate_id}` | read — with an `actions` block saying which of generate/finalize/download is available and why not |
+| `POST` | `/api/release-candidates/{candidate_id}/artifacts` | write **and** global `engineer` — generate or regenerate |
+| `GET` | `/api/release-candidates/{candidate_id}/artifacts` | read — one row per file, with its level and checksum |
+| `POST` | `/api/release-candidates/{candidate_id}/finalize` | review **and** global `reviewer`; body must carry `confirm: true` |
+| `GET` | `/api/release-candidates/{candidate_id}/download` | read — streams the pre-verified ZIP, `X-Content-Sha256` on the response |
+
+### Reports and model configuration
+
+| Method | Path | Access |
+| --- | --- | --- |
+| `GET` | `/api/projects/{project_id}/reports` | read |
+| `GET` | `/api/reports/{report_id}` | read |
+| `GET` | `/api/reports/{report_id}/content` | read |
+| `GET` | `/api/model-configurations` | global `administrator` |
+| `GET` | `/api/model-configurations/providers` | global `administrator` — which providers are enabled, and which send content off the machine |
+| `PUT` | `/api/model-configurations/{agent_kind}` | global `administrator` |
+| `DELETE` | `/api/model-configurations/{agent_kind}` | global `administrator` |
+
+### Events
+
+| Method | Path | Access |
+| --- | --- | --- |
+| `GET` | `/api/projects/{project_id}/events` | read — `?since_seq=`, repeatable `?event_type=`, `?limit=`, `?offset=` |
+| `WS` | `/ws/projects/{project_id}` | read — token via `?token=` or the session cookie |
+
+**No endpoint lists the approval gates.** A gate reaches the UI through the
+approval it raised: `ApprovalRead` carries `gate_id`, `gate_key`,
+`revision_number`, `decision`, `decision_allowed` and
+`decision_disabled_reason`. `GET /api/projects/{id}/release-readiness` reports
+`outstanding_gates` in gate order. Neither returns a gate's unmet criteria, so the
+sentence explaining *why* a gate is not ready is currently only visible on the
+`ApprovalGate` row and in the `gate.status_changed` event payload. Tell me if you
+want a gates endpoint; it is a small addition and I would rather add it than have
+you infer gate state from approvals.
+
+**No endpoint reports the workstation adapter.** `app.adapters.capability_rows()`
+exists and produces a row in the same shape as the plugin capabilities, but
+`GET /api/system/capabilities` does not call it, so nothing there says import
+verification is unavailable. Read `import_verification_possible` and
+`import_verification_detail` from `release-readiness` instead. Also mine to fix.
+
+---
+
+## API semantics worth knowing
+
+**Auth transport.** Send `Authorization: Bearer <token>` *or* rely on the
+`esco_session` httpOnly cookie login sets. Both work; the browser frontend should
+use the cookie, the desktop shell the header. The WebSocket takes `?token=` too,
+because a browser cannot set headers on a handshake.
+
+**Error envelope.** Every failing endpoint returns exactly one shape:
+
+```json
+{ "error": { "code": "release_refused", "message": "…", "details": {} } }
+```
+
+`code` is stable and safe to branch on. `X-Request-ID` correlates a failure with
+the server log. `release_refused` carries `details.blocks`, an array of
+`{code, summary, detail}` — the detail is written to be shown to an engineer
+unedited.
+
+**Upload is partially accepting by design.** `POST .../files` returns `201` even
+when some files were refused. Read `results[].accepted` per file and show
+`rejection_reason` verbatim; do not treat a non-zero `rejected_count` as a failed
+request. An uploaded ZIP is expanded and each usable member appears in
+`extracted` as a file in its own right, with `parent_file_id` and
+`archive_member_path`.
+
+**Deleted files keep their row.** `GET /api/files/{id}` still returns `200` with
+`status: "deleted"`; only `/content` becomes `404`. Render it as a tombstone so a
+citation that pointed at it does not silently vanish.
+
+**The approval gate.** `POST /api/approvals/{id}/decision` takes a boolean and is
+the compatibility route; when the approval is a gate decision it now routes
+through the gate service so the gate and the approval move together. Use
+`POST /api/approval-gates/{gate}/approvals/{approval}/decision` for anything other
+than approve/reject — both identifiers are in the path so a stale client cannot
+apply a decision to a newer request for the same gate. `approved` has no default.
+Once nothing is pending, the gated tasks return to the queue and the run
+continues on its own.
+
+**Four things the finding UI must get right**, because they are product promises
+rather than presentation choices:
+
+1. Never show `fact` and `inference` as one block. They are separate fields
+   precisely so a deduction is never displayed as an observation.
+2. Always show `limitations` and `confidence`. Hiding uncertainty is the failure
+   this product exists to prevent.
+3. `display_location` **is** the citation. It is written to be followable
+   verbatim — "MainProgram / Conveyor_Interlocks / Rung 0" — so show it, do not
+   summarise it.
+4. A finding with `requires_approval: true` is not a result yet.
+
+**Two things the release UI must get right:**
+
+1. A package is an **"import-ready candidate"** until an actual Studio 5000
+   import has passed, and none ever has in this repository. Show
+   `validation_level`, `import_verification_status` and
+   `import_verification_detail` together; the detail is a whole sentence written
+   for an operator.
+2. `highest_attainable_validation_level` from `release-readiness` is the
+   **ceiling this deployment can reach**, not what any package reached. Showing it
+   before generation is what stops "verified" being expected later.
+
+---
+
+## WebSocket
+
+Envelope: `id`, `schema_version`, `seq`, `event_type`, `project_id`, `agent_id`,
+`task_id`, `actor_user_id`, `occurred_at`, `payload`.
+
+**47 event types**, 46 of them mapped to a payload model in
+`contracts/events.schema.json` under `x-payload-by-event-type` (see
+[Contracts](#contracts)). Events are **persisted before broadcast**, with
+a gap-free per-project `seq`. `GET /api/projects/{id}/events?since_seq=N` and
+`WS /ws/projects/{id}?since_seq=N` are interchangeable for catching up; the socket
+answers with a `hello` frame carrying `current_seq`, how many events were
+replayed, and `replay_truncated` — when that is true the client **must** refetch
+over REST rather than assume it has a complete picture.
+
+The transport is live and the emitters are wired; the note in the previous
+version of this file saying otherwise was left over from Milestone 0.
+
+Two defects worth keeping in mind if you touch the broadcast path, both silent
+and both found by attacking the merge rather than by any test:
 
 * **A savepoint rollback emptied the whole event broadcast buffer.** SQLAlchemy
   fires `after_soft_rollback` for a `SAVEPOINT` as well as for the outer
-  transaction. The merge does its apply inside `begin_nested()`, so a dry run
-  cancelled the live delivery of every event the surrounding request had already
-  recorded. Rows committed, REST history complete, WebSocket quiet.
-* **`after_commit` fires when a savepoint commits.** Events were being published
-  before the outer transaction landed — so a rollback afterwards left a client
-  holding a change that never happened, which is exactly what the
-  persist-then-broadcast ordering exists to prevent.
+  transaction, and the merge applies inside `begin_nested()`. A dry run cancelled
+  the live delivery of every event the surrounding request had already recorded:
+  rows committed, REST history complete, WebSocket quiet.
+* **`after_commit` fires when a savepoint commits.** Events were published before
+  the outer transaction landed, so a rollback afterwards left a client holding a
+  change that never happened — which is exactly what persist-then-broadcast
+  ordering exists to prevent.
 
 ---
 
-## Status — review platform (delivered)
+## Defects worth remembering
 
-| Milestone | Scope | State |
-| --- | --- | --- |
-| 0 | Foundation, core schemas, contracts, health endpoint | ✅ complete |
-| 1 | Persistence, authentication, audit, storage | ✅ complete |
-| 2 | Parsers and normalised evidence graph | ✅ complete |
-| 3 | Workflow engine and WebSockets | ✅ complete |
-| 4 | Four review agents and provider adapters | ✅ complete |
-| 5 | Full API and backend integration tests | ✅ complete |
-| 6 | Security review, documentation, handoff | ✅ complete |
+Each milestone was implemented and then independently attacked. The full accounts
+are in `docs/backend/parsers.md`, `docs/backend/evidence.md`, the earlier revisions
+of this file, and the regression test that came with each fix. The pattern worth
+carrying forward is that **almost every one was silent**: content dropped with no
+warning, or a claim the code could not support. A green suite found none of them.
 
-### Commits
+**Schema and persistence**
 
-| Milestone | Commit | Message |
-| --- | --- | --- |
-| 0 | `08c3cfb` | `foundation: establish backend and contracts v1` |
-| 1 | `c74b812` | `persistence: authentication, audit, storage and safe intake` |
-| 2 | `751ba54` | `parsers: seven file parsers and the cross-file evidence graph` |
-| 3+4 | `1303c08` | `workflow: persisted queue, live events and the four review agents` |
-| 5 | `4869889` | `api: findings, approvals, agents and reports` |
-| 6 | `3d79213` | `security: review, documentation and handoff` |
-| — | _(this commit)_ | `config: model-configuration endpoints and checkpoint durability` |
-
----
-
-## Milestone 0 — what exists now
-
-**Domain vocabulary** — `backend/app/core/enums.py` holds all 25 published
-enums (project/task/finding/agent statuses, severities, anchor types, event
-types, audit actions, action types). These values are contract surface: members
-are added, never renamed.
-
-**ORM** — `backend/app/models/` defines all 22 required entities across 25
-tables, with UUID primary keys and timezone-aware UTC timestamps. Portable
-column types (`backend/app/database/types.py`) mean the same models run on
-PostgreSQL and SQLite.
-
-**AgentAction** — `backend/app/agents/base/actions.py`. The complete surface
-through which a model can affect the system. Two rules are enforced by the
-schema rather than by prompt wording:
-
-* `create_finding` / `create_recommendation` are rejected without at least one
-  evidence anchor;
-* a finding in a safety-relevant category must state a
-  `suggested_review_action`.
-
-`extra="forbid"` everywhere, so a model cannot widen the action surface.
-
-**Plugin interfaces** — `backend/app/agents/base/plugins.py`. `DeliveryAgentPlugin`,
-`ReportProvider`, `ExportFormatProvider` plus discovery. See *Plugin interfaces*
-below.
-
-**Health** — `GET /api/health`, `GET /api/system/capabilities`.
-
-**Contracts** — `contracts/` is generated from the running app. See below.
-
----
-
-## Milestone 1 — what exists now
-
-**Authentication** — Argon2id password hashing, HS256 access tokens with a `jti`
-so `POST /api/auth/logout` genuinely revokes rather than gesturing. Login is
-local only; no outbound call, no external identity provider. Failure messages are
-identical for unknown-email, wrong-password and disabled-account, and an unknown
-account still pays the cost of a real hash verification so response timing cannot
-enumerate addresses.
-
-**Authorisation** — two layers, both required: a global role
-(`engineer`/`reviewer`/`administrator`) and per-project membership. Holding the
-global `engineer` role does **not** grant access to another engineer's project.
-Recording an approval needs both the global `reviewer` role and a reviewing role
-on the project. Administrators are treated as owners everywhere so an orphaned
-project can be recovered.
-
-**Audit** — append-only, written in the *same transaction* as the change it
-describes, so an operation that rolls back never leaves an entry claiming it
-happened. Credential-shaped keys in `details` are redacted. Covers project
-creation/update/archive, file upload/rejection/deletion, login success **and
-failure**, logout, user creation and permission changes.
-
-**Storage** — `data/projects/{id}/{originals,derived,reports}/`. Originals are
-written once, sealed read-only, and never reopened for writing, so an evidence
-anchor taken today still refers to the same bytes tomorrow. SHA-256 on every
-blob. Deleting a file removes the bytes but keeps the row, so a citation resolves
-to a tombstone instead of silently disappearing.
-
-**Safe intake** — allowlist by content *and* extension. Refuses executables by
-magic bytes regardless of filename (`MZ`, ELF, Mach-O, shebang, OLE), refuses
-dangerous extensions, and refuses `.ACD`/`.doc`/`.xls` with a message that says
-why and what to upload instead. A content/extension mismatch is accepted, routed
-by content, and **warned about** rather than silently corrected.
-
-**Safe archives** — the whole central directory is validated before a single byte
-is written: entry count, total uncompressed size, compression ratio (zip-bomb),
-and every member name proved containable. Zip Slip, backslash traversal, absolute
-paths and drive prefixes are all refused; symlink and device members are skipped
-with a reason; a member that understates its size is caught mid-copy. A rejected
-archive leaves nothing behind, and the scratch tree is cleaned up unconditionally.
-
-**Safe XML** — one hardened entry point (`app.security.xml_safety`). DTDs and
-entities are disabled, so XXE and billion-laughs are refused; nesting depth and
-document size are bounded. An XML upload carrying a DOCTYPE is refused at intake
-with an explanation rather than failing opaquely later.
-
-**Migrations** — Alembic, one revision, round-trips clean (`upgrade` → `check` →
-`downgrade base` → `upgrade`) and `alembic check` confirms the migration matches
-the ORM. `render_as_batch` is on so SQLite can alter tables at all.
-
-### Defects found and fixed by an adversarial review of this milestone
-
-Worth recording because all of them passed a fully green test suite first:
-
-* **Enum columns did not round-trip.** `Mapped[ProjectStatus]` with `String(32)`
-  stores correctly but loads back as a plain `str`, so
-  `status is ProjectStatus.ARCHIVED` was `False` for every persisted row. This
-  made archived projects still accept uploads, and made `DELETE /api/files/{id}`
-  return 500 *after* unlinking the blob. Fixed with a `StrEnumType` decorator
-  registered in `Base.type_annotation_map` (no DDL change, no migration), plus a
-  structural test that fails for any future enum column that forgets it.
-* **The seeded administrator could never sign in.** `admin@esco.local` — and
-  every `.local`/`.test`/`.invalid` address — is rejected by `EmailStr`. Seeded
-  accounts moved to `esco.internal`, and `Settings` now refuses to start with a
-  bootstrap email the login endpoint would reject.
-* **Failed logins were rolled back.** The audit entry was added and then the route
+* **An approval could invalidate itself.** An approval recorded who and when but
+  never *what*, so `ApprovalIntegrityValidator` inferred "edited since approval"
+  from `updated_at > approved_at`. Recording an approval is itself an update, so
+  those are two reads of one clock inside a single flush: accepting a requirement
+  reported the reviewer who accepted it, as a release-blocking
+  `cross.approved_object_modified`, whenever the two reads landed in different
+  ticks. This is the counter-example to "a green run means it works" — it failed
+  intermittently, and the run that passed was equally good evidence of the
+  defect. Fixed by recording `approved_object_revision` on
+  `EngineeringObjectMixin` (revision `4000cd6b1757`) and comparing revisions,
+  which cannot race. It is in `registry.PROTECTED_FIELDS`: an agent that could
+  move the baseline could edit an approved object and leave the signature
+  reading as intact.
+* **Enum columns did not round-trip.** `Mapped[ProjectStatus]` on a plain
+  `String(32)` stores correctly and loads back as a `str`, so
+  `status is ProjectStatus.ARCHIVED` was `False` for every persisted row — which
+  made archived projects still accept uploads and made `DELETE /api/files/{id}`
+  return 500 *after* unlinking the blob. Fixed with a `StrEnumType` in
+  `Base.type_annotation_map`; `backend/tests/test_project_core_schema.py` now fails
+  for any enum column that forgets it. This is the single most repeatable mistake
+  in the repository.
+* **The seeded administrator could never sign in.** `admin@esco.local` — and every
+  `.local`/`.test`/`.invalid` address — is rejected by `EmailStr`. Seeded accounts
+  moved to `esco.internal`, and `Settings` refuses to start with a bootstrap email
+  the login endpoint would reject.
+* **Failed logins were rolled back.** The audit entry was written and the route
   only committed on success, discarding the entire record of refused sign-ins.
-* **PK bytes were classified by extension.** An archive named `.csv` was routed to
-  a text parser and its contents silently omitted from the review.
-* Archive fixes: integrity check ran before the zip-bomb limits; a traversing
-  member left already-written files behind; over-nesting was reported as a
-  traversal attempt.
 
----
+**Parsers and the evidence graph**
 
-## Milestone 2 — what exists now
-
-**Seven parsers** under `backend/app/parsers/`: L5X, XLSX, CSV, DOCX, PDF, XML and
-plain text. Each turns one file into a normalised document plus evidence anchors,
-under three rules that are product requirements rather than style guidance:
-
-1. **Never guess silently.** Unreadable content becomes a warning or an
-   unsupported item, never an omission. A review that reports nothing because the
-   parser gave up is indistinguishable from a clean result.
-2. **Never claim more than the format supports.** `GRT(AIR_PRESS_PSI, 40.0)` is a
-   mnemonic and two operands — not "trips below 40 psi", and not "contradicts the
-   documented 60".
-3. **Be deterministic.** Same bytes, same content, same anchors, same order.
-
-The PDF parser carries the sharpest version of rule 1: it never silently uses OCR
-and never returns a quietly empty page. A scanned drawing produces a
-`no_text_layer` warning, an unsupported item, and a page anchor marked
-`unsupported_content` whose expectation says manual review is required — so "we
-could not read this" survives into the report as a citable fact.
-
-**The evidence graph** (`app/core/services/evidence_graph.py`) joins every parsed
-artifact into one cross-file structure: tags, documented interlocks, rungs, I/O
-points, alarms, narrative statements, and the limitations carried forward from
-each parser. A discrepancy only exists *between* documents, so this is where the
-product's value actually is.
-
-It assembles facts and never draws conclusions. An interlock whose trip tag
-matches nothing gets `matched_tag=None` plus ranked `candidate_tags`; a threshold
-disagreement is recorded as both values verbatim. Whether those constitute a
-finding is an agent's judgement, with evidence and a confidence, for a human to
-approve.
-
-**Anchors** are keyed `(file_id, anchor_key)` with a deterministic parser-assigned
-key, so re-parsing updates rows in place and the findings that cite them keep
-working across a parser upgrade. `content_hash` fixes the excerpt at creation
-time, so a re-upload that changed the underlying file is detectable rather than
-silently re-pointing an old finding at new text.
-
-See `docs/backend/parsers.md` and `docs/backend/evidence.md`.
-
-### What an adversarial review of this milestone found
-
-Each parser was implemented, then independently attacked. 53 problems were
-confirmed; the 40 at medium severity and above were fixed with a regression test
-each, and 14 were declined with reasoning. The pattern worth recording is that
-almost every one was a *silent* failure — content dropped with no warning, or a
-claim the code could not support:
-
-* an L5X alias tag's target was discarded, so the binding between an interlock
-  symbol and its physical I/O point vanished without trace;
-* only the first `<Tags>` container was read, so a declared tag was reported as
-  undeclared — a false finding, not a missed one;
-* tracked changes inside DOCX table cells dropped text, and the mutilated string
-  was then published as a *direct* anchor excerpt an agent would quote verbatim;
-* pages pypdf silently dropped were never noticed, so a partially-read document
-  reported as fully examined;
-* XML mixed content lost child text and fabricated separators inside identifiers;
-* a spreadsheet cell whose text merely began with `=` was recorded as a formula
+* An L5X alias tag's target was discarded, so the binding between an interlock
+  symbol and its physical I/O point vanished without trace.
+* Only the first `<Tags>` container was read, so a declared tag was reported as
+  undeclared — a false finding, not a missed one.
+* Tracked changes inside DOCX table cells dropped text, and the mutilated string
+  was published as a *direct* anchor excerpt an agent would quote verbatim.
+* Pages pypdf silently dropped were never noticed, so a partially-read document
+  reported as fully examined.
+* A spreadsheet cell whose text merely began with `=` was recorded as a formula
   with a null value, turning a documented threshold into a blank field.
+* Bytes were classified by extension, so an archive named `.csv` was routed to a
+  text parser and its contents omitted from the review.
+* The graph fabricated anchor keys no parser emits (`range:Interlocks!row5` against
+  the parser's `range:Interlocks!A5:H5`). Nothing errored — the Interlock Review
+  Agent simply had nothing to cite and produced no discrepancies at all. There is
+  now a test asserting that every citation the graph emits resolves to a real
+  anchor, for every file type.
+* Members of a declared UDT (`CV101_Status.Running`) read as undeclared
+  references, turning one genuine finding into seven false leads; and rows from a
+  *hidden* worksheet were treated as live requirements.
 
-The graph had two of its own, found by running it over the full fixture set:
-members of a declared UDT (`CV101_Status.Running`) read as undeclared references,
-turning one genuine finding into seven false leads; and rows from a *hidden*
-worksheet were being treated as live requirements.
-
----
-
-## Milestones 3 and 4 — what exists now
-
-**The queue is the database.** No Redis. A worker claims a task by writing a
-lease; if the process dies the lease expires and a sweep requeues it. At-least-
-once, so every handler is idempotent — `Task.idempotency_key` stops duplicate
-tasks and each handler converges rather than duplicating.
-
-**A run** is: intake → one parse task per file → evidence graph → the Project
-Manager Agent plans → the specialists it scheduled → senior review → the approval
-gate → delivery → finalise. The prelude is fixed because it is mechanical; the
-specialists are planned because which ones are worth running depends on what was
-actually uploaded.
-
-**Restart recovery.** A task left `running` by a killed worker returns to the
-queue rather than sitting there forever, and the attempt is not double-counted —
-a crash costs one attempt, not two.
-
-**Events** are persisted before broadcast, with a gap-free per-project `seq`.
-`GET /api/projects/{id}/events?since_seq=N` and
-`WS /ws/projects/{id}?since_seq=N` are interchangeable for catching up. The
-socket answers with a `hello` frame carrying `current_seq` and
-`replay_truncated`; when that is true the client must refetch over REST rather
-than assume it has a complete picture.
-
-**Providers.** `mock` (deterministic, offline, the default), `ollama` (local),
-`openai` and `anthropic`. The last two send project content off this machine, so
-they cannot even be *constructed* unless an administrator lists them in
-`ESCO_ENABLED_PROVIDERS` and supplies a credential. There is no fallback from a
-failing provider to another one.
-
-**The MockProvider is not a model and says so.** It is a fixed rule engine that
-restates what the evidence graph already established, every response carries a
-warning to that effect, and its confidence is capped. Nobody should be able to
-mistake a mock run for an engineering review.
-
-**The four agents.** Their permissions are narrow and enforced in code, not
-prompt wording:
-
-| Agent | May propose | Notably may **not** |
-| --- | --- | --- |
-| Project Manager | tasks, messages, blockers | create a finding — so it cannot draw a technical conclusion |
-| PLC Review | findings, recommendations, messages | claim anything about a running controller |
-| Interlock Review | findings, recommendations, approvals, messages | — |
-| Senior Review | review verdicts, approvals, messages | create a finding, or **raise** a confidence |
-
-**What the runner refuses**, before anything reaches the database: an action type
-outside the closed set; a payload that fails its model; a technical claim with no
-evidence anchor; an anchor id that does not belong to this project; a safety- or
-damage-related recommendation marked as not needing approval; a senior review
-that tries to raise confidence. Refusals are recorded on the run — what a model
-*tried* to do is part of the record.
-
-### The full review, over the synthetic project
-
-Every planted case in `fixtures/README.md` comes out right, on the MockProvider,
-with no network:
-
-| Case | Outcome |
-| --- | --- |
-| ILK-003 documented, wired, never implemented | **high**, approval raised, project halts at `awaiting_review` |
-| ILK-004 same interlock, different name | medium — not inflated, because it *is* implemented |
-| ILK-007 no tag, no threshold | documentation gap; no threshold invented |
-| `ALM_HOPPER_HIGH` undeclared | medium, cited to the exact rung |
-| Duplicate rung | low |
-| ILK-001, ILK-002, ILK-005 (correct) | **no findings** — no false positives |
-| `Scanned_Drawing.pdf` | reported as unreadable, never as reviewed |
-
-The project reaches `awaiting_review`, **not** `completed`, while that approval
-is outstanding.
-
-### Defects an adversarial review of this milestone found
+**Workflow**
 
 * **A failed dependency stalled a run forever.** The queue ignored
   `TaskDependency.hard`, so one unreadable document left the graph task — and
-  everything behind it — queued permanently while the project still reported
-  itself `running`. No error, nothing to act on.
-* **Blocked tasks hid runnable ones.** The claim window was sized from `limit`,
-  so a run of dependency-blocked tasks starved the work behind them.
+  everything behind it — queued permanently while the project still reported itself
+  `running`.
+* **Blocked tasks hid runnable ones.** The claim window was sized from `limit`, so
+  a run of dependency-blocked tasks starved the work behind them.
 * **The duplicate-enqueue recovery called `db.rollback()`**, discarding the
   caller's whole transaction — inside `start_run` that is every task, dependency,
   audit row and event created so far.
 * **Handlers were only registered when an in-process worker was enabled**, so an
-  API process paired with an external worker reported every task kind as
-  unhandled.
-* **The WebSocket used the process-global settings**, rejecting tokens the REST
-  API had just issued whenever the app was built with explicit settings.
-* **The graph fabricated anchor keys no parser emits** (`range:Interlocks!row5`
-  against the parser's `range:Interlocks!A5:H5`). Nothing errored — the Interlock
-  Review Agent simply had nothing to cite and produced no discrepancies at all.
-  There is now a test asserting that *every* citation the graph emits resolves to
-  a real anchor, for every file type.
+  API process paired with an external worker reported every task kind as unhandled.
+* **The WebSocket used the process-global settings**, rejecting tokens the REST API
+  had just issued whenever the app was built with explicit settings.
+
+The two savepoint/broadcast defects are above, under WebSocket.
 
 ---
 
-## Work for GPT — the outstanding half
+## Plugin interfaces — now populated
 
-The backend side of the remaining work is done (model-configuration endpoints and
-checkpoint durability, below). What is left is all in GPT-owned directories, so I
-have not touched any of it. In rough priority order.
+`backend/app/agents/delivery/` and `backend/app/reporting/` are partner-owned and
+**exist**. `GET /api/system/capabilities` currently reports all three
+capabilities available:
 
-### 1. Delivery agents — `backend/app/agents/delivery/` *(reserved for you)*
+* five delivery agents: `alarm_engineering`, `electrical_io`,
+  `engineering_report`, `hmi_engineering`, `testing_commissioning`;
+* twenty-one report providers, including `discrepancy_matrix`,
+  `requirements_traceability_matrix`, `interlock_matrix`, `fat_plan`, `iat_plan`
+  and `known_limitations`;
+* seven export formats: `csv`, `docx`, `html`, `json`, `markdown`, `pdf`, `xlsx`.
 
-`GET /api/system/capabilities` currently reports `delivery_agents: false`, which
-is accurate: nothing is installed, so a review produces findings but no
-deliverables. The workflow already has a `delivery` task that completes with
-`delivery_available: false` and an explanation, so nothing breaks — it just does
-nothing.
+Register either by defining `register(registry)` in the package `__init__`, or by
+declaring module-level `DELIVERY_AGENTS` / `REPORT_PROVIDERS` / `EXPORT_FORMATS`
+sequences. `DeliveryAgentPlugin` needs `kind`, `display_name`, `version`,
+`handles_task_kinds`, `run(context) -> AgentRunResult`. `ReportProvider` needs
+`report_type`, `display_name`, `version`, `supported_formats`,
+`render(snapshot, export_format) -> RenderedReport`. `ExportFormatProvider` needs
+`format_key`, `media_type`, `file_extension`, `version`,
+`serialize(document) -> bytes`. A plugin that raises during import or registration
+is caught, recorded with its traceback and surfaced through
+`/api/system/capabilities`; it never prevents startup.
 
-To install one, create `backend/app/agents/delivery/__init__.py` exposing either
-a `register(registry)` function or a module-level `DELIVERY_AGENTS` sequence:
+Two rules that still hold:
 
-```python
-def register(registry):
-    registry.add_delivery_agent(TestPlanAgent())
-```
+* **Delivery agents run after human approval**, so they should read only findings
+  whose `status` is `accepted`.
+* **`Task.checkpoint` is the tool for a long generation.** Use
+  `context.mark_done(item)` / `context.done()`; the queue is at-least-once and a
+  crashed task is otherwise re-run from the start. Durability is proved by
+  `backend/tests/orchestration/test_checkpoints.py`.
 
-`DeliveryAgentPlugin` needs `kind: str`, `display_name: str`, `version: str`,
-`handles_task_kinds: Sequence[str]`, and `run(context) -> AgentRunResult`.
-
-Two things worth knowing:
-
-* **Delivery agents run *after* human approval**, so they should read only
-  findings whose `status` is `accepted`. Anything else has not been agreed by an
-  engineer and must not reach a deliverable.
-* **`Task.checkpoint` is the tool for a long generation.** A delivery agent
-  producing twenty reports is one task doing twenty things, so use
-  `context.mark_done(item)` / `context.done()` to record progress — the queue is
-  at-least-once and a crashed task is re-run from the start otherwise. Durability
-  is proved by `backend/tests/orchestration/test_checkpoints.py`. The core
-  handlers do not use it because the workflow already decomposes to one task per
-  file, which is finer grained; yours will not have that luxury.
-
-### 2. Report providers — `backend/app/reporting/` *(reserved for you)*
-
-`ReportProvider` needs `report_type: str`, `display_name: str`, `version: str`,
-`supported_formats: Sequence[str]`, `render(snapshot, export_format)`.
-`ExportFormatProvider` needs `format_key`, `media_type`, `file_extension`,
-`version`, `serialize(document) -> bytes`.
-
-Write output through `ProjectStorage.write_report()` and record a `Report` row;
-`GET /api/reports/{id}/content` will then serve it. The `Report` model already
-carries `finding_ids`, so a report stays traceable to the findings it was built
-from — please populate it.
-
-The obvious first two, given the fixture: a **discrepancy matrix** (the interlock
-comparison as a table) and a **test plan** derived from the accepted findings.
-
-### 3. Frontend integration — `frontend/`
-
-These endpoints are live and contract-generated; the city view is not yet reading
-them:
-
-| Endpoint | What it gives the UI |
-| --- | --- |
-| `WS /ws/projects/{id}` | Live `agent.status_changed`, `agent.location_changed`, `task.*`, `finding.created`, `approval.requested` — everything the city animates on |
-| `GET /api/projects/{id}/agents` | Agent presence: `status`, `location`, `current_activity` |
-| `GET /api/projects/{id}/messages` | The activity feed |
-| `GET /api/projects/{id}/findings` | Findings list, paginated and filterable |
-| `GET /api/findings/{id}` | Every citation resolved, with `display_location` |
-| `GET /api/projects/{id}/approvals` | The decision queue |
-| `POST /api/approvals/{id}/decision` | The approval gate |
-
-Four things the UI needs to get right, because they are product promises rather
-than presentation choices:
-
-1. **Never show `fact` and `inference` as one block.** They are separate fields
-   precisely so a deduction is never displayed as an observation.
-2. **Always show `limitations` and `confidence`.** Hiding uncertainty is the
-   failure this product exists to prevent.
-3. **`display_location` is the citation.** It is written to be followable
-   verbatim — "MainProgram / Conveyor_Interlocks / Rung 0" — so show it, do not
-   summarise it.
-4. **A finding with `requires_approval: true` is not a result yet.** It needs an
-   engineer's decision before it can be presented as one.
-
-### 4. Smaller items
-
-* **`GET /api/projects/{id}/parsers`** reports which file kinds this installation
-  can read, and why any cannot. Worth surfacing at upload time so a user learns a
-  format is unsupported before they wait for a review.
-* **Provider badge.** `GET /api/model-configurations/providers` says which
-  providers are enabled and which send content off the machine. If a project ran
-  on the MockProvider, the UI should say so — every agent run carries a warning
-  to that effect in `AgentRunDetail.warnings`, and a demo run must not look like
-  a real review.
-
-### Not requests, just notes
-
-* Do not hand-edit `contracts/` — it is generated and `test_contracts.py` fails on
-  drift. If you need a field that is not there, note it in `docs/handoffs/GPT.md`
-  and I will add it to the source model and regenerate.
-* `fixtures/demo_project/` is a full synthetic project you can develop against,
-  and `fixtures/README.md` documents exactly which findings a correct review
-  produces — useful for building the UI against known output.
+One thing that does not work, and it is mine: **plugin output never reaches the
+release package.** `app.engineering.release._delivery_slots` constructs every
+slot with `is_present=False` and no files, so `02_HMI`, `03_Alarms`,
+`04_Testing` and `05_Reports` are always created empty with a stated absence
+reason, even when a delivery agent produced something. If you have artifacts you
+want inside the customer ZIP, say so and I will wire the slots to the plugin
+results.
 
 ---
 
-## Definition of done
+## What is not done
 
-Every item verified, most of them against a live process rather than only in
-tests.
+Honestly, and in rough order of how much it matters.
 
-| Requirement | Verified by |
-| --- | --- |
-| The backend starts locally | `scripts/backend/smoke.py` boots uvicorn on a fresh database |
-| A user can authenticate | 72/72 smoke checks; `test_auth_api.py` |
-| A project can be created | smoke + `test_projects_api.py` |
-| Multiple files can be uploaded | 9 fixtures in one request, partial acceptance |
-| Files are safely stored and parsed | 7 parsers, sealed read-only originals, SHA-256 |
-| Evidence anchors are produced | ~500 anchors over the fixture set, every citation resolves |
-| A workflow can start, pause, resume, fail and recover | `test_engine.py`, `test_worker.py` |
-| Claude-owned agents run on the MockProvider | 4 agents, no network, deterministic |
-| Findings contain exact evidence | every finding cites an anchor with a followable location |
-| Findings reach human approval | the high-severity interlock halts the project at `awaiting_review` |
-| Events persist and broadcast over WebSockets | gap-free `seq`, replay, live frames |
-| The backend works after a restart | killed mid-run; a fresh process finished the review |
-| All backend tests pass | 994 passing, ruff and mypy clean |
-| Contracts complete enough for the frontend | 39 endpoints, 27 event types, generated and drift-checked |
-| No external model or cloud service required | MockProvider is the default; cloud providers cannot be constructed unless enabled |
+1. **No production run has completed end to end.** Gate 2's
+   `equipment_model_recorded` needs at least one `Device`, and on the Line 4
+   fixture nothing creates one — the I/O list's "Device Tag" column is claimed by
+   the canonical importer's `tag` alias, so no `Device`, `Signal` or
+   `AddressAssignment` is created. Gate 3's `hmi_screens_recorded` needs
+   `HMIScreen` rows, which only the HMI delivery agent creates. Every gate after
+   the first undecidable one reports "an earlier gate is undecided", so
+   generation, freezing and release are unobserved on that fixture.
+   `test_production_workflow.py` reaches further only because its fixture
+   declares `HmiProduct.NONE`.
+2. **Only one of the seven planted Line 4 defects comes out right.** Four are not
+   found (issues 1, 2, 4 and 5), one is found but inflated into a release blocker
+   above the missing protection it should sit below (issue 3), one deliberate
+   ambiguity is never put back to the customer (issue 6), and the correctly
+   implemented diverter is reported as a defect (issue 7). Six of the eleven
+   decoys also fire. The per-issue diagnosis is on each `xfail` marker and the
+   scoreboard is tabulated in `docs/backend/release-pipeline.md`. Do not quote a
+   detection rate from anywhere else.
+3. **No Studio 5000 import has ever been attempted.** Offline verification stops
+   at `ROUND_TRIP_PARSED`. This is by design and is not going to change without a
+   licensed machine, but it must never be described as "verified".
+4. **The contracts are stale and `test_contracts.py` fails** on them (above). The
+   four-column migration gap is closed in the tree by an uncommitted revision, so
+   a clean checkout of `01e289f` still fails `alembic check`.
+5. **60-odd enums are missing from the domain contract** (above).
+6. **No gates endpoint, no gate enable/disable endpoint, no adapter capability
+   row** (above).
+7. **Plugin output does not reach the package** (above).
+8. **Four `ValidationLevel` members are declared and never assigned** —
+   `schema_validated`, `internal_semantic_validated`, `human_approved`,
+   `released`. Do not branch on them. See ADR 0002 decision 2.
+9. **PostgreSQL is untested.** Portable column types, full support intended, only
+   SQLite exercised. `e342ddb` fixed one real PostgreSQL defect (a password with
+   URL-significant characters made Alembic unusable), which is a fair indication
+   there are others.
+10. **Read-only sealing is best-effort.** Originals and published archives are
+    chmod'ed read-only; network and container filesystems may ignore it, and a
+    warning is logged when the chmod fails.
+11. **Per-project byte quota counts only live uploads.** It sums
+    `UploadedFile.size_bytes` for undeleted rows, so parser output under
+    `derived/`, reports, and every generated package and delivery ZIP under
+    `releases/` are outside it. `ProjectStorage.total_bytes()` would measure the
+    real occupancy and nothing calls it, so release packages grow unbounded.
+12. **Demo passwords are in the repository.** `esco-demo-admin` and the seeded
+    demo accounts exist so the offline demonstration works out of the box.
+    `ESCO_ENVIRONMENT=production` refuses to start until `ESCO_JWT_SECRET` and
+    `ESCO_BOOTSTRAP_ADMIN_PASSWORD` are set, and
+    `ESCO_BOOTSTRAP_DEMO_USERS=false` turns the demo accounts off.
 
-### The demonstration, in one command
+---
 
-```bash
-python scripts/backend/smoke.py
-```
+## What stays impossible
 
-Boots a real server on a throwaway database, signs in, creates a project,
-uploads the nine synthetic documents, checks that a disguised executable and an
-`.ACD` are refused with reasons, runs the full review, reads the findings and
-their citations, approves the one that needs a human, and confirms the project
-only reports itself complete afterwards. 72 assertions, no network.
+Enforced in code, and listed so that a later change weakening one is visibly a
+reversal rather than a refactor.
+
+* No controller connection, upload, download, online edit, mode change, force or
+  firmware operation exists anywhere — absent, not disabled.
+  `backend/tests/security/test_product_boundaries.py` fails if an industrial
+  protocol library is ever imported.
+* No `.ACD` parsing or fabrication. Uploads are refused at intake with a message
+  naming L5X as the supported input.
+* Models get no filesystem, shell, database or network access. They return
+  structured proposals into a closed action set and the runner refuses anything
+  outside it. Refusals are recorded on the run — what a model *tried* to do is
+  part of the record.
+* External providers cannot be constructed unless an administrator enables them
+  and supplies a credential. The default is `mock`, which is a deterministic rule
+  engine, is not a model, says so on every response, and has its confidence
+  capped. There is no fallback from a failing provider to another one.
+* Safety-related and equipment-damage recommendations cannot be released without
+  a named human approval. Restricted domains are review-only unless an
+  administrator names them in `ESCO_ENABLED_RESTRICTED_DOMAINS`; an unrecognised
+  name is refused at startup rather than silently ignored.
+* Model chain-of-thought is never stored or displayed. A short, user-facing
+  rationale is.
+* `ROCKWELL_IMPORT_VERIFIED` is unreachable without the licensed workstation
+  adapter, and the ceiling is enforced structurally:
+  `VerificationOutcome` refuses to exist with `status=PASSED` unless it came from
+  an adapter reporting `READY`.
 
 ---
 
@@ -660,18 +738,19 @@ cp .env.example .env                           # optional; defaults work
 .venv/Scripts/python -m uvicorn app.main:app --app-dir backend --reload --port 8000
 ```
 
-Interactive docs: <http://127.0.0.1:8000/docs>
-Health: <http://127.0.0.1:8000/api/health>
+Interactive docs: <http://127.0.0.1:8000/docs> · Health:
+<http://127.0.0.1:8000/api/health>
 
 Defaults with no configuration: SQLite at `data/esco_city.sqlite3`, MockProvider,
 no network access, no external service. The schema is migrated and an
-administrator is seeded on first boot.
+administrator is seeded on first boot. Sign in with `admin@esco.internal` /
+`esco-demo-admin`; in demo mode `engineer@esco.internal` /
+`esco-demo-engineer` and `reviewer@esco.internal` / `esco-demo-reviewer` are
+seeded too, so each role can be exercised. Note the domain: `.local`, `.test`
+and `.invalid` are reserved special-use domains and `EmailStr` rejects them, so
+do not use them in frontend fixtures either.
 
-Sign in with `admin@esco.internal` / `esco-demo-admin`. In demo mode
-`engineer@esco.internal` / `esco-demo-engineer` and `reviewer@esco.internal` /
-`esco-demo-reviewer` are seeded too, so each role can be exercised.
-
-Checks:
+### Checks
 
 ```bash
 .venv/Scripts/python -m ruff format backend scripts
@@ -679,22 +758,66 @@ Checks:
 .venv/Scripts/python -m mypy
 .venv/Scripts/python -m pytest
 .venv/Scripts/python scripts/backend/generate_contracts.py --check
-.venv/Scripts/python scripts/backend/smoke.py          # boots a real server
+.venv/Scripts/python scripts/backend/smoke.py             # review, live process
+.venv/Scripts/python scripts/backend/smoke_production.py  # Line 4 acceptance
 ```
 
-`smoke.py` starts uvicorn against a throwaway database, signs in, creates a
-project, uploads the whole synthetic fixture set, checks the rejection paths,
-downloads and deletes a file, and archives the project — 42 assertions against a
-live process rather than a TestClient.
+`ruff check` and `mypy` pass. `ruff format` is **not** currently a no-op —
+fifteen files would be reformatted, spread across both owners' code — so run it
+before committing rather than assuming it is clean. `generate_contracts.py
+--check` reports all three files stale while the uncommitted API work is in the
+tree, which is what fails `backend/tests/test_contracts.py`.
 
-Fixtures and migrations:
+Both smoke scripts boot a real uvicorn on a throwaway database and data
+directory, and both were run against this tree.
+
+`smoke.py` — **72 checks passed, 0 failed.** Signs in, creates a project, uploads
+the nine synthetic review documents, checks that a disguised executable and an
+`.ACD` are refused with reasons, runs the review, reads the findings and their
+citations, approves the one needing a human, confirms the project only reports
+itself complete afterwards, and archives it.
+
+`smoke_production.py` — **67 checks passed, 0 failed, 17 gaps**, and a real stop
+and reboot against the same database in the middle. It drives the Line 4 fixture
+and reports `check` / `found` / `quiet` / `gap`; only `check` can fail the run,
+because a smoke script that went red on a known limitation would be silenced
+within a week and the limitation would stop being visible. Read the 17 gaps: they
+are the most compact honest statement of what the product does not yet do. The
+project ends `blocked` and no release candidate is generated.
+
+### Migrations
+
+Point Alembic at a throwaway database rather than the project's own, or you will
+migrate live data:
 
 ```bash
-.venv/Scripts/python scripts/backend/make_fixtures.py  # regenerate fixtures
-.venv/Scripts/python -m alembic upgrade head
-.venv/Scripts/python -m alembic check                  # models match migration?
-.venv/Scripts/python -m alembic revision --autogenerate -m "describe it"
+ESCO_DATABASE_URL="sqlite+pysqlite:///./tmp/scratch.sqlite3" \
+  .venv/Scripts/python -m alembic upgrade head
+ESCO_DATABASE_URL=... .venv/Scripts/python -m alembic check
+ESCO_DATABASE_URL=... .venv/Scripts/python -m alembic downgrade base
+ESCO_DATABASE_URL=... .venv/Scripts/python -m alembic revision --autogenerate -m "describe it"
 ```
+
+Head is `4f7a9c2d1e6b` in the working tree and `38af6b21dc04` at `01e289f`.
+`upgrade head` → `check` → `downgrade base` → `upgrade head` round-trips cleanly on
+SQLite with the newer revision present. Check what head actually is before
+autogenerating, or you will fold somebody else's columns into your revision.
+
+### Fixtures
+
+```bash
+.venv/Scripts/python scripts/backend/make_fixtures.py      # the review fixture
+.venv/Scripts/python scripts/backend/make_line4_fixture.py # the acceptance fixture
+```
+
+`fixtures/demo_project/` is a full synthetic review project and
+`fixtures/README.md` states exactly which discrepancies a correct review should
+and should not report. `fixtures/line4_packaging_conveyor/` is the production
+acceptance fixture: eight artifacts, seven planted defects and eleven decoys, all
+declared in advance. Both scripts take `--target`, and `make_fixtures.py` raises
+from its own summary when the target is outside the repository root — the files are
+written first, so it is cosmetic, and it is mine. Please add only synthetic data;
+no ESCO customer content in the repository.
 
 ---
 
@@ -707,253 +830,68 @@ python scripts/backend/generate_contracts.py           # write
 python scripts/backend/generate_contracts.py --check   # fail if stale
 ```
 
-`backend/tests/test_contracts.py` runs the check, so an API change that is not
-reflected in the contracts fails the suite. Generate the frontend client from
-these files — they cannot describe an endpoint the backend does not serve.
+`backend/tests/test_contracts.py` runs the check, so an API change not reflected
+in the contracts fails the suite. Generate the frontend client from these files —
+they cannot describe an endpoint the backend does not serve.
 
 | File | Contents |
 | --- | --- |
-| `contracts/openapi.yaml` | Every HTTP endpoint |
-| `contracts/events.schema.json` | Event envelope + payload per event type |
-| `contracts/domain.schema.json` | 25 enums, 80 entity definitions |
-| `contracts/README.md` | How to consume them |
+| `contracts/openapi.yaml` | Every HTTP endpoint — 54 paths, 65 operations at `01e289f` |
+| `contracts/events.schema.json` | The envelope plus a payload model per event type — 46 mapped |
+| `contracts/domain.schema.json` | 90 definitions, of which 32 are enums; `x-enums` lists the 25 deliberately published ones |
+| `contracts/README.md` | How to consume them, and what this API will never do |
 
-`contracts/README.md` also lists what this API deliberately will never do
-(controller connections, program upload/download, `.ACD` parsing, applying
-design changes, releasing safety recommendations without human approval).
-
----
-
-## Available endpoints
-
-Every endpoint below is implemented, tested and exercised against a live process
-by `scripts/backend/smoke.py`. Nothing is listed here until it works.
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/health` | Liveness, contract version, enabled providers, capabilities |
-| `GET` | `/api/system/capabilities` | Optional plugin capabilities and why any are missing |
-| `POST` | `/api/auth/login` | Sign in; returns a token and sets an httpOnly cookie |
-| `POST` | `/api/auth/logout` | Revoke the presented token |
-| `GET` | `/api/auth/me` | Current user and their per-project roles |
-| `POST` | `/api/auth/users` | Create a user (administrator only) |
-| `GET` | `/api/auth/users` | List users (administrator only) |
-| `POST` | `/api/projects` | Create a project |
-| `GET` | `/api/projects` | List projects the caller may see (paginated) |
-| `GET` | `/api/projects/{project_id}` | Detail with membership and roll-up counts |
-| `PATCH` | `/api/projects/{project_id}` | Update metadata (**not** status) |
-| `POST` | `/api/projects/{project_id}/archive` | Archive; read-only from then on |
-| `GET` | `/api/projects/{project_id}/members` | List members |
-| `POST` | `/api/projects/{project_id}/members` | Add a member or change their role |
-| `POST` | `/api/projects/{project_id}/files` | Upload one or more files |
-| `GET` | `/api/projects/{project_id}/files` | List a project's files |
-| `GET` | `/api/files/{file_id}` | File metadata, artifacts, anchor count |
-| `GET` | `/api/files/{file_id}/content` | Download the stored original |
-| `DELETE` | `/api/files/{file_id}` | Delete a file (row retained as a tombstone) |
-| `GET` | `/api/agents` | Every registered agent, and why any is unavailable |
-| `GET` | `/api/projects/{project_id}/agents` | Agent presence for the city view |
-| `GET` | `/api/projects/{project_id}/agent-runs` | Agent runs for a project |
-| `GET` | `/api/agent-runs/{run_id}` | One run, including the actions the backend **refused** |
-| `GET` | `/api/projects/{project_id}/messages` | The project activity feed |
-| `GET` | `/api/projects/{project_id}/findings` | List findings (paginated, filterable) |
-| `GET` | `/api/findings/{finding_id}` | Finding detail with every citation resolved |
-| `PATCH` | `/api/findings/{finding_id}` | Record a human disposition (reviewer role) |
-| `POST` | `/api/findings/{finding_id}/comment` | Add a reviewer note |
-| `GET` | `/api/findings/{finding_id}/comments` | Reviewer notes |
-| `GET` | `/api/projects/{project_id}/recommendations` | Proposed engineering changes |
-| `GET` | `/api/projects/{project_id}/approvals` | Decisions waiting on a human |
-| `GET` | `/api/approvals/{approval_id}` | One approval with its evidence snapshot |
-| `POST` | `/api/approvals/{approval_id}/decision` | **Record an engineering decision** |
-| `GET` | `/api/projects/{project_id}/reports` | Reports generated for a project |
-| `GET` | `/api/reports/{report_id}` | Report metadata |
-| `GET` | `/api/reports/{report_id}/content` | Download a generated report |
-| `GET` | `/api/model-configurations` | Configured provider/model rows (administrator) |
-| `GET` | `/api/model-configurations/providers` | Enabled providers, and which send data off-machine |
-| `PUT` | `/api/model-configurations/{agent_kind}` | Set an agent's provider and model (administrator) |
-| `DELETE` | `/api/model-configurations/{agent_kind}` | Fall back to the next-broadest scope |
-| `POST` | `/api/projects/{project_id}/runs` | Start a review run |
-| `POST` | `/api/projects/{project_id}/pause` | Pause the run |
-| `POST` | `/api/projects/{project_id}/resume` | Resume a paused run |
-| `POST` | `/api/projects/{project_id}/cancel` | Cancel the run |
-| `POST` | `/api/projects/{project_id}/recover` | Requeue tasks abandoned by a stopped worker |
-| `GET` | `/api/projects/{project_id}/workflow` | Workflow state and task counts |
-| `GET` | `/api/projects/{project_id}/tasks` | List tasks |
-| `GET` | `/api/tasks/{task_id}` | Task detail with dependency edges |
-| `GET` | `/api/projects/{project_id}/parsers` | Which file kinds this install can parse |
-| `GET` | `/api/projects/{project_id}/events` | Replay the event history |
-| `WS` | `/ws/projects/{project_id}` | Live event stream |
-
-**Auth transport** — send `Authorization: Bearer <token>` *or* rely on the
-`esco_session` httpOnly cookie that login sets. Both work; the browser frontend
-should use the cookie, the desktop shell the header.
-
-**Upload semantics** — `POST .../files` takes a multipart `files` list plus an
-optional `document_role`. Each file is accepted or rejected **independently**:
-the response is `201` with `accepted_count`, `rejected_count` and a per-file
-result carrying `rejection_code` and `rejection_reason`. Uploading nine good
-files and one executable keeps the nine. An uploaded ZIP is expanded and each
-usable member appears in `extracted` as a file in its own right, with
-`parent_file_id` and `archive_member_path` set.
-
-**The approval gate.** `POST /api/approvals/{id}/decision` is the only way a
-finding is released. It requires the global `reviewer` role *and* a reviewing
-role on the project, so an engineer cannot sign off their own project's safety
-findings. `approved` has no default — approving is always an explicit act. Once
-every approval is decided the gated tasks return to the queue and the run
-continues on its own.
-
-**Reports** are produced by GPT-owned providers under `app.reporting`. With none
-installed the list is legitimately empty and `/api/system/capabilities` says why;
-the endpoints are not broken, the capability is absent.
-
----
-
-## Error envelope
-
-Every failing endpoint returns exactly one shape:
-
-```json
-{ "error": { "code": "file_rejected", "message": "…", "details": {} } }
-```
-
-`code` is stable and safe to branch on. The `X-Request-ID` response header
-correlates a failure with the server log.
-
----
-
-## WebSocket event types
-
-Envelope: `id`, `schema_version`, `seq`, `event_type`, `project_id`, `agent_id`,
-`task_id`, `actor_user_id`, `occurred_at`, `payload`.
-
-27 event types are declared and mapped to payload models in
-`contracts/events.schema.json` under `x-payload-by-event-type`:
-
-`project.created` · `project.updated` · `project.completed` · `project.failed` ·
-`file.uploaded` · `file.parsing_started` · `file.parsed` · `file.parse_failed` ·
-`file.deleted` · `workflow.started` · `workflow.paused` · `workflow.resumed` ·
-`workflow.cancelled` · `task.created` · `task.started` · `task.completed` ·
-`task.failed` · `task.blocked` · `agent.status_changed` ·
-`agent.location_changed` · `agent.message_created` · `finding.created` ·
-`finding.reviewed` · `finding.updated` · `approval.requested` ·
-`approval.decided` · `report.created`
-
-Events are persisted before broadcast. `seq` is gap-free per project;
-reconnecting clients pass `?since_seq=` and receive a `hello` frame stating
-`current_seq`, how many events were replayed, and `replay_truncated` when the
-requested point is outside the replay window.
-
-> **Not yet emitting.** The types and payload shapes are frozen contract, but
-> the transport and the emitters land in Milestone 3. Build against the schema;
-> do not expect live frames yet.
-
----
-
-## Plugin interfaces
-
-Reserved for GPT, discovered from `app.agents.delivery` and `app.reporting`.
-Neither package exists yet, and **the backend starts fine without them** — it
-reports the missing capability instead of crashing. Verified by
-`backend/tests/test_health.py::test_missing_plugins_are_reported_not_fatal`.
-
-Register either by defining `register(registry)` in the package `__init__`, or
-by declaring module-level `DELIVERY_AGENTS` / `REPORT_PROVIDERS` /
-`EXPORT_FORMATS` sequences.
-
-```python
-# backend/app/agents/delivery/__init__.py
-from .test_plan import TestPlanAgent
-
-def register(registry):
-    registry.add_delivery_agent(TestPlanAgent())
-```
-
-**`DeliveryAgentPlugin`** — `kind: str`, `display_name: str`, `version: str`,
-`handles_task_kinds: Sequence[str]`, `run(context) -> AgentRunResult`.
-
-**`ReportProvider`** — `report_type: str`, `display_name: str`, `version: str`,
-`supported_formats: Sequence[str]`, `render(snapshot, export_format) -> RenderedReport`.
-
-**`ExportFormatProvider`** — `format_key: str`, `media_type: str`,
-`file_extension: str`, `version: str`, `serialize(document) -> bytes`.
-
-A plugin that raises during import or registration is caught, recorded with its
-traceback, and surfaced through `/api/system/capabilities`. It never prevents
-startup.
-
-> `AgentRunResult`, `RenderedReport` and the read-only context objects are
-> defined in Milestone 4. Until then, treat the attribute names above as fixed
-> and the return types as forthcoming.
-
----
-
-## Known limitations
-
-* **No parsers yet.** Files are stored, hashed, classified by kind and role, and
-  safely expanded from archives — but nothing reads their *contents*. Parsers and
-  evidence anchors land in Milestone 2, so `GET /api/files/{id}` currently
-  reports zero artifacts and zero anchors for every file. That is accurate, not a
-  placeholder.
-* **No workflow, agents, findings, approvals or reports yet** (Milestones 3–5).
-* **No live WebSocket.** Contract is frozen; transport lands in Milestone 3.
-  Events *are* already persisted (`project.created`, `file.uploaded`,
-  `file.deleted`) with gap-free per-project `seq`, so replay will have real
-  history to serve.
-* **Demo passwords are in the repository.** `esco-demo-admin` and the seeded demo
-  accounts exist so the offline demonstration works out of the box.
-  `ESCO_ENVIRONMENT=production` refuses to start until `ESCO_JWT_SECRET` and
-  `ESCO_BOOTSTRAP_ADMIN_PASSWORD` are set, and `ESCO_BOOTSTRAP_DEMO_USERS=false`
-  turns the demo accounts off.
-* **Read-only sealing is best-effort.** Originals are chmod'ed read-only; some
-  network and container filesystems ignore that, in which case immutability is a
-  convention rather than an enforced property. A warning is logged when the chmod
-  fails.
-* **Per-project byte quota counts only live files.** Deleted rows are excluded, so
-  reclaiming space works, but the derived/ tree is not counted against the quota.
-* **PostgreSQL is untested in CI.** The models use portable types and the intent
-  is full support, but only SQLite is exercised so far.
-* **`.ACD` files are not supported and never will be.** The format is
-  proprietary; the product does not claim otherwise. L5X exports are the
-  supported Studio 5000 input.
-* **PDF text extraction only, no silent OCR.** A scanned PDF will produce a
-  warning that manual review or OCR is required rather than a quietly empty
-  parse. (Milestone 2.)
+The committed `x-payload-by-event-type` maps 46 of the 47 `EventType` members:
+`changeset.abandoned` is emitted by `app.engineering.changesets.abandon` and had
+no payload model at `01e289f`. One has since been added in the working tree, which
+is part of why the contracts read stale. The enum shortfall in
+`domain.schema.json` is a separate and larger gap, and is mine.
 
 ---
 
 ## Requests for GPT
 
-Nothing blocking yet. Noted for when the relevant milestone lands:
-
-1. **Do not hand-edit `contracts/`.** It is generated and the test suite
-   enforces it. If the frontend needs a field that is not there, note it in
-   `docs/handoffs/GPT.md` and I will add it to the source model and regenerate.
-2. **Root `.gitignore`** — I appended a Python/backend section beneath the
-   existing Node entries rather than restructuring the file. Shout if you would
-   rather split it per-directory.
-3. **Branch** — `master` is the only branch and the initial commit is yours, so
-   I am committing backend milestones there too. Say the word if you would
-   prefer separate branches.
-4. **Delivery/reporting packages** — `backend/app/agents/delivery/` and
-   `backend/app/reporting/` are yours; I have not created them, so plugin
-   discovery currently reports them as missing (by design). The interfaces above
-   are stable enough to start against once Milestone 4 defines the result types.
-5. **Health endpoint for the desktop shell** — `GET /api/health` returns
-   `contract_version`. Consider failing fast in the client if it does not match
-   the version the generated client was built from.
-6. **Seeded demo credentials** — `admin@esco.internal` / `esco-demo-admin`. Note
-   the domain: `.local`, `.test` and `.invalid` are reserved special-use domains
-   and `EmailStr` rejects them, so don't use them in frontend fixtures either.
-7. **Upload is partially-accepting by design.** `POST .../files` returns `201`
-   even when some files were refused. Read `results[].accepted` per file and show
-   `rejection_reason` — it is written to be shown to an engineer verbatim. Do not
-   treat a non-zero `rejected_count` as a failed request.
-8. **Deleted files keep their row.** `GET /api/files/{id}` still returns `200`
-   with `status: "deleted"`; only `/content` becomes `404`. Render it as a
-   tombstone so a citation that pointed at it does not silently vanish.
-9. **Synthetic fixtures are available** for frontend work:
-   `fixtures/demo_project/` holds a full invented project (L5X, interlock
-   workbook, I/O list, functional description, PDFs including one with no text
-   layer, HMI XML, and a ZIP package). `fixtures/README.md` documents the ground
-   truth — exactly which discrepancies a correct review should and should not
-   report. Please add only synthetic data; no ESCO customer content in the repo.
+1. **Do not hand-edit `contracts/`.** If the frontend needs a field or an enum
+   that is not there, note it in `docs/handoffs/GPT.md` and I will add it to the
+   source model or to `PUBLISHED_ENUMS` and regenerate.
+2. **Say which enums you need published first.** The gate, release and validation
+   enums are the obvious candidates; I would rather add the right ten now than all
+   sixty badly.
+3. **Tell me whether you want a gates endpoint** returning each gate's status and
+   its unmet criteria. Inferring gate state from approvals works today but will
+   not survive the first gate that is `NOT_READY` with nothing pending.
+4. **Handle unknown enum members and unknown event types without breaking.** The
+   widening above will happen again; members are added, never renamed, and that is
+   a contract promise you can build a `default` branch against.
+5. **If you want delivery artifacts inside the customer ZIP**, say so — the slots
+   exist and are wired to nothing.
+6. **Health endpoint for the desktop shell.** `GET /api/health` returns
+   `contract_version`, now `1.1.0`. Consider failing fast in the client if it does
+   not match the version the generated client was built from.
+7. **Whoever is editing `backend/app/api/routes/` and
+   `backend/app/engineering/gates.py` in the working tree**: those are mine, and
+   the gate-decision endpoint is a genuine improvement, so this is a coordination
+   note rather than an objection. Three things belong in the commit that lands it,
+   and I will do them if you would rather not: regenerate `contracts/` (three
+   files are stale, which is what fails `test_contracts.py`); delete the two
+   `RESOLVED` gaps from `scripts/backend/smoke_production.py` along with the
+   `GATE_WALL` wording; and fix
+   `test_line4_end_to_end.py::test_a_gate_decision_has_an_http_door`, which is
+   `strict=True` and only still xfails because it enumerates `application.routes`
+   in a way that does not see prefixed routers — a test that would pass for the
+   wrong reason is worse than one that fails.
+8. **Settled: the socket test was too strict, not the presence events.** It
+   expected `workflow.started` followed by a contiguous run of `task.created`
+   frames. The socket's contract is that `seq` is gap-free and monotonic per
+   project; it has never promised that two event types arrive adjacently, and
+   `agent.status_changed` interleaving is legitimate. The test now takes the
+   frame count from `GET /events` and holds **every** frame that arrived to the
+   sequence contract — presence frames included rather than filtered out — so it
+   passes whether the roster is announced before, inside or after the burst
+   (verified by flipping `provision_workflow_agents(announce=…)` both ways).
+   Nothing in the product changed. One thing left for whoever owns event order:
+   `orchestration/engine.py` still defers the roster announcement until after the
+   `task.created` loop, and its comment invites consumers to treat
+   `workflow.started` + `task_count` × `task.created` as "one contiguous,
+   deterministic snapshot". No test needs that any more, and the comment promises
+   more than the socket does. Check the frontend before dropping it.

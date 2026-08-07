@@ -43,6 +43,11 @@ class EngineeringObjectMixin:
     ``approval_state`` is the other. Once an object is ``APPROVED`` it is
     protected — a later change set must supersede it explicitly and win a fresh
     approval, so no agent can quietly edit something an engineer signed off.
+
+    An approval records three things and needs all three: who
+    (``approved_by_id``), when (``approved_at``) and *what*
+    (``approved_object_revision``). The third is what makes "approved, and edited
+    since" answerable by comparison rather than by inference from timestamps.
     """
 
     project_id: Mapped[uuid.UUID] = mapped_column(
@@ -64,6 +69,17 @@ class EngineeringObjectMixin:
     approved_by_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    #: The ``object_revision`` the approval covers. Recording an approval is
+    #: itself an update, so ``approved_at`` and ``updated_at`` are two reads of
+    #: the same wall clock in the same flush and their order is undefined —
+    #: which made an approval intermittently indistinguishable from a later edit
+    #: of the thing it approved. A revision cannot race: the reviewer signed
+    #: revision *n*, and only an edit takes the object to *n + 1*.
+    #:
+    #: Null means no approval has been recorded, or that whatever recorded one
+    #: did not state what it covered. That is a gap in the evidence rather than a
+    #: fresh signature, and ``ApprovalIntegrityValidator`` reports it as one.
+    approved_object_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     #: How this object came to exist. Recorded at creation and never inferred
     #: afterwards, so "an agent proposed this" stays distinguishable from "this

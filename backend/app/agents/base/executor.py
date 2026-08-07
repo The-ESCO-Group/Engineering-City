@@ -16,6 +16,14 @@ the agent that produced it. Re-running an agent updates the existing finding
 rather than adding a second copy — which is what makes the at-least-once queue
 safe for agents — while one agent cannot address another's row.
 
+A question is keyed the same way, by a reference derived from the task and the
+payload, so an exact retry returns the question it already raised instead of
+queueing a second identical decision. Whether that row is still open or has since
+been answered is reported separately, in
+:attr:`ExecutionResult.settled_questions`: a caller that cannot tell the two
+apart reports a question a human has answered as one still waiting for them, and
+the run never moves.
+
 Two things this module refuses outright, because both leave a human decision
 attached to something the human never saw:
 
@@ -58,6 +66,7 @@ from app.core.enums import (
     ApprovalKind,
     ApprovalStatus,
     AuditAction,
+    ClarificationStatus,
     EventType,
     FindingSeverity,
     FindingStatus,
@@ -84,6 +93,14 @@ logger = get_logger(__name__)
 #: mode this product exists to prevent.
 APPROVAL_SEVERITIES: frozenset[FindingSeverity] = frozenset(
     {FindingSeverity.HIGH, FindingSeverity.CRITICAL}
+)
+
+#: Question statuses that still leave a human owing an answer — the same pair
+#: :attr:`~app.models.profile.ProjectQuestion.is_blocking` treats as outstanding.
+#: Everything else has been through a person: answered, dismissed as no longer
+#: needed, or superseded. Deferring is not an answer.
+UNANSWERED_QUESTION_STATUSES: frozenset[ClarificationStatus] = frozenset(
+    {ClarificationStatus.OPEN, ClarificationStatus.DEFERRED}
 )
 
 
@@ -137,6 +154,11 @@ class ExecutionResult:
     approvals: list[Approval] = field(default_factory=list)
     messages: list[AgentMessage] = field(default_factory=list)
     questions: list[ProjectQuestion] = field(default_factory=list)
+    #: The subset of ``questions`` a human has already been through. An accepted
+    #: clarification is idempotent by reference, so a re-run legitimately returns
+    #: a row somebody answered days ago; a caller that could not tell that from a
+    #: question just asked would report "waiting for you" for ever.
+    settled_questions: list[ProjectQuestion] = field(default_factory=list)
     reviewed: list[Finding] = field(default_factory=list)
     enqueue: list[EnqueueRequest] = field(default_factory=list)
     blockers: list[str] = field(default_factory=list)
@@ -155,6 +177,7 @@ class ExecutionResult:
             "approvals": len(self.approvals),
             "messages": len(self.messages),
             "questions_raised": len(self.questions),
+            "questions_already_settled": [item.reference for item in self.settled_questions],
             "reviewed": len(self.reviewed),
             "tasks_planned": len(self.enqueue),
             "blockers": self.blockers,
@@ -653,14 +676,18 @@ class ActionExecutor:
         return approval
 
     # -- planning and messages -------------------------------------------
-    def _request_clarification(
-        self, item: ValidatedAction, result: ExecutionResult
-    ) -> None:
+    def _request_clarification(self, item: ValidatedAction, result: ExecutionResult) -> None:
         """Persist an accepted question so a human can actually answer it.
 
         The reference is deterministic for the task and payload. A leased task
         may run more than once; an exact retry must return the same question,
         while a materially different question remains a separate decision.
+
+        Returning the existing row is therefore right, and returning it *silently*
+        was the defect: a question somebody answered came back looking exactly
+        like one just asked, so the caller reported the run as waiting for an
+        answer that had already been given. The row is still returned; which of
+        the two it is, is now on the record.
         """
         payload = item.payload
         assert isinstance(payload, RequestClarificationPayload)
@@ -676,6 +703,16 @@ class ActionExecutor:
         ).scalar_one_or_none()
         if question is not None:
             result.questions.append(question)
+            if question.status not in UNANSWERED_QUESTION_STATUSES:
+                result.settled_questions.append(question)
+                logger.info(
+                    "an accepted clarification repeats a question a human has already settled",
+                    extra={
+                        "agent_kind": self.agent_kind,
+                        "reference": question.reference,
+                        "status": question.status.value,
+                    },
+                )
             return
 
         attributes: dict[str, Any] = {

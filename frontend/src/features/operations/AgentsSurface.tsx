@@ -11,11 +11,23 @@ import {
   SearchX
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import type {
+  ExternalAgentDeployRequest,
+  ExternalAgentDeployResponse
+} from "../../api/types";
 import { humanizeOperationsCode } from "./adapters";
+import { ExternalAgentSetup } from "./ExternalAgentSetup";
 import type { OperationsAgentRecord } from "./types";
 
 export interface AgentsSurfaceProps {
   agents: OperationsAgentRecord[];
+  projectName?: string;
+  serverBaseUrl?: string;
+  canDeployExternalAgent?: boolean;
+  externalAgentDisabledReason?: string;
+  onDeployExternalAgent?: (
+    payload: ExternalAgentDeployRequest
+  ) => Promise<ExternalAgentDeployResponse>;
   onOpenCityLocation?: (semanticLocation: string) => void;
 }
 
@@ -33,10 +45,19 @@ function eventDetail(event: OperationsAgentRecord["recentEvents"][number]): stri
   return humanizeOperationsCode(event.event_type);
 }
 
-export function AgentsSurface({ agents, onOpenCityLocation }: AgentsSurfaceProps) {
+export function AgentsSurface({
+  agents,
+  projectName,
+  serverBaseUrl,
+  canDeployExternalAgent = false,
+  externalAgentDisabledReason = "Open a live project as an owner or engineer to send an agent.",
+  onDeployExternalAgent,
+  onOpenCityLocation
+}: AgentsSurfaceProps) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"all" | OperationsAgentRecord["status"]>("all");
   const [selectedId, setSelectedId] = useState<string | null>(agents[0]?.id ?? null);
+  const [setupOpen, setSetupOpen] = useState(false);
   const statuses = useMemo(
     () => [...new Set(agents.map((agent) => agent.status))].sort(),
     [agents]
@@ -64,9 +85,20 @@ export function AgentsSurface({ agents, onOpenCityLocation }: AgentsSurfaceProps
         <div>
           <span>REPORTED AGENT SNAPSHOTS</span>
           <h2 id="ops-agents-title">Agent operations</h2>
-          <p>Current backend-reported state, assigned work, messages, and recent events. This view has no agent-control actions.</p>
+          <p>Current backend-reported state, assigned work, messages, and recent events. Existing records stay read only; authorized engineers can add a scoped SDK worker.</p>
         </div>
-        <span className="ops-readonly-badge"><CircleOff aria-hidden="true" /> Read only</span>
+        <div className="ops-surface__actions">
+          <span className="ops-readonly-badge"><CircleOff aria-hidden="true" /> Records read only</span>
+          <button
+            type="button"
+            className="ops-send-agent-button"
+            disabled={!canDeployExternalAgent || !onDeployExternalAgent || !serverBaseUrl}
+            onClick={() => setSetupOpen(true)}
+            title={!canDeployExternalAgent ? externalAgentDisabledReason : undefined}
+          >
+            <Bot aria-hidden="true" /> Send agent
+          </button>
+        </div>
       </header>
 
       <dl className="ops-summary-grid" aria-label="Agent status summary">
@@ -162,6 +194,19 @@ export function AgentsSurface({ agents, onOpenCityLocation }: AgentsSurfaceProps
             </article>
           )}
         </div>
+      )}
+
+      {setupOpen && onDeployExternalAgent && serverBaseUrl && (
+        <ExternalAgentSetup
+          projectName={projectName || "Authorized project"}
+          serverBaseUrl={serverBaseUrl}
+          onClose={() => setSetupOpen(false)}
+          onDeploy={async (payload) => {
+            const response = await onDeployExternalAgent(payload);
+            setSelectedId(response.instance.id);
+            return response;
+          }}
+        />
       )}
     </section>
   );

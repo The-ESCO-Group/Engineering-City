@@ -54,6 +54,30 @@ export type paths = {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/approval-gates/{gate_id}/approvals/{approval_id}/decision": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Record an explicit workflow gate decision
+         * @description Record any supported gate verdict against an exact gate/request pair.
+         *
+         *     The gate and approval identifiers are both in the route so a stale client
+         *     cannot accidentally apply a decision to a newer request for the same gate.
+         *     ``record_decision`` remains the sole state transition authority.
+         */
+        readonly post: operations["decide_gate_api_approval_gates__gate_id__approvals__approval_id__decision_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/approvals/{approval_id}": {
         readonly parameters: {
             readonly query?: never;
@@ -195,6 +219,57 @@ export type paths = {
         readonly put?: never;
         /** Resolve a requirement or object ambiguity as a named human decision */
         readonly post: operations["resolve_clarification_api_clarifications__clarification_id__resolve_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/external-agents/session/context": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** Read the bounded project context granted to this SDK mission */
+        readonly get: operations["external_agent_context_api_external_agents_session_context_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/external-agents/session/progress": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** Publish SDK agent progress and its semantic city location */
+        readonly post: operations["external_agent_progress_api_external_agents_session_progress_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/external-agents/session/submit": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** Submit one idempotent SDK result through native ESCO action gates */
+        readonly post: operations["external_agent_submit_api_external_agents_session_submit_post"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -615,6 +690,40 @@ export type paths = {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/projects/{project_id}/external-agents": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** Deploy one short-lived OpenAI or Claude SDK agent */
+        readonly post: operations["deploy_external_agent_api_projects__project_id__external_agents_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/projects/{project_id}/external-agents/{instance_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        /** Revoke an external SDK mission immediately */
+        readonly delete: operations["revoke_external_agent_api_projects__project_id__external_agents__instance_id__delete"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/projects/{project_id}/files": {
         readonly parameters: {
             readonly query?: never;
@@ -917,6 +1026,23 @@ export type paths = {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/projects/{project_id}/validation-results": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** Newest deterministic validation results, including recorded waivers */
+        readonly get: operations["list_validation_results_api_projects__project_id__validation_results_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/projects/{project_id}/workflow": {
         readonly parameters: {
             readonly query?: never;
@@ -1082,6 +1208,23 @@ export type paths = {
         readonly get: operations["get_task_api_tasks__task_id__get"];
         readonly put?: never;
         readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/validation-results/{result_id}/waiver": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** Accept one current validation risk as a named reviewer */
+        readonly post: operations["waive_validation_result_api_validation_results__result_id__waiver_post"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -1458,6 +1601,12 @@ export type components = {
          */
         readonly AnchorType: "l5x_controller" | "l5x_program" | "l5x_routine" | "l5x_rung" | "l5x_instruction" | "l5x_tag" | "l5x_module" | "l5x_addon_instruction" | "xlsx_workbook" | "xlsx_worksheet" | "xlsx_cell" | "xlsx_range" | "csv_row" | "csv_cell" | "docx_heading" | "docx_paragraph" | "docx_table_cell" | "pdf_page" | "pdf_text_range" | "xml_element" | "description_paragraph" | "requirement" | "template" | "human_decision" | "generated_object" | "validation_result" | "file_line" | "file_section" | "file_whole";
         /**
+         * ApprovalDecision
+         * @description What a reviewer chose. Maps onto :class:`ApprovalStatus`.
+         * @enum {string}
+         */
+        readonly ApprovalDecision: "approve" | "reject" | "request_changes" | "accept_risk" | "defer";
+        /**
          * ApprovalDecisionRequest
          * @description A human decision.
          *
@@ -1473,6 +1622,24 @@ export type components = {
              */
             readonly notes?: string;
         };
+        /**
+         * ApprovalGateDecisionRequest
+         * @description An explicit decision on one of the six production workflow gates.
+         */
+        readonly ApprovalGateDecisionRequest: {
+            /**
+             * Comment
+             * @default
+             */
+            readonly comment?: string;
+            readonly decision: components["schemas"]["ApprovalDecision"];
+        };
+        /**
+         * ApprovalGateKey
+         * @description The six configurable gates a project passes through.
+         * @enum {string}
+         */
+        readonly ApprovalGateKey: "project_profile" | "devices_io_tags" | "logic_and_delivery" | "qa_and_risk" | "import_verification" | "release";
         /**
          * ApprovalKind
          * @description Why a human decision is required.
@@ -1502,6 +1669,7 @@ export type components = {
             readonly decided_by_display_name?: string;
             /** Decided By Id */
             readonly decided_by_id?: string | null;
+            readonly decision?: components["schemas"]["ApprovalDecision"] | null;
             /**
              * Decision Allowed
              * @default true
@@ -1519,6 +1687,9 @@ export type components = {
             readonly decision_notes?: string;
             /** Finding Id */
             readonly finding_id?: string | null;
+            /** Gate Id */
+            readonly gate_id?: string | null;
+            readonly gate_key?: components["schemas"]["ApprovalGateKey"] | null;
             /**
              * Id
              * Format: uuid
@@ -1537,6 +1708,8 @@ export type components = {
             readonly question: string;
             /** Recommendation Id */
             readonly recommendation_id?: string | null;
+            /** Release Candidate Id */
+            readonly release_candidate_id?: string | null;
             /** Report Id */
             readonly report_id?: string | null;
             /** Requested At */
@@ -1546,6 +1719,8 @@ export type components = {
              * @default
              */
             readonly requested_by_agent_kind?: string;
+            /** Revision Number */
+            readonly revision_number?: number | null;
             readonly status: components["schemas"]["ApprovalStatus"];
             /** Task Id */
             readonly task_id?: string | null;
@@ -1936,7 +2111,7 @@ export type components = {
          *     Persisted before broadcast; see ``contracts/events.schema.json``.
          * @enum {string}
          */
-        readonly EventType: "project.created" | "project.updated" | "project.completed" | "project.failed" | "file.uploaded" | "file.parsing_started" | "file.parsed" | "file.parse_failed" | "file.deleted" | "workflow.started" | "workflow.paused" | "workflow.resumed" | "workflow.cancelled" | "task.created" | "task.started" | "task.completed" | "task.failed" | "task.blocked" | "agent.status_changed" | "agent.location_changed" | "agent.message_created" | "finding.created" | "finding.reviewed" | "finding.updated" | "approval.requested" | "approval.decided" | "report.created" | "project.question_created" | "project.question_resolved" | "requirement.created" | "workflow.planned" | "workflow.failed" | "task.assigned" | "changeset.created" | "changeset.validation_failed" | "changeset.submitted" | "changeset.reviewed" | "changeset.merged" | "revision.created" | "gate.status_changed" | "validation.started" | "validation.completed" | "export.started" | "export.artifact_created" | "release.candidate_created" | "release.ready";
+        readonly EventType: "project.created" | "project.updated" | "project.completed" | "project.failed" | "file.uploaded" | "file.parsing_started" | "file.parsed" | "file.parse_failed" | "file.deleted" | "workflow.started" | "workflow.paused" | "workflow.resumed" | "workflow.cancelled" | "task.created" | "task.started" | "task.completed" | "task.failed" | "task.blocked" | "agent.status_changed" | "agent.location_changed" | "agent.message_created" | "finding.created" | "finding.reviewed" | "finding.updated" | "approval.requested" | "approval.decided" | "report.created" | "project.question_created" | "project.question_resolved" | "requirement.created" | "workflow.planned" | "workflow.failed" | "task.assigned" | "changeset.created" | "changeset.validation_failed" | "changeset.submitted" | "changeset.reviewed" | "changeset.abandoned" | "changeset.merged" | "revision.created" | "gate.status_changed" | "validation.started" | "validation.completed" | "export.started" | "export.artifact_created" | "release.candidate_created" | "release.ready";
         /**
          * EvidenceAnchorRead
          * @description A citation the UI can render and, where possible, deep-link to.
@@ -2050,6 +2225,176 @@ export type components = {
             readonly validation_level: components["schemas"]["ValidationLevel"];
             /** Warnings */
             readonly warnings?: readonly unknown[];
+        };
+        /** ExternalAgentContextRead */
+        readonly ExternalAgentContextRead: {
+            /** Allowed Actions */
+            readonly allowed_actions: readonly string[];
+            /** Evidence Anchors */
+            readonly evidence_anchors: readonly {
+                readonly [key: string]: unknown;
+            }[];
+            /** Evidence Limit */
+            readonly evidence_limit: number;
+            /** Evidence Offset */
+            readonly evidence_offset: number;
+            /** Evidence Total */
+            readonly evidence_total: number;
+            /** Files */
+            readonly files: readonly {
+                readonly [key: string]: unknown;
+            }[];
+            readonly instance: components["schemas"]["AgentInstanceRead"];
+            /** Mission */
+            readonly mission: string;
+            /** Model */
+            readonly model: string;
+            /** Project */
+            readonly project: {
+                readonly [key: string]: unknown;
+            };
+            readonly provider: components["schemas"]["ProviderKind"];
+            /** Requirements */
+            readonly requirements: readonly {
+                readonly [key: string]: unknown;
+            }[];
+            /** Response Schema */
+            readonly response_schema: {
+                readonly [key: string]: unknown;
+            };
+            /** Rules */
+            readonly rules: string;
+        };
+        /** ExternalAgentDeployRequest */
+        readonly ExternalAgentDeployRequest: {
+            /**
+             * Acknowledge External Processing
+             * @description Explicit acknowledgement that the SDK worker may send the returned project context to the selected external provider.
+             * @constant
+             */
+            readonly acknowledge_external_processing: true;
+            /** Display Name */
+            readonly display_name: string;
+            /** @default project_intake */
+            readonly initial_location?: components["schemas"]["SemanticLocation"];
+            /** Mission */
+            readonly mission: string;
+            /** Model */
+            readonly model: string;
+            /**
+             * Provider
+             * @enum {string}
+             */
+            readonly provider: "openai" | "anthropic";
+            /** Specialty */
+            readonly specialty: string;
+            /**
+             * Ttl Seconds
+             * @default 3600
+             */
+            readonly ttl_seconds?: number;
+        };
+        /** ExternalAgentDeployResponse */
+        readonly ExternalAgentDeployResponse: {
+            /**
+             * Agent Token
+             * @description Shown once. Send as `Authorization: Bearer <token>` to mission endpoints.
+             */
+            readonly agent_token: string;
+            /** Allowed Actions */
+            readonly allowed_actions: readonly string[];
+            readonly endpoints: components["schemas"]["ExternalAgentEndpoints"];
+            readonly instance: components["schemas"]["AgentInstanceRead"];
+            /** Mission */
+            readonly mission: string;
+            /** Model */
+            readonly model: string;
+            readonly provider: components["schemas"]["ProviderKind"];
+            /**
+             * Token Expires At
+             * Format: date-time
+             */
+            readonly token_expires_at: string;
+        };
+        /** ExternalAgentEndpoints */
+        readonly ExternalAgentEndpoints: {
+            /** Context */
+            readonly context: string;
+            /** Progress */
+            readonly progress: string;
+            /** Submit */
+            readonly submit: string;
+        };
+        /** ExternalAgentProgressRequest */
+        readonly ExternalAgentProgressRequest: {
+            /** Activity */
+            readonly activity: string;
+            readonly location: components["schemas"]["SemanticLocation"];
+            /**
+             * Message
+             * @default
+             */
+            readonly message?: string;
+            readonly status: components["schemas"]["AgentStatus"];
+        };
+        /** ExternalAgentRevokeResponse */
+        readonly ExternalAgentRevokeResponse: {
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            readonly instance_id: string;
+            /** Message */
+            readonly message: string;
+            readonly status: components["schemas"]["AgentStatus"];
+        };
+        /** ExternalAgentSubmissionRequest */
+        readonly ExternalAgentSubmissionRequest: {
+            /** Actions */
+            readonly actions: readonly {
+                readonly [key: string]: unknown;
+            }[];
+            /**
+             * Completion Tokens
+             * @default 0
+             */
+            readonly completion_tokens?: number;
+            /**
+             * Latency Ms
+             * @default 0
+             */
+            readonly latency_ms?: number;
+            /**
+             * Prompt Tokens
+             * @default 0
+             */
+            readonly prompt_tokens?: number;
+            /** Rationale */
+            readonly rationale: string;
+            /**
+             * Submission Id
+             * Format: uuid
+             */
+            readonly submission_id: string;
+            /** Warnings */
+            readonly warnings?: readonly string[];
+        };
+        /** ExternalAgentSubmissionResponse */
+        readonly ExternalAgentSubmissionResponse: {
+            /** Accepted Actions */
+            readonly accepted_actions: number;
+            /** Execution */
+            readonly execution: {
+                readonly [key: string]: unknown;
+            };
+            /** Rejected Actions */
+            readonly rejected_actions: number;
+            /**
+             * Replayed
+             * @default false
+             */
+            readonly replayed?: boolean;
+            readonly run: components["schemas"]["AgentRunDetail"];
         };
         /** FileDetail */
         readonly FileDetail: {
@@ -2547,6 +2892,17 @@ export type components = {
          */
         readonly ObjectApprovalState: "draft" | "proposed" | "approved" | "rejected" | "superseded";
         /**
+         * ObjectType
+         * @description Stable names for canonical objects.
+         *
+         *     Used wherever a reference has to be polymorphic — evidence links, change
+         *     operations, impact analysis. A string rather than a foreign key per target
+         *     so that adding an object type does not require a schema change everywhere
+         *     it could be cited.
+         * @enum {string}
+         */
+        readonly ObjectType: "project_profile" | "project_question" | "project_decision" | "requirement" | "acceptance_criterion" | "assumption" | "constraint" | "clarification" | "area" | "unit" | "equipment_module" | "device" | "device_type" | "network_node" | "module" | "io_point" | "signal" | "address_assignment" | "tag" | "tag_alias" | "tag_group" | "data_type_definition" | "udt_definition" | "aoi_reference" | "controller_task" | "program" | "routine" | "logic_network" | "logic_rung" | "logic_instruction" | "interlock" | "permissive" | "cause_effect_entry" | "mode_definition" | "state_definition" | "transition_definition" | "sequence_step" | "fault_definition" | "reset_behavior" | "hmi_screen" | "hmi_binding" | "alarm_definition" | "test_case" | "finding" | "export_artifact" | "release_candidate";
+        /**
          * OkResponse
          * @description Acknowledgement for operations with no meaningful body.
          */
@@ -2916,6 +3272,11 @@ export type components = {
          * @enum {string}
          */
         readonly ProjectType: "new_installation" | "upgrade" | "retrofit" | "migration" | "expansion" | "other";
+        /**
+         * ProviderKind
+         * @enum {string}
+         */
+        readonly ProviderKind: "mock" | "ollama" | "openai" | "anthropic";
         /**
          * QuestionCategory
          * @description What a clarification is about. Drives who should answer it.
@@ -3499,6 +3860,16 @@ export type components = {
          */
         readonly SafetyClassification: "standard" | "safety_rated" | "mixed_standard_and_safety" | "unknown";
         /**
+         * SemanticLocation
+         * @description Where in the city an agent is working.
+         *
+         *     The backend broadcasts these names and never pixel coordinates: where a
+         *     district *is* on screen is the frontend's business, and coupling the
+         *     backend to a layout would make moving a building a backend change.
+         * @enum {string}
+         */
+        readonly SemanticLocation: "project_intake" | "requirements_hall" | "project_core" | "tag_foundry" | "automation_core" | "ladder_logic_lab" | "electrical_works" | "hmi_district" | "alarm_center" | "qa_campus" | "testing_grounds" | "approval_plaza" | "documentation_quarter" | "release_logistics" | "template_library" | "data_center";
+        /**
          * StartRunRequest
          * @description Starts a workflow run over the project's current files.
          */
@@ -3946,6 +4317,11 @@ export type components = {
             /** Roles */
             readonly roles?: readonly components["schemas"]["RoleName"][];
         };
+        /**
+         * ValidationDiscipline
+         * @enum {string}
+         */
+        readonly ValidationDiscipline: "requirements" | "tags" | "io" | "plc_logic" | "interlocks" | "hmi" | "alarms" | "testing" | "documentation" | "release" | "cross_discipline";
         /** ValidationError */
         readonly ValidationError: {
             /** Context */
@@ -3970,6 +4346,112 @@ export type components = {
          * @enum {string}
          */
         readonly ValidationLevel: "generated" | "schema_validated" | "internal_semantic_validated" | "round_trip_parsed" | "rockwell_import_verified" | "human_approved" | "released";
+        /** ValidationResultRead */
+        readonly ValidationResultRead: {
+            /** Code */
+            readonly code: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            readonly created_at: string;
+            /** Detail */
+            readonly detail?: {
+                readonly [key: string]: unknown;
+            };
+            readonly discipline: components["schemas"]["ValidationDiscipline"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Is Waived */
+            readonly is_waived: boolean;
+            /** Message */
+            readonly message: string;
+            /** Object Id */
+            readonly object_id?: string | null;
+            /**
+             * Object Label
+             * @default
+             */
+            readonly object_label?: string;
+            readonly object_type?: components["schemas"]["ObjectType"] | null;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            readonly project_id: string;
+            /** Requires Human Decision */
+            readonly requires_human_decision: boolean;
+            readonly severity: components["schemas"]["ValidationSeverity"];
+            /**
+             * Suggested Action
+             * @default
+             */
+            readonly suggested_action?: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            readonly updated_at: string;
+            /**
+             * Validation Run Id
+             * Format: uuid
+             */
+            readonly validation_run_id: string;
+            /** Waived By Id */
+            readonly waived_by_id?: string | null;
+            /**
+             * Waiver Reason
+             * @default
+             */
+            readonly waiver_reason?: string;
+        };
+        /**
+         * ValidationSeverity
+         * @enum {string}
+         */
+        readonly ValidationSeverity: "error" | "warning" | "information" | "unsupported" | "human_review_required";
+        /** ValidationWaiverRead */
+        readonly ValidationWaiverRead: {
+            /**
+             * Decision Replayed
+             * @default false
+             */
+            readonly decision_replayed?: boolean;
+            readonly result: components["schemas"]["ValidationResultRead"];
+            /**
+             * Unblocked Task Count
+             * @default 0
+             */
+            readonly unblocked_task_count?: number;
+            /**
+             * Waived At
+             * Format: date-time
+             */
+            readonly waived_at: string;
+            /**
+             * Waived By Id
+             * Format: uuid
+             */
+            readonly waived_by_id: string;
+        };
+        /** ValidationWaiverRequest */
+        readonly ValidationWaiverRequest: {
+            /**
+             * Confirm
+             * @constant
+             */
+            readonly confirm: true;
+            /**
+             * Expected Updated At
+             * Format: date-time
+             */
+            readonly expected_updated_at: string;
+            /** Reason */
+            readonly reason: string;
+        };
         /** WorkflowControlRequest */
         readonly WorkflowControlRequest: {
             /**
@@ -4088,6 +4570,42 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": readonly components["schemas"]["AgentDefinitionRead"][];
+                };
+            };
+        };
+    };
+    readonly decide_gate_api_approval_gates__gate_id__approvals__approval_id__decision_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly approval_id: string;
+                readonly gate_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ApprovalGateDecisionRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ApprovalRead"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4323,6 +4841,104 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["ClarificationResolutionRead"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly external_agent_context_api_external_agents_session_context_get: {
+        readonly parameters: {
+            readonly query?: {
+                readonly evidence_limit?: number;
+                readonly evidence_offset?: number;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ExternalAgentContextRead"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly external_agent_progress_api_external_agents_session_progress_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ExternalAgentProgressRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["AgentInstanceRead"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly external_agent_submit_api_external_agents_session_submit_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ExternalAgentSubmissionRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ExternalAgentSubmissionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5176,6 +5792,73 @@ export interface operations {
             };
         };
     };
+    readonly deploy_external_agent_api_projects__project_id__external_agents_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly project_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ExternalAgentDeployRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ExternalAgentDeployResponse"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly revoke_external_agent_api_projects__project_id__external_agents__instance_id__delete: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly instance_id: string;
+                readonly project_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ExternalAgentRevokeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     readonly list_files_api_projects__project_id__files_get: {
         readonly parameters: {
             readonly query?: {
@@ -5780,6 +6463,37 @@ export interface operations {
             };
         };
     };
+    readonly list_validation_results_api_projects__project_id__validation_results_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly project_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": readonly components["schemas"]["ValidationResultRead"][];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     readonly workflow_state_api_projects__project_id__workflow_get: {
         readonly parameters: {
             readonly query?: never;
@@ -6106,6 +6820,43 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly waive_validation_result_api_validation_results__result_id__waiver_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: {
+                readonly "User-Agent"?: string | null;
+            };
+            readonly path: {
+                readonly result_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ValidationWaiverRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ValidationWaiverRead"];
                 };
             };
             /** @description Validation Error */

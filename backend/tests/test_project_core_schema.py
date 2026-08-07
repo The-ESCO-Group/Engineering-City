@@ -45,6 +45,7 @@ MIXIN_COLUMNS = (
     "approval_state",
     "approved_at",
     "approved_by_id",
+    "approved_object_revision",
     "origin",
     "source_changeset_id",
     "created_by_agent",

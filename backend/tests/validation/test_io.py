@@ -45,10 +45,11 @@ DUPLICATE = "io.duplicate_point_assignment"
 
 
 def test_two_signals_on_one_terminal_is_an_error(db: Session, project: Project) -> None:
-    device = make_device(db, project)
+    guard = make_device(db, project, "GD401")
+    drive = make_device(db, project, "MTR403")
     point = make_io_point(db, project)
-    first = make_signal(db, project, device, "Run_Cmd", ordinal=0)
-    second = make_signal(db, project, device, "Fwd_Cmd", ordinal=1)
+    first = make_signal(db, project, guard, "GD401_CLOSED", ordinal=0)
+    second = make_signal(db, project, drive, "MTR403_FAULT", ordinal=0)
     make_assignment(db, project, first, point, status=AddressAssignmentStatus.ASSIGNED)
     make_assignment(db, project, second, point, status=AddressAssignmentStatus.ASSIGNED)
 
@@ -57,6 +58,13 @@ def test_two_signals_on_one_terminal_is_an_error(db: Session, project: Project) 
     assert len(found) == 2, "both claimants should be named"
     assert all(issue.severity is ValidationSeverity.ERROR for issue in found)
     assert "Local:2:O.Data.0" in found[0].object_label
+    assert all(
+        "GD401_CLOSED" in issue.message and "MTR403_FAULT" in issue.message for issue in found
+    )
+    assert all(issue.detail["signal_names"] == ["GD401_CLOSED", "MTR403_FAULT"] for issue in found)
+    assert all(issue.detail["signal_ids"] == [str(first.id), str(second.id)] for issue in found), (
+        "the deterministic names and IDs must continue to describe the same claimants"
+    )
 
 
 def test_one_signal_per_terminal_does_not_fire(db: Session, project: Project) -> None:

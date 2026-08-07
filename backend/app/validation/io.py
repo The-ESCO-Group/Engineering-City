@@ -114,8 +114,27 @@ class IOAssignmentValidator:
             if point is None:
                 continue
 
-            claimants = by_point.get(assignment.io_point_id, [])
+            claimants = sorted(
+                by_point.get(assignment.io_point_id, []),
+                key=lambda signal_id: (
+                    context.signals_by_id[signal_id].name.casefold()
+                    if signal_id in context.signals_by_id
+                    else "\uffff",
+                    context.signals_by_id[signal_id].name
+                    if signal_id in context.signals_by_id
+                    else "",
+                    str(signal_id),
+                ),
+            )
             if len(claimants) > 1:
+                claimant_names = [
+                    (
+                        context.signals_by_id[signal_id].name
+                        if signal_id in context.signals_by_id
+                        else f"unknown signal {signal_id}"
+                    )
+                    for signal_id in claimants
+                ]
                 issues.append(
                     Issue(
                         code="io.duplicate_point_assignment",
@@ -126,7 +145,8 @@ class IOAssignmentValidator:
                         # found at commissioning, on the machine.
                         severity=ValidationSeverity.ERROR,
                         message=(
-                            f"{len(claimants)} signals are assigned to I/O point '{point.address}'."
+                            f"I/O point '{point.address}' is assigned to {len(claimants)} "
+                            f"signals: {', '.join(repr(name) for name in claimant_names)}."
                         ),
                         object_type=ObjectType.ADDRESS_ASSIGNMENT,
                         object_id=assignment.id,
@@ -138,11 +158,7 @@ class IOAssignmentValidator:
                         detail={
                             "address": point.address,
                             "signal_ids": [str(item) for item in claimants],
-                            "signal_names": [
-                                context.signals_by_id[item].name
-                                for item in claimants
-                                if item in context.signals_by_id
-                            ],
+                            "signal_names": claimant_names,
                         },
                     )
                 )

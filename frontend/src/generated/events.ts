@@ -121,6 +121,31 @@ export type components = {
          */
         readonly ChangeOperationType: "create_object" | "update_field" | "delete_object" | "link_objects" | "unlink_objects" | "rename_tag" | "assign_io" | "create_logic" | "update_logic" | "create_finding" | "resolve_finding" | "create_export" | "request_clarification";
         /**
+         * ChangeSetAbandonedEventPayload
+         * @description A change set closed without ever being merged, and why.
+         *
+         *     Not a verdict. A reviewer turning work down is
+         *     :class:`ChangeSetReviewedEventPayload`; this is the author, the orchestrator
+         *     or an engineer deciding the proposal will not be carried any further —
+         *     superseded by a later template, overtaken by a clarification, abandoned
+         *     because the task that raised it was cancelled. A client answering "what
+         *     became of this proposal" needs to tell those apart, which is why ``reason``
+         *     is required rather than an optional note: a change set that disappears
+         *     without one is indistinguishable from a bug.
+         */
+        readonly ChangeSetAbandonedEventPayload: {
+            /**
+             * Changeset Id
+             * Format: uuid
+             */
+            readonly changeset_id: string;
+            /** Reason */
+            readonly reason: string;
+            readonly status: components["schemas"]["ChangeSetStatus"];
+            /** Title */
+            readonly title: string;
+        };
+        /**
          * ChangeSetEventPayload
          * @description A proposed, scoped batch of changes to the canonical model.
          *
@@ -393,7 +418,7 @@ export type components = {
          *     Persisted before broadcast; see ``contracts/events.schema.json``.
          * @enum {string}
          */
-        readonly EventType: "project.created" | "project.updated" | "project.completed" | "project.failed" | "file.uploaded" | "file.parsing_started" | "file.parsed" | "file.parse_failed" | "file.deleted" | "workflow.started" | "workflow.paused" | "workflow.resumed" | "workflow.cancelled" | "task.created" | "task.started" | "task.completed" | "task.failed" | "task.blocked" | "agent.status_changed" | "agent.location_changed" | "agent.message_created" | "finding.created" | "finding.reviewed" | "finding.updated" | "approval.requested" | "approval.decided" | "report.created" | "project.question_created" | "project.question_resolved" | "requirement.created" | "workflow.planned" | "workflow.failed" | "task.assigned" | "changeset.created" | "changeset.validation_failed" | "changeset.submitted" | "changeset.reviewed" | "changeset.merged" | "revision.created" | "gate.status_changed" | "validation.started" | "validation.completed" | "export.started" | "export.artifact_created" | "release.candidate_created" | "release.ready";
+        readonly EventType: "project.created" | "project.updated" | "project.completed" | "project.failed" | "file.uploaded" | "file.parsing_started" | "file.parsed" | "file.parse_failed" | "file.deleted" | "workflow.started" | "workflow.paused" | "workflow.resumed" | "workflow.cancelled" | "task.created" | "task.started" | "task.completed" | "task.failed" | "task.blocked" | "agent.status_changed" | "agent.location_changed" | "agent.message_created" | "finding.created" | "finding.reviewed" | "finding.updated" | "approval.requested" | "approval.decided" | "report.created" | "project.question_created" | "project.question_resolved" | "requirement.created" | "workflow.planned" | "workflow.failed" | "task.assigned" | "changeset.created" | "changeset.validation_failed" | "changeset.submitted" | "changeset.reviewed" | "changeset.abandoned" | "changeset.merged" | "revision.created" | "gate.status_changed" | "validation.started" | "validation.completed" | "export.started" | "export.artifact_created" | "release.candidate_created" | "release.ready";
         /**
          * ExportArtifactCreatedEventPayload
          * @description One generated file inside a release package.
@@ -1382,6 +1407,7 @@ export type AgentStatusEventPayload = components["schemas"]["AgentStatusEventPay
 export type ApprovalEventPayload = components["schemas"]["ApprovalEventPayload"];
 export type ApprovalGateKey = components["schemas"]["ApprovalGateKey"];
 export type ChangeOperationType = components["schemas"]["ChangeOperationType"];
+export type ChangeSetAbandonedEventPayload = components["schemas"]["ChangeSetAbandonedEventPayload"];
 export type ChangeSetEventPayload = components["schemas"]["ChangeSetEventPayload"];
 export type ChangeSetMergedEventPayload = components["schemas"]["ChangeSetMergedEventPayload"];
 export type ChangeSetReviewedEventPayload = components["schemas"]["ChangeSetReviewedEventPayload"];

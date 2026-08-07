@@ -9,11 +9,11 @@ produces a label a human can follow back to the thing being changed.
 Three deliberate shapes:
 
 * **The field allowlist is a denylist applied to the mapper.** It is derived as
-  "every mapped column except :data:`PROTECTED_FIELDS`", so a column added to a
-  model tomorrow is writable without anyone remembering to update a list here,
-  while ``approval_state``, ``object_revision`` and the provenance columns can
-  never become writable by accident. The service layer owns those; a model that
-  could set ``approval_state`` could approve its own work.
+  "every mapped column except :data:`PROTECTED_FIELDS` and the object-specific
+  :data:`FIELD_WRITE_RESTRICTIONS`". The service-owned columns can never become
+  writable by accident, while a newly introduced field whose invariants are not
+  yet enforced can be held fail-closed without freezing every ordinary model
+  addition.
 * **Natural keys come from the table's unique constraints**, so duplicate
   detection tracks the schema rather than a hand-maintained copy of it. It is
   also stricter than the database: ``NULL != NULL`` means a unique constraint
@@ -94,6 +94,7 @@ from app.models import (
 )
 
 __all__ = [
+    "FIELD_WRITE_RESTRICTIONS",
     "OBJECT_TYPE_MODELS",
     "PROTECTED_FIELDS",
     "UNWRITABLE_OBJECT_TYPES",
@@ -102,12 +103,14 @@ __all__ = [
     "allowed_fields",
     "coerce_value",
     "describe",
+    "field_write_restriction",
     "foreign_key_targets",
     "is_writable",
     "label_for",
     "model_for",
     "natural_keys",
     "object_type_for",
+    "restricted_fields",
     "type_label",
 ]
 
@@ -131,8 +134,12 @@ class FieldValueError(ValueError):
 #: that could write ``approval_state`` could approve its own work, one that could
 #: write ``object_revision`` could defeat conflict detection, and one that could
 #: write ``created_by_agent`` could attribute its output to somebody else.
-#: ``deleted_at`` is here because deletion is an operation type, not a field
-#: edit — a soft delete has to bump the revision and record a before-state.
+#: ``approved_object_revision`` is the same rule once more: it is the revision a
+#: reviewer signed, so an agent that could move it forward would silence the
+#: integrity check on an object it had just edited — which is worse than being
+#: unable to edit the object at all, because the signature would survive looking
+#: intact. ``deleted_at`` is here because deletion is an operation type, not a
+#: field edit — a soft delete has to bump the revision and record a before-state.
 PROTECTED_FIELDS: frozenset[str] = frozenset(
     {
         "id",
@@ -143,6 +150,7 @@ PROTECTED_FIELDS: frozenset[str] = frozenset(
         "approval_state",
         "approved_at",
         "approved_by_id",
+        "approved_object_revision",
         "deleted_at",
         "superseded_by_id",
         "origin",
@@ -153,6 +161,27 @@ PROTECTED_FIELDS: frozenset[str] = frozenset(
         "updated_at",
     }
 )
+
+
+#: Object-specific fields that exist in the canonical model but are not yet a
+#: safe change-set surface. Keeping these separate from ``PROTECTED_FIELDS``
+#: matters: they are not service-owned metadata, and another object's column
+#: with the same name must not become unwritable by accident.
+#:
+#: ``LogicInstruction.branch_id`` is intentionally held closed while canonical
+#: import and Rockwell generation still use ``branch_level``/``branch_index``.
+#: ``LogicBranch`` is not itself a registered change-set object, so the generic
+#: foreign-key checker cannot prove that a proposed leg belongs to the same
+#: project *and* the instruction's rung. Allowing the id before those checks
+#: exist would let a client attach an instruction to an unrelated branch row.
+FIELD_WRITE_RESTRICTIONS: Mapping[ObjectType, Mapping[str, str]] = {
+    ObjectType.LOGIC_INSTRUCTION: {
+        "branch_id": (
+            "branch membership is not writable until canonical import and generation "
+            "validate branch identity; use branch_level and branch_index coordinates"
+        )
+    }
+}
 
 
 #: The canonical object each :class:`ObjectType` addresses.
@@ -329,11 +358,20 @@ def _columns(object_type: ObjectType) -> dict[str, Any]:
 def allowed_fields(object_type: ObjectType) -> frozenset[str]:
     """The columns a change operation may set on this object type.
 
-    Every mapped column minus :data:`PROTECTED_FIELDS`. Derived rather than
-    listed so that a column added to a model is writable by default and the
-    protected ones stay unwritable without anyone having to remember.
+    Every mapped column minus :data:`PROTECTED_FIELDS` and any field held closed
+    by :data:`FIELD_WRITE_RESTRICTIONS`.
     """
-    return frozenset(_columns(object_type)) - PROTECTED_FIELDS
+    return frozenset(_columns(object_type)) - PROTECTED_FIELDS - restricted_fields(object_type)
+
+
+def restricted_fields(object_type: ObjectType) -> frozenset[str]:
+    """Mapped fields deliberately excluded from this object's write surface."""
+    return frozenset(FIELD_WRITE_RESTRICTIONS.get(object_type, {}))
+
+
+def field_write_restriction(object_type: ObjectType, field: str) -> str:
+    """Why ``field`` is held closed for ``object_type``, or an empty string."""
+    return FIELD_WRITE_RESTRICTIONS.get(object_type, {}).get(field, "")
 
 
 def required_fields(object_type: ObjectType) -> frozenset[str]:
@@ -344,8 +382,9 @@ def required_fields(object_type: ObjectType) -> frozenset[str]:
     halfway through applying a batch.
     """
     required: set[str] = set()
+    held_closed = restricted_fields(object_type)
     for key, column in _columns(object_type).items():
-        if key in PROTECTED_FIELDS or column.primary_key:
+        if key in PROTECTED_FIELDS or key in held_closed or column.primary_key:
             continue
         if column.nullable or column.default is not None or column.server_default is not None:
             continue

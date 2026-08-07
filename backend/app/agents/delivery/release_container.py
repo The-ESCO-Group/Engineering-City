@@ -236,14 +236,11 @@ def _safe_archive_root(name: str) -> str:
     return safe
 
 
-def _verify_portable_path_uniqueness(
-    directories: tuple[str, ...], files: dict[str, bytes]
-) -> None:
+def _verify_portable_path_uniqueness(directories: tuple[str, ...], files: dict[str, bytes]) -> None:
     seen: dict[str, str] = {}
     for relative in (*directories, *files):
         portable_key = "/".join(
-            unicodedata.normalize("NFC", part).casefold()
-            for part in PurePosixPath(relative).parts
+            unicodedata.normalize("NFC", part).casefold() for part in PurePosixPath(relative).parts
         )
         previous = seen.get(portable_key)
         if previous is not None and previous != relative:
@@ -331,9 +328,7 @@ def _read_tree(
                     ReleaseContainerErrorCode.UNSUPPORTED_ENTRY,
                     f"Release entry {relative} cannot be inspected.",
                 ) from error
-            is_reparse_point = bool(
-                getattr(metadata, "st_file_attributes", 0) & reparse_attribute
-            )
+            is_reparse_point = bool(getattr(metadata, "st_file_attributes", 0) & reparse_attribute)
             if stat.S_ISLNK(metadata.st_mode) or is_reparse_point:
                 raise ReleaseContainerError(
                     ReleaseContainerErrorCode.UNSUPPORTED_ENTRY,
@@ -669,9 +664,7 @@ def _verify_package(
     project_storage_root: Path,
     trust_anchor: ReleaseTrustAnchor,
 ) -> _VerifiedPackage:
-    root, directories, files = _read_tree(
-        package_root, project_storage_root=project_storage_root
-    )
+    root, directories, files = _read_tree(package_root, project_storage_root=project_storage_root)
     trusted_artifacts = _trusted_artifacts(trust_anchor)
     _verify_portable_path_uniqueness(directories, files)
     _verify_directory_layout(directories, files)

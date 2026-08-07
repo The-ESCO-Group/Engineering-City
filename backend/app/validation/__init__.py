@@ -39,16 +39,37 @@ A validator that raises must not stop the run
 ``validator.failed`` naming the validator and the exception, and carries on. A run
 that dies halfway and reports "3 issues" is worse than one that reports its own
 failure: the first looks like a clean result.
+
+An accepted error stays accepted until the thing changes
+--------------------------------------------------------
+A run writes fresh :class:`~app.models.release.ValidationResult` rows every time,
+so "blocks a release until resolved **or** accepted" only holds if a reviewer's
+waiver survives the next run of the validators. It is carried forward on the
+check code and the object the result is about, never on the row id — the row id
+is new every run, which is what made an accepted error come back unwaived and
+park the pipeline for good.
+
+It is carried forward *only while the object has not moved on*. A waiver is
+recorded against a revision, and the revision is what makes that meaningful: a
+decision taken over the model as it stood at revision 7 says nothing about an
+object somebody edited at revision 8, so its waiver is dropped and the error
+returns for a fresh decision. Everything about this fails closed — an object that
+cannot be resolved, a preceding run claiming a revision the project has not
+reached, a second occurrence of a check nobody waived twice — because losing a
+waiver stops a release and inheriting one ships something nobody signed for.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections import deque
 from collections.abc import Sequence
+from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.clock import utcnow
+from app.core.clock import ensure_utc, utcnow
 from app.core.enums import (
     EventType,
     SemanticLocation,
@@ -57,6 +78,7 @@ from app.core.enums import (
     ValidationSeverity,
 )
 from app.core.logging import get_logger
+from app.models.core import EngineeringObjectMixin
 from app.models.project import Project
 from app.models.release import ValidationResult, ValidationRun
 from app.orchestration.events import record_event
@@ -120,6 +142,13 @@ __all__ = [
 #: namespaces on purpose: it is a statement about this software, not about the
 #: customer's engineering.
 VALIDATOR_FAILED_CODE = "validator.failed"
+
+#: What a result is *about*, rather than which row happens to be carrying it:
+#: the check code, the object type, the object id and the label an engineer
+#: follows. Stable across runs, which is the whole requirement — the row id is
+#: not, so a waiver keyed on one would be lost the moment the validators ran
+#: again.
+_ResultIdentity = tuple[str, str, uuid.UUID | None, str]
 
 #: The registry, in the order a run executes it. Ordering is deliberate rather
 #: than incidental: requirements first, because a project whose basis is not
@@ -189,6 +218,14 @@ def run_validation(
     Does not commit. The caller owns the transaction, so the run and its results
     land if and only if the events describing them do.
     """
+    # Validation and reviewer waivers both use the project as their root lock.
+    # This makes "newest completed run for the current revision" stable until
+    # either transaction commits and prevents a reviewer from signing a result
+    # that becomes stale during the decision itself.
+    project = db.execute(
+        select(Project).where(Project.id == project.id).with_for_update()
+    ).scalar_one()
+
     selected = validators_for(disciplines)
     covered = (
         tuple(dict.fromkeys(validator.discipline for validator in selected))
@@ -270,7 +307,13 @@ def run_validation(
                 )
             )
 
-    results = [_persist(db, run=run, project=project, issue=issue) for issue in issues]
+    carried = _carried_waivers(
+        db, project=project, revision_number=revision_number, excluding=run.id
+    )
+    results = [
+        _persist(db, run=run, project=project, issue=issue, waiver=_claim(carried, issue))
+        for issue in issues
+    ]
     db.flush()
 
     counts = dict.fromkeys(ValidationSeverity, 0)
@@ -342,7 +385,12 @@ def run_validation(
 
 
 def _persist(
-    db: Session, *, run: ValidationRun, project: Project, issue: Issue
+    db: Session,
+    *,
+    run: ValidationRun,
+    project: Project,
+    issue: Issue,
+    waiver: _CarriedWaiver | None = None,
 ) -> ValidationResult:
     result = ValidationResult(
         project_id=project.id,
@@ -357,9 +405,155 @@ def _persist(
         object_label=issue.object_label[:MAX_OBJECT_LABEL_CHARS],
         suggested_action=issue.suggested_action,
         requires_human_decision=issue.requires_human_decision,
+        is_waived=waiver is not None,
+        waived_by_id=waiver.waived_by_id if waiver is not None else None,
+        waiver_reason=waiver.reason if waiver is not None else "",
     )
     db.add(result)
     return result
+
+
+@dataclass(frozen=True, slots=True)
+class _CarriedWaiver:
+    """One reviewer's acceptance, ready to re-attach to a freshly written result.
+
+    The name and the reason travel with it. A carried waiver that lost them would
+    say "somebody accepted this", which is the one thing a waiver must never say.
+    """
+
+    waived_by_id: uuid.UUID | None
+    reason: str
+
+
+def _carried_waivers(
+    db: Session, *, project: Project, revision_number: int, excluding: uuid.UUID
+) -> dict[_ResultIdentity, deque[_CarriedWaiver]]:
+    """The waivers from the preceding run that still describe the same object.
+
+    Only the immediately preceding completed run is read, and its
+    ``revision_number`` is the revision every waiver on it is anchored to: a
+    waiver can only be recorded against the newest completed run at the current
+    revision, so anything it carries forward was decided over the model as that
+    run saw it.
+
+    A queue per identity rather than a single entry, because one run can
+    legitimately raise the same check against the same object twice — two
+    unresolved operands on one rung — and a reviewer waived one of them.
+    """
+    recent = list(
+        db.execute(
+            select(ValidationRun)
+            .where(
+                ValidationRun.project_id == project.id,
+                ValidationRun.id != excluding,
+                ValidationRun.status == ValidationRunStatus.COMPLETED,
+                ValidationRun.deleted_at.is_(None),
+            )
+            .order_by(ValidationRun.created_at.desc(), ValidationRun.id.desc())
+            .limit(2)
+        ).scalars()
+    )
+    if not recent or recent[0].revision_number > revision_number:
+        # A run claiming a revision the project has not reached cannot anchor a
+        # decision to one, so nothing is carried and the errors come back.
+        return {}
+    if len(recent) > 1 and ensure_utc(recent[0].created_at) == ensure_utc(recent[1].created_at):
+        # The rule the waiver service already applies: two runs sharing a
+        # recorded creation time leave neither authoritative, so there is no
+        # snapshot a waiver can be said to have been decided over.
+        return {}
+    previous = recent[0]
+
+    carried: dict[_ResultIdentity, deque[_CarriedWaiver]] = {}
+    waived = db.execute(
+        select(ValidationResult)
+        .where(
+            ValidationResult.validation_run_id == previous.id,
+            ValidationResult.is_waived.is_(True),
+        )
+        .order_by(ValidationResult.created_at, ValidationResult.id)
+    ).scalars()
+    for result in waived:
+        if _object_moved_on(
+            db,
+            result=result,
+            waived_revision=previous.revision_number,
+            revision_number=revision_number,
+        ):
+            logger.info(
+                "validation waiver went stale",
+                extra={
+                    "project_id": str(project.id),
+                    "code": result.code,
+                    "object_label": result.object_label,
+                    "waived_revision": previous.revision_number,
+                    "revision_number": revision_number,
+                },
+            )
+            continue
+        carried.setdefault(_result_identity(result), deque()).append(
+            _CarriedWaiver(waived_by_id=result.waived_by_id, reason=result.waiver_reason)
+        )
+    return carried
+
+
+def _claim(
+    carried: dict[_ResultIdentity, deque[_CarriedWaiver]], issue: Issue
+) -> _CarriedWaiver | None:
+    """The waiver covering this issue, consumed so no second issue inherits it."""
+    queue = carried.get(_issue_identity(issue))
+    return queue.popleft() if queue else None
+
+
+def _object_moved_on(
+    db: Session,
+    *,
+    result: ValidationResult,
+    waived_revision: int,
+    revision_number: int,
+) -> bool:
+    """Whether the thing a waiver was about has changed since it was signed."""
+    if result.object_type is None or result.object_id is None:
+        # Nothing narrower than the project was named, so the project is the
+        # subject and reaching a new revision is a change to it.
+        return revision_number > waived_revision
+
+    # Imported at call time, not at module scope: :mod:`app.engineering.gates`
+    # imports this package, so a top-level import here would close the cycle.
+    # ``app.engineering`` is always loaded by the time this runs — it is on the
+    # only import path by which this module can be reached at all — so this is
+    # not a lazy import hiding an optional dependency.
+    from app.engineering.registry import UnknownObjectTypeError, model_for
+
+    try:
+        model = model_for(result.object_type)
+    except UnknownObjectTypeError:
+        # Every object type the validators name today resolves. One that does not
+        # has no revision history to compare, so the waiver cannot be shown to
+        # still hold and the error returns.
+        return True
+    row = db.get(model, result.object_id)
+    if not isinstance(row, EngineeringObjectMixin):
+        return True
+    return row.updated_in_revision > waived_revision
+
+
+def _result_identity(result: ValidationResult) -> _ResultIdentity:
+    return (
+        result.code,
+        result.object_type.value if result.object_type is not None else "",
+        result.object_id,
+        result.object_label,
+    )
+
+
+def _issue_identity(issue: Issue) -> _ResultIdentity:
+    return (
+        issue.code,
+        issue.object_type.value if issue.object_type is not None else "",
+        issue.object_id,
+        issue.object_label[:MAX_OBJECT_LABEL_CHARS],
+    )
 
 
 def _summarise(run: ValidationRun, covered: Sequence[ValidationDiscipline]) -> str:

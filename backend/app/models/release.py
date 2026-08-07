@@ -24,13 +24,13 @@ manifest and the package README all have one place to ask.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint, event, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.clock import utcnow
+from app.core.clock import ensure_utc, utcnow
 from app.core.enums import (
     VALIDATION_LEVEL_ORDER,
     ControllerFamily,
@@ -241,6 +241,26 @@ class ValidationResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     waiver_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     validation_run: Mapped[ValidationRun] = relationship(back_populates="results")
+
+
+@event.listens_for(ValidationResult, "before_update")
+def _advance_validation_result_timestamp(
+    _mapper: Any,
+    _connection: Any,
+    result: ValidationResult,
+) -> None:
+    """Make ``updated_at`` a strict concurrency token, even on coarse clocks.
+
+    ``TimestampMixin`` normally assigns the wall-clock time on update.  Two
+    writes can share that value on hosts whose clock has a coarser resolution
+    than the database column (and the clock can move backwards).  A reviewer
+    could then submit a token for evidence that has changed and have the token
+    compare equal.  Validation results are the review evidence itself, so their
+    timestamp must advance for every ORM update rather than merely reflect the
+    best wall-clock reading available at that instant.
+    """
+    previous = ensure_utc(result.updated_at)
+    result.updated_at = max(utcnow(), previous + timedelta(microseconds=1))
 
 
 class ReleaseCandidate(UUIDPrimaryKeyMixin, EngineeringObjectMixin, TimestampMixin, Base):

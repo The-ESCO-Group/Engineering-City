@@ -8,21 +8,24 @@ the API and the worker, so re-running it must never duplicate or destroy data.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, func, inspect, select, text
+from sqlalchemy import MetaData, Table, create_engine, func, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.agents.base.plugins import PluginRegistry
 from app.core.bootstrap import sync_agent_definitions
 from app.core.config import Settings
-from app.core.enums import AgentKind, RoleName
+from app.core.enums import AgentKind, ChangeSetStatus, RoleName
 from app.core.services import users as user_service
-from app.models import Base
+from app.models import Base, ChangeOperation, ChangeSet, MergeResult, Project
 from app.models.agent import AgentDefinition
 from app.models.user import Role, User
 
@@ -150,6 +153,229 @@ def test_migration_creates_the_same_tables_as_the_orm_metadata(migration_db: Pat
         reference.dispose()
 
     assert migrated == from_metadata
+
+
+@pytest.mark.slow
+def test_proposal_split_migration_preserves_legacy_rows_and_round_trips(
+    migration_db: Path,
+) -> None:
+    """Populated databases keep known facts without fabricating overwritten proposals."""
+    url = _sqlite_url(migration_db)
+    previous = _run_alembic("upgrade", "38af6b21dc04", database_url=url)
+    assert previous.returncode == 0, _diagnose(previous, "alembic upgrade 38af6b21dc04")
+
+    now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
+    engine = create_engine(url)
+    try:
+        with Session(engine) as db:
+            project = Project(name="Legacy proposal migration")
+            db.add(project)
+            db.flush()
+            open_set = ChangeSet(
+                project_id=project.id,
+                base_revision_number=0,
+                title="Validation failed but proposal remains recoverable",
+                status=ChangeSetStatus.VALIDATION_FAILED,
+            )
+            merged_set = ChangeSet(
+                project_id=project.id,
+                base_revision_number=0,
+                merged_revision_number=1,
+                title="Proposal was overwritten by its landed outcome",
+                status=ChangeSetStatus.MERGED,
+            )
+            rehearsed_set = ChangeSet(
+                project_id=project.id,
+                base_revision_number=1,
+                title="Proposal was overwritten by a successful rehearsal",
+                status=ChangeSetStatus.SUBMITTED,
+            )
+            db.add_all((open_set, merged_set, rehearsed_set))
+            db.flush()
+            project_id = project.id
+            change_set_ids = {
+                "open": open_set.id,
+                "merged": merged_set.id,
+                "rehearsed": rehearsed_set.id,
+            }
+            db.commit()
+
+        metadata = MetaData()
+        operations = Table("change_operations", metadata, autoload_with=engine)
+        results = Table("merge_results", metadata, autoload_with=engine)
+        operation_ids = {name: uuid.uuid4() for name in change_set_ids}
+        basis = [{"kind": "template_rule", "template_id": "legacy@1"}]
+
+        def operation_row(
+            name: str, *, after: dict[str, object], applied: bool
+        ) -> dict[str, object]:
+            return {
+                "project_id": str(project_id),
+                "change_set_id": str(change_set_ids[name]),
+                "ordinal": 0,
+                "operation_type": "create_object",
+                "object_type": "tag",
+                "object_id": None,
+                "temp_key": f"legacy-{name}",
+                "based_on_object_revision": None,
+                "field_name": "",
+                "before": json.dumps({}),
+                "after": json.dumps({**after, "$basis": basis}),
+                "related_object_type": None,
+                "related_object_id": None,
+                "relationship_key": "",
+                "description": f"Legacy {name} operation",
+                "applied": applied,
+                "applied_at": now if applied else None,
+                "failure_reason": "",
+                "id": str(operation_ids[name]),
+                "created_at": now,
+                "updated_at": now,
+            }
+
+        def result_row(
+            name: str,
+            *,
+            outcome: str,
+            dry_run: bool,
+            validation_error_count: int = 0,
+        ) -> dict[str, object]:
+            return {
+                "project_id": str(project_id),
+                "change_set_id": str(change_set_ids[name]),
+                "outcome": outcome,
+                "is_dry_run": dry_run,
+                "base_revision_number": 0,
+                "head_revision_number": 0,
+                "resulting_revision_number": None,
+                "operations_applied": 0,
+                "operations_skipped": 1,
+                "conflict_count": 0,
+                "validation_error_count": validation_error_count,
+                "explanation": "Legacy result retained only prose and a count.",
+                "performed_by_id": None,
+                "id": str(uuid.uuid4()),
+                "created_at": now,
+                "updated_at": now,
+            }
+
+        with engine.begin() as connection:
+            connection.execute(
+                operations.insert(),
+                (
+                    operation_row("open", after={"name": "Proposed"}, applied=False),
+                    operation_row("merged", after={"name": "Landed"}, applied=True),
+                    operation_row("rehearsed", after={"name": "Would land"}, applied=False),
+                ),
+            )
+            connection.execute(
+                results.insert(),
+                (
+                    result_row(
+                        "open",
+                        outcome="validation_failed",
+                        dry_run=False,
+                        validation_error_count=2,
+                    ),
+                    result_row("rehearsed", outcome="dry_run_ok", dry_run=True),
+                ),
+            )
+    finally:
+        engine.dispose()
+
+    upgraded = _run_alembic("upgrade", "head", database_url=url)
+    assert upgraded.returncode == 0, _diagnose(upgraded, "alembic upgrade head")
+
+    engine = create_engine(url)
+    try:
+        with Session(engine) as db:
+            migrated = {
+                row.id: row
+                for row in db.execute(
+                    select(ChangeOperation).where(ChangeOperation.project_id == project_id)
+                ).scalars()
+            }
+            assert migrated[operation_ids["open"]].values == {"name": "Proposed"}
+            assert migrated[operation_ids["open"]].basis == basis
+            assert migrated[operation_ids["open"]].after == {}
+
+            # Outcome rows remain truthful. Their exact proposal was already
+            # overwritten in the old schema, so values stays explicitly unknown.
+            assert migrated[operation_ids["merged"]].values == {}
+            assert migrated[operation_ids["merged"]].basis == basis
+            assert migrated[operation_ids["merged"]].after == {"name": "Landed"}
+            assert migrated[operation_ids["rehearsed"]].values == {}
+            assert migrated[operation_ids["rehearsed"]].basis == basis
+            assert migrated[operation_ids["rehearsed"]].after == {"name": "Would land"}
+
+            legacy_results = list(
+                db.execute(
+                    select(MergeResult).where(MergeResult.project_id == project_id)
+                ).scalars()
+            )
+            assert legacy_results
+            assert all(row.validation_errors == [] for row in legacy_results)
+            assert any(row.validation_error_count == 2 for row in legacy_results)
+
+        schema = inspect(engine)
+        operation_columns = {row["name"]: row for row in schema.get_columns("change_operations")}
+        assert operation_columns["values"]["nullable"] is False
+        assert operation_columns["basis"]["nullable"] is False
+        result_columns = {row["name"]: row for row in schema.get_columns("merge_results")}
+        assert result_columns["validation_errors"]["nullable"] is False
+        instruction_columns = {row["name"]: row for row in schema.get_columns("logic_instructions")}
+        assert instruction_columns["branch_id"]["nullable"] is True
+        assert "ix_logic_instructions_branch_id" in {
+            row["name"] for row in schema.get_indexes("logic_instructions")
+        }
+        branch_fks = [
+            row
+            for row in schema.get_foreign_keys("logic_instructions")
+            if row["constrained_columns"] == ["branch_id"]
+        ]
+        assert len(branch_fks) == 1
+        assert branch_fks[0]["referred_table"] == "logic_branches"
+        assert branch_fks[0]["options"].get("ondelete") == "CASCADE"
+    finally:
+        engine.dispose()
+
+    downgraded = _run_alembic("downgrade", "38af6b21dc04", database_url=url)
+    assert downgraded.returncode == 0, _diagnose(downgraded, "alembic downgrade 38af6b21dc04")
+
+    engine = create_engine(url)
+    try:
+        metadata = MetaData()
+        operations = Table("change_operations", metadata, autoload_with=engine)
+        with engine.connect() as connection:
+            restored = {
+                uuid.UUID(str(row.id)): json.loads(row.after)
+                for row in connection.execute(
+                    select(operations.c.id, operations.c.after).where(
+                        operations.c.project_id == str(project_id)
+                    )
+                )
+            }
+        assert restored[operation_ids["open"]] == {
+            "name": "Proposed",
+            "$basis": basis,
+        }
+        assert restored[operation_ids["merged"]] == {
+            "name": "Landed",
+            "$basis": basis,
+        }
+        assert restored[operation_ids["rehearsed"]] == {
+            "name": "Would land",
+            "$basis": basis,
+        }
+        schema = inspect(engine)
+        assert "values" not in {row["name"] for row in schema.get_columns("change_operations")}
+        assert "basis" not in {row["name"] for row in schema.get_columns("change_operations")}
+        assert "validation_errors" not in {
+            row["name"] for row in schema.get_columns("merge_results")
+        }
+        assert "branch_id" not in {row["name"] for row in schema.get_columns("logic_instructions")}
+    finally:
+        engine.dispose()
 
 
 def test_sync_agent_definitions_is_idempotent(db: Session) -> None:

@@ -9,12 +9,17 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from app.api.schemas.common import ApiModel
-from app.core.enums import ApprovalKind, ApprovalStatus
+from app.core.enums import ApprovalDecision, ApprovalGateKey, ApprovalKind, ApprovalStatus
 
 
 class ApprovalRead(ApiModel):
     id: uuid.UUID
     project_id: uuid.UUID
+    gate_id: uuid.UUID | None = None
+    gate_key: ApprovalGateKey | None = None
+    revision_number: int | None = None
+    release_candidate_id: uuid.UUID | None = None
+    decision: ApprovalDecision | None = None
     task_id: uuid.UUID | None = None
     finding_id: uuid.UUID | None = None
     recommendation_id: uuid.UUID | None = None
@@ -49,3 +54,10 @@ class ApprovalDecisionRequest(ApiModel):
 
     approved: bool
     notes: Annotated[str, Field(max_length=4000)] = ""
+
+
+class ApprovalGateDecisionRequest(ApiModel):
+    """An explicit decision on one of the six production workflow gates."""
+
+    decision: ApprovalDecision
+    comment: Annotated[str, Field(max_length=4000)] = ""

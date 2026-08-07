@@ -199,6 +199,11 @@ class DestructiveWrite:
     """
 
     tag_name: str
+    #: Operand exactly as written.  ``resolved_name`` is deliberately the base
+    #: declaration (``Buffer`` for ``Buffer[5]``), which is right for output
+    #: coverage but not enough to distinguish two array elements.  Duplicate
+    #: and range checks therefore use this lossless spelling.
+    operand_text: str
     mnemonic: str
     rung_id: uuid.UUID
     rung_label: str
@@ -556,6 +561,7 @@ class ValidationContext:
                 writes.append(
                     DestructiveWrite(
                         tag_name=name,
+                        operand_text=operand.text.strip() or name,
                         mnemonic=instruction.mnemonic.upper(),
                         rung_id=instruction.rung_id,
                         rung_label=self.rung_label(instruction.rung_id),

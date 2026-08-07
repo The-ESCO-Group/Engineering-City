@@ -194,6 +194,13 @@ class ChangeOperation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     complete description of the edit — enough to render a diff, enough to undo,
     and enough to explain to a reviewer what will happen *before* it happens,
     which is what makes a merge dry-run meaningful rather than reassuring.
+
+    The proposal is kept apart from the outcome. ``values`` and ``basis`` are
+    what the agent asked for and why; ``before`` and ``after`` are what the merge
+    found and what it wrote. They used to share ``after``, which meant a merged
+    operation could no longer answer "what was proposed" — the merge had
+    overwritten it with what landed. Those are the same thing exactly when
+    nothing went wrong, and the audit trail exists for the times something did.
     """
 
     __tablename__ = "change_operations"
@@ -227,6 +234,21 @@ class ChangeOperation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #: Set for UPDATE_FIELD; empty for whole-object operations.
     field_name: Mapped[str] = mapped_column(String(80), default="", nullable=False)
 
+    #: The field values the agent proposed, exactly as proposed. Written once,
+    #: at build time, and never touched again — a merge that coerces, rejects or
+    #: partially applies them leaves this untouched so the proposal stays
+    #: readable next to what became of it.
+    values: Mapped[dict[str, Any]] = mapped_column(JSONDict, default=dict, nullable=False)
+    #: Why the operation should happen: requirement, template rule, human
+    #: decision or cited document, each as one entry. The merge resolves these
+    #: into :class:`~app.models.core.ObjectEvidenceLink` rows; keeping the
+    #: stated form here means an operation that was refused still says what it
+    #: claimed, which is what a reviewer needs in order to disagree with it.
+    basis: Mapped[list[Any]] = mapped_column(JSONList, default=list, nullable=False)
+
+    #: The object's state before this operation, and after it. Both are the
+    #: merge's account of what happened, written when the operation is applied
+    #: or rehearsed, and empty until then.
     before: Mapped[dict[str, Any]] = mapped_column(JSONDict, default=dict, nullable=False)
     after: Mapped[dict[str, Any]] = mapped_column(JSONDict, default=dict, nullable=False)
 
@@ -279,6 +301,15 @@ class MergeResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     #: Written for a human: what this merge did, or precisely why it did not.
     explanation: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    #: One entry per validation error, each naming the operation ordinal, the
+    #: object and the field. The same errors are rendered into ``explanation``
+    #: for a reader; they are here as well because prose cannot be grouped or
+    #: counted, and "which change sets failed validation, and on what" is a
+    #: question the platform has to answer over the whole project rather than
+    #: one merge at a time. Conflicts are rows of their own — see
+    #: :class:`MergeConflict` — because each carries two competing values a
+    #: reviewer has to choose between; a validation error has no such choice.
+    validation_errors: Mapped[list[Any]] = mapped_column(JSONList, default=list, nullable=False)
     performed_by_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

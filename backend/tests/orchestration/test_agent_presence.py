@@ -64,8 +64,7 @@ def test_start_run_provisions_named_roster_assignments_and_presence_events(
 
     instance_by_kind = {instance.kind: instance for instance in instances}
     assert all(
-        task.agent_instance_id == instance_by_kind[task.agent_kind].id
-        for task in agent_tasks
+        task.agent_instance_id == instance_by_kind[task.agent_kind].id for task in agent_tasks
     )
 
     # Re-provisioning a role retains its durable identity rather than spawning a
@@ -75,29 +74,21 @@ def test_start_run_provisions_named_roster_assignments_and_presence_events(
 
     events = list(
         db.execute(
-            select(Event)
-            .where(Event.project_id == ingested_project.id)
-            .order_by(Event.seq)
+            select(Event).where(Event.project_id == ingested_project.id).order_by(Event.seq)
         ).scalars()
     )
     announced_status_ids = {
-        event.agent_id
-        for event in events
-        if event.event_type is EventType.AGENT_STATUS_CHANGED
+        event.agent_id for event in events if event.event_type is EventType.AGENT_STATUS_CHANGED
     }
     announced_location_ids = {
-        event.agent_id
-        for event in events
-        if event.event_type is EventType.AGENT_LOCATION_CHANGED
+        event.agent_id for event in events if event.event_type is EventType.AGENT_LOCATION_CHANGED
     }
     roster_ids = {instance.id for instance in instances}
     assert announced_status_ids == roster_ids
     assert announced_location_ids == roster_ids
 
     created_by_task = {
-        event.task_id: event
-        for event in events
-        if event.event_type is EventType.TASK_CREATED
+        event.task_id: event for event in events if event.event_type is EventType.TASK_CREATED
     }
     assert all(created_by_task[task.id].agent_id == task.agent_instance_id for task in agent_tasks)
 

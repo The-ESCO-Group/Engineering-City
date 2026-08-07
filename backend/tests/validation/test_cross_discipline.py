@@ -302,51 +302,109 @@ def test_a_tested_interlock_does_not_fire(db: Session, project: Project) -> None
 # Approval integrity
 # ---------------------------------------------------------------------------
 MODIFIED = "cross.approved_object_modified"
+UNRECORDED = "cross.approval_revision_unrecorded"
 
 
 def test_an_approved_object_edited_afterwards_is_an_error(db: Session, project: Project) -> None:
-    now = utcnow()
+    """The teeth of the check: an edit past the approved revision is caught."""
     make_tag(
         db,
         project,
         "Motor_Run_Cmd",
         approval_state=ObjectApprovalState.APPROVED,
-        approved_at=now - timedelta(hours=2),
-        updated_at=now,
+        approved_at=utcnow(),
+        approved_object_revision=4,
+        object_revision=5,
     )
 
     issue = only(run_check(ApprovalIntegrityValidator(), db, project), MODIFIED)
 
     assert issue.severity is ValidationSeverity.ERROR
     assert issue.object_type is ObjectType.TAG
+    assert issue.detail["approved_object_revision"] == 4
+    assert issue.detail["object_revision"] == 5
 
 
 def test_an_untouched_approved_object_does_not_fire(db: Session, project: Project) -> None:
+    make_tag(
+        db,
+        project,
+        "Motor_Run_Cmd",
+        approval_state=ObjectApprovalState.APPROVED,
+        approved_at=utcnow(),
+        approved_object_revision=4,
+        object_revision=4,
+    )
+
+    assert MODIFIED not in codes(run_check(ApprovalIntegrityValidator(), db, project))
+
+
+def test_the_clock_does_not_decide_whether_an_approval_is_stale(
+    db: Session, project: Project
+) -> None:
+    """The regression that made accepting a requirement invalidate its own approval.
+
+    Recording an approval is an update, so ``approved_at`` and ``updated_at`` are
+    two reads of one clock in a single flush and either may land first. Here the
+    row is written the way that flush leaves it — approved *before* it was last
+    written, by two hours to make the point — and the revisions agree, so nothing
+    was edited and nothing may be reported.
+    """
     now = utcnow()
     make_tag(
         db,
         project,
         "Motor_Run_Cmd",
         approval_state=ObjectApprovalState.APPROVED,
-        approved_at=now,
-        updated_at=now - timedelta(hours=2),
+        approved_at=now - timedelta(hours=2),
+        updated_at=now,
+        approved_object_revision=2,
+        object_revision=2,
     )
 
     assert MODIFIED not in codes(run_check(ApprovalIntegrityValidator(), db, project))
 
 
+def test_an_approval_that_did_not_record_its_revision_is_declared_unchecked(
+    db: Session, project: Project
+) -> None:
+    """Reported as uncheckable, not as an edit nobody has shown.
+
+    An approval written before this was recorded — or by something that forgot —
+    leaves no baseline to compare against. Passing it silently would drop the
+    object out of the only check protecting a signature; calling it modified
+    would be a claim the evidence does not support.
+    """
+    make_tag(
+        db,
+        project,
+        "Motor_Run_Cmd",
+        approval_state=ObjectApprovalState.APPROVED,
+        approved_at=utcnow(),
+        approved_object_revision=None,
+        object_revision=3,
+    )
+
+    issue = only(run_check(ApprovalIntegrityValidator(), db, project), UNRECORDED)
+
+    assert issue.severity is ValidationSeverity.UNSUPPORTED
+    assert MODIFIED not in codes(run_check(ApprovalIntegrityValidator(), db, project))
+
+
 def test_a_draft_object_is_not_subject_to_the_check(db: Session, project: Project) -> None:
-    now = utcnow()
     make_tag(
         db,
         project,
         "Motor_Run_Cmd",
         approval_state=ObjectApprovalState.DRAFT,
-        approved_at=now - timedelta(hours=2),
-        updated_at=now,
+        approved_at=utcnow() - timedelta(hours=2),
+        updated_at=utcnow(),
+        object_revision=5,
     )
 
-    assert MODIFIED not in codes(run_check(ApprovalIntegrityValidator(), db, project))
+    found = codes(run_check(ApprovalIntegrityValidator(), db, project))
+    assert MODIFIED not in found
+    assert UNRECORDED not in found
 
 
 # ---------------------------------------------------------------------------

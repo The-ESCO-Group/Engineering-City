@@ -8,8 +8,16 @@ cites nothing, it cannot accept its own inference, and it cannot design the
 system it is describing.
 
 Runs entirely offline against a fixed provider — no network, no model, no cost.
-The MockProvider is deliberately not used: it derives its answer from the
-evidence graph, so it cannot be made to propose the thing that has to be refused.
+For the refusals the MockProvider is deliberately not used: it derives its answer
+from the evidence graph, so it cannot be made to propose the thing that has to be
+refused.
+
+The last section is the exception, and it is about the provider rather than the
+agent. Two of that provider's rules read the context and decide what to say about
+it — which schedule rows become requirements, and which narrative passage becomes
+a question — and both are judged on what they *do not* produce. A rule that asks
+about a sentence nobody was unsure of wastes the attention this product exists to
+protect, so the negative cases are the ones asserted.
 """
 
 from __future__ import annotations
@@ -29,6 +37,7 @@ from app.agents.base.actions import (
 )
 from app.agents.base.agent import AgentContext
 from app.agents.base.provider import ChatMessage, ProviderResponse
+from app.agents.base.providers.mock import MockProvider
 from app.agents.base.runner import AgentRunner, RunOutcome
 from app.agents.review.requirements_planning import (
     ALLOWED_OBJECT_TYPES,
@@ -344,9 +353,7 @@ def test_an_accepted_clarification_is_persisted_once_for_a_human_to_answer(
     assert question.asked_by_agent == "requirements_planning"
     assert question.raised_in_task_id == task.id
     assert question.blocks_task_kinds == [TaskKind.GENERATE_LOGIC.value]
-    assert question.attributes["competing_readings"] == action["payload"][
-        "competing_readings"
-    ]
+    assert question.attributes["competing_readings"] == action["payload"]["competing_readings"]
     assert first.execution.questions[0].id == question.id
     assert second.execution.questions[0].id == question.id
     assert all(
@@ -707,3 +714,216 @@ def test_the_context_states_the_revision_a_proposal_must_be_written_against(
     context = agent.build_context(_context(db, described_project, settings))
 
     assert context["base_revision_number"] == described_project.current_revision_number
+
+
+# ---------------------------------------------------------------------------
+# What the deterministic provider says about this agent's context
+# ---------------------------------------------------------------------------
+# One interlock schedule row as the evidence graph serialises it. Both `scope`
+# and `is_current` are present because the point of these tests is that this
+# consumer keys off the first and not the second.
+def _row(**values: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "identifier": "ILK-901",
+        "description": "Guard door open",
+        "trip_tag": "GD901_CLOSED",
+        "trip_condition": "GD901_CLOSED = 0",
+        "action": "Drop the line permissive",
+        "failsafe": "De-energise to trip",
+        "scope_text": "Existing",
+        "scope": "existing",
+        "is_current": True,
+        "from_hidden_sheet": False,
+        "is_specified": True,
+        "missing_fields": [],
+        "sources": [{"anchor_key": "row:901"}],
+    }
+    row.update(values)
+    return row
+
+
+def _statement(index: int, section: str, text: str) -> dict[str, Any]:
+    return {
+        "anchor_key": f"paragraph:{index}",
+        "anchor_id": f"anchor-{index}",
+        "section": section,
+        "text": text,
+    }
+
+
+def _provider_operations(
+    *, rows: list[dict[str, Any]] | None = None, documents: list[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
+    """The change-set operations the deterministic provider proposes for a context."""
+    anchors = {"row:901": "anchor-row-901"}
+    context = {
+        "agent_kind": "requirements_planning",
+        "base_revision_number": 0,
+        "anchor_index": anchors,
+        "documents": documents or [],
+        "graph": {"documented_interlocks": rows or []},
+        "existing": {},
+    }
+    response = MockProvider().complete_structured(
+        system="",
+        messages=[ChatMessage(role="user", content=json.dumps(context))],
+        schema={},
+    )
+    return [
+        operation
+        for action in response.data["actions"]
+        if action["action_type"] == ActionType.PROPOSE_CHANGESET.value
+        for operation in action["payload"]["operations"]
+    ]
+
+
+def _clarifications(operations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        operation
+        for operation in operations
+        if operation["object_type"] == ObjectType.CLARIFICATION.value
+    ]
+
+
+# A functional description recording that a passage of the customer's brief is
+# still open, and the brief it names. Modelled on the Line 4 fixture, which is the
+# shape a real document set arrives in: the notice lives in the companion
+# document, and it says which document and which section it is about.
+def _deferring_pair(
+    notice: str = (
+        "The release behaviour requested in section 3 of the project description has "
+        "not been settled. It is not specified here and no logic has been written for it."
+    ),
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "filename": "Project_Description.docx",
+            "statements": [
+                _statement(11, "Brief / 3. Scope of work", "3. Scope of work"),
+                _statement(
+                    12,
+                    "Brief / 3. Scope of work",
+                    "We want the accumulation zone to do the work the operators do by hand.",
+                ),
+                _statement(
+                    13,
+                    "Brief / 3. Scope of work",
+                    "When the palletiser calls for product, CV402 shall release the "
+                    "accumulated cases to the discharge.",
+                ),
+                _statement(
+                    14,
+                    "Brief / 4. Control system",
+                    "Keep the existing controller and the existing I/O.",
+                ),
+            ],
+        },
+        {
+            "filename": "Functional_Description.docx",
+            "statements": [_statement(30, "FDS / 8. To be confirmed", notice)],
+        },
+    ]
+
+
+def test_a_passage_a_companion_document_records_as_unsettled_becomes_a_question() -> None:
+    """The signal is the document set's own words, not a reading of the sentence.
+
+    One document says the passage is not settled and names where it was asked for.
+    That is a fact about the documents, so restating it is the same act as
+    restating a schedule row — and it is the only narrative rule this provider has.
+    """
+    raised = _clarifications(_provider_operations(documents=_deferring_pair()))
+
+    assert len(raised) == 1
+    question = raised[0]["values"]["question"]
+    assert "release the accumulated cases" in question, question
+    assert "8. To be confirmed" in question, question
+    assert raised[0]["values"]["blocks_generation"] is True
+    cited = {str(item["anchor_id"]) for item in raised[0]["basis"]}
+    assert cited == {"anchor-13", "anchor-30"}, "the question cites the passage and the notice"
+
+
+def test_the_question_says_the_problem_is_missing_information_not_two_readings() -> None:
+    """Naming one reading is worse than naming none, and inventing two is worse still.
+
+    ``RequestClarificationPayload`` refuses a single competing reading for that
+    reason. Neither document here writes the alternatives down, so the honest
+    answer is that the information is missing — a rule that composed the two
+    readings would be inventing the requirement it is asking about.
+    """
+    raised = _clarifications(_provider_operations(documents=_deferring_pair()))
+
+    ambiguity = raised[0]["values"]["ambiguity"]
+    assert "missing information rather than a stated ambiguity" in ambiguity, ambiguity
+    assert "has not been settled" in ambiguity, "the notice is quoted, not paraphrased"
+
+
+@pytest.mark.parametrize(
+    ("notice", "why"),
+    [
+        (
+            "The release behaviour has not been settled.",
+            "no cross-reference, so no passage can be quoted",
+        ),
+        (
+            "The release behaviour requested in section 3 of the project description is "
+            "implemented as described.",
+            "a cross-reference with nothing deferred is an ordinary citation",
+        ),
+        (
+            "The reset behaviour requested in section 3 of the project description has "
+            "not been settled.",
+            "the notice's subject names nothing in the cited section",
+        ),
+        (
+            "The extension of CYL401 has to be confirmed within 1.5 s of the solenoid "
+            "energising, as section 3 of the project description requires.",
+            "an obligation on the plant is a requirement, not an open decision",
+        ),
+        (
+            "The release behaviour requested in section 9 of the project description has "
+            "not been settled.",
+            "the cited section does not exist in the document named",
+        ),
+    ],
+)
+def test_a_passage_is_only_questioned_when_every_condition_holds(notice: str, why: str) -> None:
+    """Each condition removed on its own, and the rule must fall silent.
+
+    This is the list the rule's honesty rests on. A deferral phrase alone is prose
+    about anything; a cross-reference alone is a citation; a shared word alone is a
+    coincidence of vocabulary. Firing on any one of them would put a question
+    against a sentence that was perfectly clear.
+    """
+    assert _clarifications(_provider_operations(documents=_deferring_pair(notice))) == [], why
+
+
+def test_a_row_the_upgrade_adds_is_still_transcribed_as_a_requirement() -> None:
+    """Scope decides what the row can be *compared* against, not whether it is asked for.
+
+    ``is_current`` is false for a row this upgrade adds, because an export of the
+    controller as it runs today is not supposed to implement it. Reusing that as
+    the filter here dropped the interlocks the job was raised to build out of the
+    requirements model entirely.
+    """
+    operations = _provider_operations(
+        rows=[
+            _row(
+                identifier="ILK-905", scope_text="New (this upgrade)", scope="new", is_current=False
+            )
+        ]
+    )
+
+    assert [operation["values"]["reference"] for operation in operations] == ["REQ-ILK-905"]
+    assert "New (this upgrade)" in operations[0]["values"]["source_text"], (
+        "an engineer accepting the requirement cannot tell existing from new without it"
+    )
+
+
+def test_a_row_from_a_hidden_worksheet_is_not_transcribed() -> None:
+    """Superseded or working content, and an engineer opening the workbook cannot see it.
+
+    Recording it as a requirement would put something nobody asked for in front of
+    a reviewer with a citation that looks as good as any other.
+    """
+    assert _provider_operations(rows=[_row(from_hidden_sheet=True, is_current=False)]) == []

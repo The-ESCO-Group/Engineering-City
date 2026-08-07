@@ -381,7 +381,18 @@ def _unblock_clarification_tasks(
     question: ProjectQuestion | None = None,
 ) -> int:
     queue = DatabaseTaskQueue(db, settings)
-    kinds = {TaskKind.RESOLVE_CLARIFICATIONS}
+    # A question can be raised by a design task that still produced a valid
+    # partial change set and therefore completed.  In that shape the next
+    # validation (or a gate evaluating its latest snapshot) is what parks.  If
+    # resolving the question only requeued the original task, the stale
+    # validation result stranded the run even though its stated blocker was
+    # gone.  These two tasks are deterministic re-evaluations and are safe to
+    # return to the queue after any clarification decision.
+    kinds = {
+        TaskKind.RESOLVE_CLARIFICATIONS,
+        TaskKind.VALIDATE_CROSS_DISCIPLINE,
+        TaskKind.EVALUATE_APPROVAL_GATE,
+    }
     task_ids: set[uuid.UUID] = set()
     if question is not None:
         if question.raised_in_task_id is not None:

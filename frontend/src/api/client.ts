@@ -5,12 +5,15 @@ import type {
   AgentRunDetail,
   AgentRunRead,
   ApprovalRead,
+  ApprovalDecision,
   ApiErrorBody,
   CapabilityStatus,
   ClarificationInbox,
   ClarificationResolutionRead,
   CurrentUserResponse,
   EventEnvelope,
+  ExternalAgentDeployRequest,
+  ExternalAgentDeployResponse,
   FindingDetail,
   FindingRead,
   HealthResponse,
@@ -31,6 +34,8 @@ import type {
   TaskRead,
   UploadResponse,
   UploadedFileRead,
+  ValidationResultRead,
+  ValidationWaiverRead,
   WorkflowStateResponse
 } from "./types";
 import { isTauri } from "@tauri-apps/api/core";
@@ -59,6 +64,10 @@ function serverBaseUrl(): URL {
   const api = new URL(API_BASE, window.location.origin);
   api.pathname = api.pathname.replace(/\/api\/?$/, "/");
   return api;
+}
+
+export function apiServerBaseUrl(): string {
+  return serverBaseUrl().toString().replace(/\/$/, "");
 }
 
 export class ApiError extends Error {
@@ -283,6 +292,11 @@ export const engineeringApi = {
   events: replayProjectEvents,
   agentDefinitions: () => request<AgentDefinitionRead[]>("/agents"),
   agents: (projectId: string) => request<AgentInstanceRead[]>(`/projects/${projectId}/agents`),
+  deployExternalAgent: (projectId: string, payload: ExternalAgentDeployRequest) =>
+    request<ExternalAgentDeployResponse>(`/projects/${projectId}/external-agents`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
   agentRuns: (projectId: string) =>
     request<AgentRunRead[]>(`/projects/${projectId}/agent-runs?limit=200`),
   agentRun: (runId: string) => request<AgentRunDetail>(`/agent-runs/${runId}`),
@@ -296,6 +310,31 @@ export const engineeringApi = {
     request<ApprovalRead>(`/approvals/${approvalId}/decision`, {
       method: "POST",
       body: JSON.stringify({ approved, notes })
+    }),
+  decideApprovalGate: (
+    gateId: string,
+    approvalId: string,
+    decision: ApprovalDecision,
+    comment: string
+  ) =>
+    request<ApprovalRead>(`/approval-gates/${gateId}/approvals/${approvalId}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ decision, comment })
+    }),
+  validationResults: (projectId: string) =>
+    request<ValidationResultRead[]>(`/projects/${projectId}/validation-results`),
+  waiveValidationResult: (
+    resultId: string,
+    reason: string,
+    expectedUpdatedAt: string
+  ) =>
+    request<ValidationWaiverRead>(`/validation-results/${resultId}/waiver`, {
+      method: "POST",
+      body: JSON.stringify({
+        confirm: true,
+        reason,
+        expected_updated_at: expectedUpdatedAt
+      })
     }),
   reports: (projectId: string) => request<ReportRead[]>(`/projects/${projectId}/reports`),
   releaseReadiness: (projectId: string) =>

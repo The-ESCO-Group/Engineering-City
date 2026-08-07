@@ -406,6 +406,26 @@ class ChangeSetReviewedEventPayload(ApiModel):
     adjusted_confidence: float | None = None
 
 
+class ChangeSetAbandonedEventPayload(ApiModel):
+    """A change set closed without ever being merged, and why.
+
+    Not a verdict. A reviewer turning work down is
+    :class:`ChangeSetReviewedEventPayload`; this is the author, the orchestrator
+    or an engineer deciding the proposal will not be carried any further —
+    superseded by a later template, overtaken by a clarification, abandoned
+    because the task that raised it was cancelled. A client answering "what
+    became of this proposal" needs to tell those apart, which is why ``reason``
+    is required rather than an optional note: a change set that disappears
+    without one is indistinguishable from a bug.
+    """
+
+    changeset_id: uuid.UUID
+    title: Annotated[str, Field(max_length=300)]
+    status: ChangeSetStatus
+    #: One sentence an engineer can act on. Never empty.
+    reason: Annotated[str, Field(min_length=1, max_length=2000)]
+
+
 class ChangeSetMergedEventPayload(ApiModel):
     """A change set applied to the canonical model in one transaction.
 
@@ -688,6 +708,7 @@ EVENT_PAYLOAD_MODELS: dict[EventType, type[ApiModel]] = {
     EventType.CHANGESET_VALIDATION_FAILED: ChangeSetValidationFailedEventPayload,
     EventType.CHANGESET_SUBMITTED: ChangeSetEventPayload,
     EventType.CHANGESET_REVIEWED: ChangeSetReviewedEventPayload,
+    EventType.CHANGESET_ABANDONED: ChangeSetAbandonedEventPayload,
     EventType.CHANGESET_MERGED: ChangeSetMergedEventPayload,
     EventType.REVISION_CREATED: RevisionCreatedEventPayload,
     EventType.GATE_STATUS_CHANGED: GateStatusChangedEventPayload,

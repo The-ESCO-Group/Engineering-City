@@ -30,8 +30,11 @@ coverage.xml
 
 # --- Backend: local runtime data (never commit project artifacts) ---
 /data/
+/backups/
 *.sqlite3
 *.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
 *.db
 
 # --- Secrets: allow only the checked-in example ---

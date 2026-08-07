@@ -932,3 +932,30 @@
 .eng-load-more:hover,
 .eng-load-more:focus-visible { background: rgb(17 55 68 / 96%); }
 .eng-load-more span { margin-left: 8px; color: var(--eng-muted); font-size: 9px; font-weight: 500; }
+
+.eng-validation-panel { margin: 16px 0; padding: 16px; border: 1px solid rgb(44 220 232 / 20%); border-radius: 8px; background: rgb(4 24 32 / 58%); }
+.eng-validation-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.eng-validation-panel > header h3 { margin: 2px 0 4px; }
+.eng-validation-panel > header p { margin: 0; color: var(--eng-muted); }
+.eng-validation-panel > header > span { padding: 8px 10px; border-radius: 6px; white-space: nowrap; background: rgb(63 217 148 / 8%); color: var(--eng-green); }
+.eng-validation-panel > header > span.attention { background: rgb(255 156 64 / 10%); color: var(--eng-warning); }
+.eng-validation-state { display: flex; align-items: center; gap: 8px; margin: 14px 0 0; color: var(--eng-muted); }
+.eng-validation-state svg, .eng-waiver-record svg, .eng-waiver-form h4 svg { width: 17px; height: 17px; flex: 0 0 auto; }
+.eng-validation-state.error { color: var(--eng-danger); }
+.eng-validation-results { display: grid; gap: 8px; margin-top: 14px; max-height: 360px; overflow: auto; }
+.eng-validation-result { padding: 12px; border: 1px solid rgb(120 164 180 / 16%); border-left: 3px solid var(--eng-muted); border-radius: 6px; background: rgb(1 15 22 / 56%); }
+.eng-validation-result.error { border-left-color: var(--eng-danger); }
+.eng-validation-result.human_review_required { border-left-color: var(--eng-warning); }
+.eng-validation-result.waived { opacity: .78; border-left-color: var(--eng-green); }
+.eng-validation-result > div:first-child { display: flex; align-items: center; gap: 9px; }
+.eng-validation-result > div:first-child small { margin-left: auto; color: var(--eng-muted); }
+.eng-validation-result h4 { margin: 8px 0 4px; }
+.eng-validation-result > p { margin: 0 0 8px; color: var(--eng-muted); }
+.eng-validation-result > button { padding: 7px 10px; }
+.eng-waiver-record { display: flex; align-items: center; gap: 6px; color: var(--eng-green) !important; }
+.eng-waiver-form { margin-top: 12px; padding: 14px; border: 1px solid rgb(255 94 94 / 32%); border-radius: 6px; background: rgb(54 12 18 / 22%); }
+.eng-waiver-form h4 { display: flex; align-items: center; gap: 7px; margin: 0 0 4px; }
+.eng-waiver-form > p { margin: 0 0 12px; color: var(--eng-muted); }
+.eng-waiver-form textarea { width: 100%; margin: 6px 0 10px; }
+.eng-waiver-confirm { display: flex; align-items: flex-start; gap: 8px; }
+.eng-waiver-form > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }

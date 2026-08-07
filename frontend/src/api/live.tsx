@@ -44,6 +44,7 @@ import type {
   RequirementRead,
   TaskRead,
   UploadedFileRead,
+  ValidationResultRead,
   WebSocketHello,
   WorkflowStateResponse
 } from "./types";
@@ -226,37 +227,74 @@ function readEventHistory(projectId: string): EventEnvelope[] {
   }
 }
 
+type EngineeringQueryKey = readonly unknown[];
+
+function releaseQueryKeys(projectId: string): EngineeringQueryKey[] {
+  return [
+    ["engineering", projectId, "validation-results"],
+    ["engineering", projectId, "release-readiness"],
+    ["engineering", projectId, "release-candidates"],
+    ["engineering", projectId, "release-artifacts"]
+  ];
+}
+
+function decisionDownstreamQueryKeys(projectId: string): EngineeringQueryKey[] {
+  return [
+    ["engineering", projectId, "approvals"],
+    ["engineering", projectId, "tasks"],
+    ["engineering", projectId, "workflow"],
+    ["engineering", projectId, "project"],
+    ["engineering", "projects"],
+    ...releaseQueryKeys(projectId)
+  ];
+}
+
+export function invalidationKeysForEvent(
+  event: EventEnvelope,
+  projectId: string
+): EngineeringQueryKey[] {
+  const prefix = event.event_type.split(".")[0];
+  if (prefix === "agent") {
+    return [
+      ["engineering", projectId, "agents"],
+      ["engineering", projectId, "agent-runs"],
+      ["engineering", projectId, "messages"]
+    ];
+  }
+  if (prefix === "finding") {
+    const keys: EngineeringQueryKey[] = [["engineering", projectId, "findings"]];
+    const findingId = event.payload.finding_id;
+    if (typeof findingId === "string") keys.push(["engineering", "finding", findingId]);
+    return keys;
+  }
+  if (prefix === "approval") {
+    return [
+      ...decisionDownstreamQueryKeys(projectId),
+      ["engineering", projectId, "findings"]
+    ];
+  }
+  if (prefix === "gate") return decisionDownstreamQueryKeys(projectId);
+  if (prefix === "report") return [["engineering", projectId, "reports"]];
+  if (["release", "export", "validation"].includes(prefix)) {
+    return releaseQueryKeys(projectId);
+  }
+  if (prefix === "task" || prefix === "workflow") {
+    return [
+      ["engineering", projectId, "tasks"],
+      ["engineering", projectId, "agent-runs"],
+      ["engineering", projectId, "workflow"],
+      ["engineering", projectId, "project"]
+    ];
+  }
+  return [["engineering", projectId, "project"]];
+}
+
 function invalidateForEvent(
   event: EventEnvelope,
   projectId: string,
   invalidate: (key: readonly unknown[]) => void
 ) {
-  const prefix = event.event_type.split(".")[0];
-  if (prefix === "agent") {
-    invalidate(["engineering", projectId, "agents"]);
-    invalidate(["engineering", projectId, "agent-runs"]);
-    invalidate(["engineering", projectId, "messages"]);
-  } else if (prefix === "finding") {
-    invalidate(["engineering", projectId, "findings"]);
-    const findingId = event.payload.finding_id;
-    if (typeof findingId === "string") invalidate(["engineering", "finding", findingId]);
-  } else if (prefix === "approval") {
-    invalidate(["engineering", projectId, "approvals"]);
-    invalidate(["engineering", projectId, "findings"]);
-  } else if (prefix === "report") {
-    invalidate(["engineering", projectId, "reports"]);
-  } else if (["release", "export", "validation", "gate"].includes(prefix)) {
-    invalidate(["engineering", projectId, "release-readiness"]);
-    invalidate(["engineering", projectId, "release-candidates"]);
-    invalidate(["engineering", projectId, "release-artifacts"]);
-  } else if (prefix === "task" || prefix === "workflow") {
-    invalidate(["engineering", projectId, "tasks"]);
-    invalidate(["engineering", projectId, "agent-runs"]);
-    invalidate(["engineering", projectId, "workflow"]);
-    invalidate(["engineering", projectId, "project"]);
-  } else {
-    invalidate(["engineering", projectId, "project"]);
-  }
+  invalidationKeysForEvent(event, projectId).forEach(invalidate);
 }
 
 export function EngineeringDataProvider({ children }: { children: ReactNode }) {
@@ -697,6 +735,51 @@ export function useApprovalDecision(projectId: string | null) {
         void queryClient.invalidateQueries({ queryKey: ["engineering", projectId, "approvals"] });
         void queryClient.invalidateQueries({ queryKey: ["engineering", projectId, "findings"] });
       }
+    }
+  });
+}
+
+export function useValidationResults(projectId: string | null, enabled: boolean) {
+  return useQuery<ValidationResultRead[]>({
+    queryKey: ["engineering", projectId, "validation-results"],
+    queryFn: () => engineeringApi.validationResults(projectId!),
+    enabled: enabled && Boolean(projectId),
+    retry: false
+  });
+}
+
+export function useValidationWaiver(projectId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      resultId,
+      reason,
+      expectedUpdatedAt
+    }: {
+      resultId: string;
+      reason: string;
+      expectedUpdatedAt: string;
+    }) => engineeringApi.waiveValidationResult(resultId, reason, expectedUpdatedAt),
+    onError: async () => {
+      if (!projectId) return;
+      await queryClient.refetchQueries({
+        queryKey: ["engineering", projectId, "validation-results"],
+        type: "all"
+      });
+    },
+    onSuccess: async () => {
+      if (!projectId) return;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["engineering", projectId, "validation-results"] }),
+        queryClient.invalidateQueries({ queryKey: ["engineering", projectId, "approvals"] }),
+        queryClient.invalidateQueries({ queryKey: ["engineering", projectId, "tasks"] }),
+        queryClient.invalidateQueries({ queryKey: ["engineering", projectId, "workflow"] }),
+        queryClient.invalidateQueries({ queryKey: ["engineering", projectId, "project"] }),
+        queryClient.invalidateQueries({ queryKey: ["engineering", "projects"] }),
+        queryClient.invalidateQueries({ queryKey: ["engineering", projectId, "release-readiness"] }),
+        queryClient.invalidateQueries({ queryKey: ["engineering", projectId, "release-candidates"] }),
+        queryClient.invalidateQueries({ queryKey: ["engineering", projectId, "release-artifacts"] })
+      ]);
     }
   });
 }

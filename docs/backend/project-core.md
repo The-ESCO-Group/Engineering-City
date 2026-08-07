@@ -8,12 +8,20 @@ writes to it. For *why* it is shaped this way, read
 [ADR 0001](adr/0001-extend-the-review-platform-into-a-production-platform.md)
 first — decision 2 in particular.
 
+For what happens to a revision *after* it is merged — the six approval gates, the
+generators, what a verification level does and does not mean, and what the
+package contains — read [the release pipeline](release-pipeline.md).
+[ADR 0002](adr/0002-what-a-release-record-is-allowed-to-claim.md) records the
+three decisions that shape both documents: when a gate decision expires, what
+level a package may claim, and why a change operation stores the proposal and the
+outcome separately.
+
 ---
 
 ## The shape in one paragraph
 
-A project has a **current state** (roughly 74 tables of engineering objects) and
-a **change log**. Every object carries an `object_revision` integer. An agent
+A project has a **current state** (64 tables of engineering objects, out of 104 in
+the schema) and a **change log**. Every object carries an `object_revision` integer. An agent
 proposes a `ChangeSet` of `ChangeOperation`s, each stating the `object_revision`
 it was written against. Deterministic code checks scope, detects conflicts,
 validates, applies a human gate where the change warrants one, and merges — all
@@ -61,7 +69,7 @@ at-least-once, so a re-run must converge rather than propose the batch twice.
 5. **The human gate** — `APPROVAL_REQUIRED`, and nothing is applied.
 6. **Apply**, inside a savepoint. Bump `object_revision`, write the evidence
    links, resolve `temp_key` references, fill in each operation's `before` and
-   `after`.
+   `after` — and leave the proposal columns untouched (below).
 7. **Record** — a `MergeResult` with its conflicts, a new `ProjectRevision`, an
    audit entry, and a `changeset.merged` event.
 
@@ -83,6 +91,26 @@ guesswork.
 edited in place — a later change must supersede it explicitly and win a fresh
 approval. This is what stops an agent quietly editing something an engineer
 signed off.
+
+---
+
+## The proposal is not the outcome
+
+`ChangeOperation` carries four JSON columns in two pairs, and mixing them up is
+the easiest way to break the audit trail:
+
+* `values` and `basis` are **what the agent asked for, and why**. Written once by
+  `build_changeset` and never touched again.
+* `before` and `after` are **what the merge found, and what it wrote**. Empty
+  until the operation is applied or rehearsed.
+
+They are identical exactly when nothing went wrong, and the audit trail exists
+for the times something did — a coerced value, a partially applied create, a
+refused operation. The two pairs used to share `after`, so a merged operation
+could no longer say what had been proposed. Read the proposal through
+`changesets.proposed_values` and `changesets.stated_basis` rather than off the
+columns; see [ADR 0002](adr/0002-what-a-release-record-is-allowed-to-claim.md)
+decision 3, including the migration that has not yet been generated for them.
 
 ---
 
@@ -120,6 +148,10 @@ kinds are in `ACCEPTABLE_BASIS_KINDS`, and the exclusions are deliberate.
 6. If it must cite a basis, add it to `TRACEABLE_OBJECT_TYPES`.
 7. Generate a migration and check it round-trips:
    `alembic upgrade head` → `alembic check` → `downgrade base` → `upgrade head`.
+   Point `ESCO_DATABASE_URL` at a throwaway file first; the default is the
+   project's live SQLite database. Check what the head revision is before
+   autogenerating: another agent's uncommitted revision may already carry columns
+   you would otherwise fold into yours.
 
 ### Field allowlists
 
@@ -181,7 +213,19 @@ recorded as a failed check and the run continues — a run that dies halfway and
 reports three issues looks like a clean result.
 
 Check codes are stable API, namespaced by discipline
-(`logic.duplicate_destructive_output`). Clients branch on them.
+(`logic.duplicate_destructive_output`). Clients branch on them, and customers
+write waiver policies against them, so a code is added or retired and **never
+quietly repurposed**. There are 25 validators and 63 codes: 62 discipline-
+namespaced, plus `validator.failed`, which is the run reporting on itself.
+
+**A gate may only ask for a discipline a validator reports against.**
+`ValidationDiscipline` declares eleven members; `ALL_DISCIPLINES` — the set the
+gates read — holds five. The interlock and mode checks are registered under
+`plc_logic`, and the HMI, alarm and test checks under `cross_discipline`, so a
+gate demanding coverage of `hmi` would demand something nothing in the registry
+can give and would never pass, for a reason no engineer could act on. There is a
+test asserting that every discipline a gate asks for is one a validator covers;
+keep it green when adding either.
 
 ---
 

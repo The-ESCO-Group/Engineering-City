@@ -3,7 +3,7 @@ import { engineeringApi } from "../../api/client";
 import { createDemoWorkspaceModel } from "./demo";
 import { createEmptyIntakeDraft } from "./intake";
 import { workspaceOperationsFromEngineering, workspaceSourceFromEngineering } from "./integration";
-import type { WorkspaceSource } from "./types";
+import type { WorkspaceApproval, WorkspaceSource } from "./types";
 
 function liveData() {
   return {
@@ -51,6 +51,44 @@ describe("workspace live integration", () => {
 
     expect(workspaceSourceFromEngineering(data).dataMode).toBe("live");
     expect(workspaceOperationsFromEngineering(data).submitIntake).toBeTypeOf("function");
+  });
+
+  it("enables validation waivers only for a globally authorized project reviewer", () => {
+    const data = {
+      ...liveData(),
+      project: {
+        id: "project-review",
+        name: "Review project",
+        description: "Synthetic",
+        client_reference: "SYN-REVIEW",
+        status: "awaiting_review",
+        is_paused: false,
+        event_seq: 1,
+        created_at: "2026-08-05T10:00:00Z",
+        updated_at: "2026-08-05T10:00:00Z",
+        attributes: {},
+        counts: { files: 0, files_parsed: 0, tasks: 0, tasks_completed: 0, findings: 0, findings_open: 0, approvals_pending: 0, reports: 0 }
+      },
+      currentUser: {
+        user: {
+          id: "reviewer-1",
+          email: "reviewer@esco.internal",
+          display_name: "Review Engineer",
+          is_active: true,
+          roles: ["reviewer" as const]
+        },
+        project_roles: { "project-review": "reviewer" }
+      }
+    };
+
+    expect(workspaceSourceFromEngineering(data).canReviewValidations).toBe(true);
+    expect(workspaceSourceFromEngineering({
+      ...data,
+      currentUser: {
+        ...data.currentUser,
+        user: { ...data.currentUser.user, roles: ["engineer" as const] }
+      }
+    }).canReviewValidations).toBe(false);
   });
 
   it("creates project identity and uploads files by declared document role", async () => {
@@ -149,5 +187,50 @@ describe("workspace live integration", () => {
     const operations = workspaceOperationsFromEngineering(data);
     await expect(operations.decideApproval?.(createDemoWorkspaceModel().approvals[0], "defer", "Synthetic comment")).rejects.toThrow(/not supported/);
     expect(decide).not.toHaveBeenCalled();
+  });
+
+  it("routes every gate verdict through the exact gate and approval binding", async () => {
+    const data = liveData();
+    const gateDecision = vi.spyOn(engineeringApi, "decideApprovalGate").mockResolvedValue({} as never);
+    const legacyDecision = vi.spyOn(engineeringApi, "decideApproval");
+    const approval: WorkspaceApproval = {
+      ...createDemoWorkspaceModel().approvals[0],
+      kind: "gate_decision",
+      gateId: "gate-1",
+      gateKey: "qa_and_risk",
+      allowedDecisions: ["approve", "reject", "request_changes", "accept_risk", "defer"]
+    };
+    const operations = workspaceOperationsFromEngineering(data);
+
+    await operations.decideApproval?.(approval, "accept_risk", "Named risk rationale.");
+
+    expect(gateDecision).toHaveBeenCalledWith(
+      "gate-1",
+      approval.id,
+      "accept_risk",
+      "Named risk rationale."
+    );
+    expect(legacyDecision).not.toHaveBeenCalled();
+    expect(data.refresh).toHaveBeenCalled();
+  });
+
+  it("refuses a gate decision whose exact binding is absent", async () => {
+    const data = liveData();
+    const gateDecision = vi.spyOn(engineeringApi, "decideApprovalGate");
+    const approval = {
+      ...createDemoWorkspaceModel().approvals[0],
+      kind: "gate_decision",
+      gateId: null,
+      gateKey: "qa_and_risk"
+    };
+
+    await expect(
+      workspaceOperationsFromEngineering(data).decideApproval?.(
+        approval,
+        "approve",
+        "Checked."
+      )
+    ).rejects.toThrow(/missing its exact gate binding/);
+    expect(gateDecision).not.toHaveBeenCalled();
   });
 });

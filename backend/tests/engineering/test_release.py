@@ -23,6 +23,7 @@ would test those instead of these.
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -67,6 +68,7 @@ from app.core.enums import (
     ValidationSeverity,
 )
 from app.core.storage import ProjectStorage
+from app.database.session import get_session_factory
 from app.engineering import gates, release
 from app.engineering.revisions import allocate_revision_number, create_revision, get_revision
 from app.models.audit import AuditEntry
@@ -702,6 +704,47 @@ def test_a_regenerated_candidate_from_the_same_revision_is_byte_identical(
     assert second.package_bytes == first.package_bytes
 
 
+def test_candidate_creation_refreshes_a_project_that_advanced_after_preload(
+    db: Session,
+    ready_project: Project,
+    settings: Settings,
+) -> None:
+    """A stale caller cannot reserve an RC against the revision it first saw."""
+    # The prepared project must be visible to the two independent sessions below.
+    # Leaving the fixture's write transaction open would test SQLite writer
+    # contention instead of the stale identity-map behavior this regression covers.
+    db.commit()
+    factory = get_session_factory()
+    stale = factory()
+    revision_writer = factory()
+    try:
+        stale_project = stale.get(Project, ready_project.id)
+        writer_project = revision_writer.get(Project, ready_project.id)
+        assert stale_project is not None and writer_project is not None
+        stale.commit()
+
+        create_revision(
+            revision_writer,
+            writer_project,
+            summary="Concurrent revision committed before candidate reservation.",
+        )
+        revision_writer.commit()
+
+        with pytest.raises(release.ReleaseRefused):
+            release.create_release_candidate(
+                stale,
+                project=stale_project,
+                settings=settings,
+            )
+        stale.rollback()
+    finally:
+        stale.close()
+        revision_writer.close()
+
+    db.expire_all()
+    assert db.execute(select(ReleaseCandidate)).scalars().all() == []
+
+
 def sorted_artifacts(candidate: ReleaseCandidate) -> list[ExportArtifact]:
     return sorted(candidate.artifacts, key=lambda artifact: artifact.relative_path)
 
@@ -747,6 +790,57 @@ def test_it_refuses_a_revision_with_blocking_validation_errors(
 
     assert release.BlockCode.VALIDATION_ERRORS in _codes(caught.value)
     assert "2 error(s)" in caught.value.message
+    assert db.execute(select(ReleaseCandidate)).scalars().all() == []
+
+
+def test_equal_time_current_validation_runs_block_readiness_and_candidate_creation(
+    db: Session, ready_project: Project, settings: Settings
+) -> None:
+    """A release must not choose clean versus blocking results by UUID ordering."""
+    clean = _validation_run(db, ready_project)
+    blocking = _validation_run(db, ready_project, errors=1)
+    tied_at = utcnow() + timedelta(days=1)
+    clean.created_at = tied_at
+    blocking.created_at = tied_at
+    db.flush()
+
+    readiness = release.release_readiness(db, project=ready_project, settings=settings)
+
+    assert readiness.is_ready is False
+    assert release.BlockCode.NO_VALIDATION_RUN in _codes_of(readiness)
+    assert readiness.validation_error_count == 0
+    assert "same recorded creation time" in " ".join(block.detail for block in readiness.blocking)
+    assert ApprovalGateKey.QA_AND_RISK in readiness.outstanding_gates
+
+    with pytest.raises(release.ReleaseRefused) as caught:
+        release.create_release_candidate(db, project=ready_project, settings=settings)
+
+    assert release.BlockCode.NO_VALIDATION_RUN in _codes(caught.value)
+    assert db.execute(select(ReleaseCandidate)).scalars().all() == []
+
+
+def test_a_future_revision_validation_run_blocks_readiness_and_candidate_creation(
+    db: Session, ready_project: Project, settings: Settings
+) -> None:
+    """A completed row ahead of project head is corruption, not newer validation evidence."""
+    claimed_revision = ready_project.current_revision_number + 1
+    _validation_run(db, ready_project, revision=claimed_revision)
+    db.flush()
+
+    readiness = release.release_readiness(db, project=ready_project, settings=settings)
+
+    assert readiness.is_ready is False
+    assert release.BlockCode.NO_VALIDATION_RUN in _codes_of(readiness)
+    assert readiness.validation_error_count == 0
+    assert any(
+        f"claims revision {claimed_revision}" in block.detail for block in readiness.blocking
+    )
+    assert ApprovalGateKey.QA_AND_RISK in readiness.outstanding_gates
+
+    with pytest.raises(release.ReleaseRefused) as caught:
+        release.create_release_candidate(db, project=ready_project, settings=settings)
+
+    assert release.BlockCode.NO_VALIDATION_RUN in _codes(caught.value)
     assert db.execute(select(ReleaseCandidate)).scalars().all() == []
 
 

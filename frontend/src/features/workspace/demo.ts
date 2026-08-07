@@ -855,6 +855,10 @@ export function createDemoWorkspaceModel(): WorkspaceModel {
       {
         id: "demo-approval-safety",
         projectId: "demo-project-line-4",
+        gateId: null,
+        gateKey: null,
+        releaseCandidateId: null,
+        recordedDecision: null,
         findingId: "DEMO-F-104",
         changesetId: "demo-cs-safety-reset",
         gate: "qa_and_risk",
@@ -878,11 +882,16 @@ export function createDemoWorkspaceModel(): WorkspaceModel {
         finalRelease: false,
         requestedBy: "Synthetic Senior Review Agent",
         requestedAt: "2026-07-31T17:31:00Z",
-        allowedDecisions: ["approve", "reject", "request_changes", "accept_risk", "defer"]
+        decisionDisabledReason: "",
+        allowedDecisions: ["approve", "reject"]
       },
       {
         id: "demo-approval-tag",
         projectId: "demo-project-line-4",
+        gateId: null,
+        gateKey: null,
+        releaseCandidateId: null,
+        recordedDecision: null,
         findingId: "DEMO-F-112",
         changesetId: "demo-cs-tag-rename",
         gate: "logic_and_delivery",
@@ -906,7 +915,8 @@ export function createDemoWorkspaceModel(): WorkspaceModel {
         finalRelease: false,
         requestedBy: "Synthetic Tag Engineering Agent",
         requestedAt: "2026-07-31T17:12:00Z",
-        allowedDecisions: ["approve", "reject", "request_changes", "defer"]
+        decisionDisabledReason: "",
+        allowedDecisions: ["approve", "reject"]
       }
     ]
   };

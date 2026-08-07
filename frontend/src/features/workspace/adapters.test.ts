@@ -106,4 +106,75 @@ describe("workspace contract adapters", () => {
     expect(inferEvidenceSourceKind("IO Schedule.xlsx", "direct")).toBe("xlsx");
     expect(inferEvidenceSourceKind("Any", "human_decision")).toBe("human_decision");
   });
+
+  it("publishes all five decisions only for an eligible, exactly bound gate approval", () => {
+    const gateApproval = {
+      id: "approval-gate-1",
+      project_id: "project-1",
+      gate_id: "gate-1",
+      gate_key: "qa_and_risk",
+      revision_number: 7,
+      release_candidate_id: null,
+      decision: null,
+      finding_id: null,
+      kind: "gate_decision",
+      status: "pending" as const,
+      title: "QA and risk",
+      question: "May this gate proceed?",
+      context: {},
+      requested_by_agent_kind: "senior_review",
+      requested_at: "2026-07-31T10:05:00Z",
+      decision_allowed: true,
+      decision_disabled_reason: "",
+      decision_notes: "",
+      created_at: "2026-07-31T10:05:00Z"
+    };
+
+    const model = buildWorkspaceModel({ ...liveSource, approvals: [gateApproval] });
+
+    expect(model.approvals[0]).toMatchObject({
+      gateId: "gate-1",
+      gateKey: "qa_and_risk",
+      affectedRevision: 7,
+      allowedDecisions: ["approve", "reject", "request_changes", "accept_risk", "defer"]
+    });
+    expect(model.capabilities.approvalDecisions.level).toBe("available");
+  });
+
+  it("limits ordinary and backend-disabled approvals", () => {
+    const baseApproval = {
+      id: "approval-ordinary",
+      project_id: "project-1",
+      gate_id: null,
+      gate_key: null,
+      revision_number: null,
+      release_candidate_id: null,
+      decision: null,
+      finding_id: "finding-1",
+      kind: "finding_release",
+      status: "pending" as const,
+      title: "Finding release",
+      question: "Accept this finding disposition?",
+      context: {},
+      requested_by_agent_kind: "senior_review",
+      requested_at: null,
+      decision_allowed: true,
+      decision_disabled_reason: "",
+      decision_notes: "",
+      created_at: "2026-07-31T10:05:00Z"
+    };
+    const model = buildWorkspaceModel({
+      ...liveSource,
+      approvals: [baseApproval, {
+        ...baseApproval,
+        id: "approval-disabled",
+        decision_allowed: false,
+        decision_disabled_reason: "Independent review is incomplete."
+      }]
+    });
+
+    expect(model.approvals[0].allowedDecisions).toEqual(["approve", "reject"]);
+    expect(model.approvals[1].allowedDecisions).toEqual([]);
+    expect(model.approvals[1].decisionDisabledReason).toContain("Independent review");
+  });
 });

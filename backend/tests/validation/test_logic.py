@@ -26,8 +26,9 @@ from app.core.enums import (
     SignalType,
     ValidationSeverity,
 )
-from app.models.plc import LogicRung
+from app.models.plc import LogicInstruction, LogicRung
 from app.models.project import Project
+from app.models.tags import Tag
 from app.validation.logic import (
     DestructiveWriteValidator,
     InstructionSupportValidator,
@@ -42,6 +43,7 @@ from app.validation.logic import (
 from tests.validation import (
     codes,
     make_alarm,
+    make_assignment,
     make_device,
     make_fault,
     make_instruction,
@@ -372,8 +374,8 @@ def _recipe_copy(
     length: str = "20",
     destination: str = "Recipe_Active[0]",
     mnemonic: str = "COP",
-) -> None:
-    make_instruction(
+) -> LogicInstruction:
+    return make_instruction(
         db,
         project,
         rung,
@@ -471,6 +473,77 @@ def test_one_copy_reaching_into_another_copy_is_reported(db: Session, project: P
 
     assert issue.severity is ValidationSeverity.ERROR
     assert issue.detail["overlap_proven"] is True
+
+
+def test_range_overlap_uses_every_write_and_raw_array_element(
+    db: Session, project: Project
+) -> None:
+    """A later unrelated destination cannot hide an earlier range collision.
+
+    Canonical import resolves both array operands to the base declaration, so
+    the raw text must retain the two distinct starts.  This also guards against
+    reporting the two elements as an exact duplicate destination.
+    """
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    third = make_rung(db, project, first.routine, ordinal=2)
+    first_copy = _recipe_copy(db, project, first)
+    second_copy = _recipe_copy(db, project, second, destination="Recipe_Active[5]", length="3")
+    first_copy.operands[1].resolved_name = "Recipe_Active"
+    second_copy.operands[1].resolved_name = "Recipe_Active"
+    make_instruction(
+        db,
+        project,
+        third,
+        "MOV",
+        ["Spare_Source", "ZZ_Unrelated"],
+        category=InstructionCategory.MOVE_LOGICAL,
+    )
+
+    issues = run_check(DestructiveWriteValidator(), db, project)
+    issue = only(issues, RANGE_DUPLICATE)
+
+    assert DUPLICATE not in codes(issues)
+    assert issue.detail["elements"] == ["Recipe_Active[5]"]
+    assert issue.detail["overlaps"] == [
+        {
+            "range_start": "Recipe_Active[0]",
+            "range_mnemonic": "COP",
+            "range_location": "MainProgram / MainRoutine / Rung 0",
+            "other_destination": "Recipe_Active[5]",
+            "other_mnemonic": "COP",
+            "other_location": "MainProgram / MainRoutine / Rung 1",
+            "overlap_proven": True,
+        }
+    ]
+
+
+def test_disjoint_copy_ranges_are_not_reported(db: Session, project: Project) -> None:
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    first_copy = _recipe_copy(db, project, first, length="3")
+    second_copy = _recipe_copy(db, project, second, destination="Recipe_Active[5]", length="3")
+    first_copy.operands[1].resolved_name = "Recipe_Active"
+    second_copy.operands[1].resolved_name = "Recipe_Active"
+
+    issues = run_check(DestructiveWriteValidator(), db, project)
+
+    assert RANGE_DUPLICATE not in codes(issues)
+    assert DUPLICATE not in codes(issues)
+
+
+def test_zero_length_copy_inside_another_range_is_not_reported(
+    db: Session, project: Project
+) -> None:
+    """A zero-length file instruction has a nominal start but writes no element."""
+    first = make_ladder(db, project, rung_ordinal=0)
+    second = make_rung(db, project, first.routine, ordinal=1)
+    _recipe_copy(db, project, first, length="20")
+    _recipe_copy(db, project, second, destination="Recipe_Active[5]", length="0")
+
+    issues = run_check(DestructiveWriteValidator(), db, project)
+
+    assert RANGE_DUPLICATE not in codes(issues)
 
 
 def test_a_synchronous_copy_is_range_checked_too(db: Session, project: Project) -> None:
@@ -676,6 +749,168 @@ def test_no_ladder_means_output_coverage_was_not_examined(db: Session, project: 
 
     assert only(found, NO_LADDER).severity is ValidationSeverity.INFORMATION
     assert UNDRIVEN_OUTPUT not in codes(found)
+
+
+# ---------------------------------------------------------------------------
+# logic.output_name_mismatch
+# ---------------------------------------------------------------------------
+NAME_MISMATCH = "logic.output_name_mismatch"
+
+
+def _wired_output(
+    db: Session,
+    project: Project,
+    name: str = "MTR401_RUN_CMD",
+    *,
+    address: str = "Local:2:O.Data.0",
+) -> Tag:
+    """A field output with a terminal behind it, the way an I/O list gives one."""
+    device = make_device(db, project)
+    signal = make_signal(db, project, device, "Run_Cmd")
+    point = make_io_point(db, project, address)
+    make_assignment(db, project, signal, point)
+    return make_tag(db, project, name, signal_id=signal.id, io_point_id=point.id)
+
+
+def test_an_output_the_ladder_drives_under_another_name_is_not_a_release_blocker(
+    db: Session, project: Project
+) -> None:
+    """The signal is wired and driven; only the two documents disagree.
+
+    Reported as ``logic.output_without_driving_rung`` this said the output can
+    never be energised — false, and at a severity that stopped the release and
+    outranked every genuine protection gap in the same run. The terminal is what
+    identifies the two names as one signal, because the names themselves do not
+    normalise together and no comparison of them ever will.
+    """
+    rung = make_ladder(db, project)
+    _wired_output(db, project)
+    make_tag(
+        db,
+        project,
+        "CV401_Run_Output",
+        description="CV401 infeed drive run command. Wired to DO_401 channel 0 (Local:2:O.Data.0).",
+    )
+    write_tag(db, project, rung, "CV401_Run_Output")
+
+    found = run_check(OutputCoverageValidator(), db, project)
+    issue = only(found, NAME_MISMATCH)
+
+    assert UNDRIVEN_OUTPUT not in codes(found)
+    assert issue.severity is ValidationSeverity.WARNING
+    # An engineer cannot settle a name disagreement without both names in front
+    # of them, and cannot find either without the terminal.
+    assert "MTR401_RUN_CMD" in issue.message
+    assert "CV401_Run_Output" in issue.message
+    assert "Local:2:O.Data.0" in issue.message
+    assert issue.detail["driven_by"] == ["CV401_Run_Output"]
+    assert issue.detail["established_from"] == "description"
+
+
+def test_an_alias_to_the_same_terminal_is_the_stronger_evidence(
+    db: Session, project: Project
+) -> None:
+    """An alias target is resolved by the controller, not written down by a person.
+
+    Both routes have to work: aliasing the terminal is the ordinary way a Logix
+    project ties a tag to a channel, and a base tag whose description names the
+    address is the ordinary way an export explains itself. A check that read only
+    one of them would keep raising a dead-output error against the other.
+    """
+    rung = make_ladder(db, project)
+    _wired_output(db, project)
+    make_tag(db, project, "CV401_Run_Output", is_alias=True, alias_for="Local:2:O.Data.0")
+    write_tag(db, project, rung, "CV401_Run_Output")
+
+    issue = only(run_check(OutputCoverageValidator(), db, project), NAME_MISMATCH)
+
+    assert issue.detail["established_from"] == "alias"
+
+
+def test_a_second_tag_on_the_same_io_point_is_a_name_disagreement(
+    db: Session, project: Project
+) -> None:
+    """One terminal, two tag rows, one of them driven. Nothing is dead here."""
+    rung = make_ladder(db, project)
+    output = _wired_output(db, project)
+    make_tag(db, project, "CV401_Run_Output", io_point_id=output.io_point_id)
+    write_tag(db, project, rung, "CV401_Run_Output")
+
+    issue = only(run_check(OutputCoverageValidator(), db, project), NAME_MISMATCH)
+
+    assert issue.detail["established_from"] == "binding"
+
+
+def test_a_description_ending_in_the_address_still_names_the_terminal(
+    db: Session, project: Project
+) -> None:
+    """The full stop that ends the sentence is not part of the address.
+
+    Rejected, the same signal would be reported as an output that can never
+    energise on nothing more than where the author put a period.
+    """
+    rung = make_ladder(db, project)
+    _wired_output(db, project)
+    make_tag(db, project, "CV401_Run_Output", description="Run command, wired to Local:2:O.Data.0.")
+    write_tag(db, project, rung, "CV401_Run_Output")
+
+    assert NAME_MISMATCH in codes(run_check(OutputCoverageValidator(), db, project))
+
+
+def test_a_neighbouring_channel_is_not_the_same_terminal(db: Session, project: Project) -> None:
+    """``Local:2:O.Data.1`` occurs inside ``Local:2:O.Data.10``.
+
+    The output on channel 1 really is driven by nothing, and excusing it against
+    the tag that drives channel 10 would lose a dead terminal *and* name the
+    wrong two tags while doing it.
+    """
+    rung = make_ladder(db, project)
+    _wired_output(db, project, address="Local:2:O.Data.1")
+    make_tag(db, project, "CV410_Run_Output", description="Wired to Local:2:O.Data.10.")
+    write_tag(db, project, rung, "CV410_Run_Output")
+
+    found = run_check(OutputCoverageValidator(), db, project)
+
+    assert only(found, UNDRIVEN_OUTPUT).severity is ValidationSeverity.ERROR
+    assert NAME_MISMATCH not in codes(found)
+
+
+def test_an_output_with_no_terminal_recorded_stays_an_error(db: Session, project: Project) -> None:
+    """With no address, nothing pairs the two names and the error stands.
+
+    This is the case the downgrade must not reach: a field output whose signal
+    nobody has assigned an address to has no terminal to compare, so "driven
+    under another name" cannot be established and is not claimed.
+    """
+    rung = make_ladder(db, project)
+    _output_tag(db, project, "MTR401_RUN_CMD")
+    make_tag(db, project, "CV401_Run_Output", description="Wired to Local:2:O.Data.0.")
+    write_tag(db, project, rung, "CV401_Run_Output")
+
+    found = run_check(OutputCoverageValidator(), db, project)
+
+    assert only(found, UNDRIVEN_OUTPUT).severity is ValidationSeverity.ERROR
+    assert NAME_MISMATCH not in codes(found)
+
+
+def test_a_tag_naming_the_terminal_that_no_rung_writes_does_not_excuse_it(
+    db: Session, project: Project
+) -> None:
+    """The other name has to be one the ladder actually drives.
+
+    Two undriven tags on one terminal are still an output nothing energises, and
+    reading the second as a driver would turn a dead output into a note about
+    spelling.
+    """
+    rung = make_ladder(db, project)
+    _wired_output(db, project)
+    make_tag(db, project, "CV401_Run_Output", description="Wired to Local:2:O.Data.0.")
+    read_tag(db, project, rung, "CV401_Run_Output")
+
+    found = run_check(OutputCoverageValidator(), db, project)
+
+    assert only(found, UNDRIVEN_OUTPUT).severity is ValidationSeverity.ERROR
+    assert NAME_MISMATCH not in codes(found)
 
 
 # ---------------------------------------------------------------------------

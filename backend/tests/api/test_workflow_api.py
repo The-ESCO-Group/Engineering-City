@@ -819,6 +819,19 @@ def test_events_recorded_after_connecting_arrive_live(
 def test_a_run_started_over_rest_is_streamed_to_a_connected_socket(
     client: TestClient, engineer_client: AuthedClient, ingested_project: Project
 ) -> None:
+    """Starting a run over HTTP reaches a socket that was already listening.
+
+    What the socket promises is that ``seq`` is gap-free and monotonic per
+    project, so a client that loses the connection can name what it missed. It
+    does not promise that any two event types arrive next to each other, and
+    other events legitimately land inside a run's opening burst — agent presence
+    being the current example. So the run's own events are matched by identity
+    and ordered by ``seq``, and every frame the socket actually sent is held to
+    the sequence contract, including the ones this test did not ask for. Reading
+    a fixed number of frames and asserting they were all ``task.created`` tested
+    an adjacency nothing guarantees; filtering the others out would have stopped
+    testing the socket and started testing a view of it.
+    """
     with client.websocket_connect(
         _ws_url(ingested_project.id, token=engineer_client.token)
     ) as socket:
@@ -826,15 +839,43 @@ def test_a_run_started_over_rest_is_streamed_to_a_connected_socket(
         _drain_replay(socket, hello)
 
         body = _start_run(engineer_client, ingested_project.id, note="watched")
+        expected_tasks = {task["id"] for task in body["tasks"]}
 
-        started = _next_event(socket)
-        created = [_next_event(socket) for _ in range(body["task_count"])]
+        # How many frames to expect, counted from the durable log rather than
+        # from the number of tasks: the run emits whatever it emits, and reading
+        # a task-shaped number of frames is what made this test depend on the
+        # burst being uninterrupted. Nothing is running a worker here, so the log
+        # is complete once the request has returned.
+        history = engineer_client.get(f"/api/projects/{ingested_project.id}/events").json()
+        expected_seqs = [event["seq"] for event in history if event["seq"] > hello["current_seq"]]
+        frames: list[dict[str, Any]] = [_next_event(socket) for _ in expected_seqs]
 
+    announced = {
+        frame["task_id"] for frame in frames if frame["event_type"] == EventType.TASK_CREATED
+    }
+    assert announced == expected_tasks, (
+        f"{len(expected_tasks - announced)} of {len(expected_tasks)} tasks were never announced "
+        f"in {len(frames)} frame(s): {Counter(frame['event_type'] for frame in frames)}"
+    )
+
+    started = frames[0]
     assert started["event_type"] == EventType.WORKFLOW_STARTED
     assert started["seq"] == hello["current_seq"] + 1
     assert started["payload"]["run_id"] == body["run_id"]
     assert started["payload"]["reason"] == "watched"
 
-    assert [event["event_type"] for event in created] == [EventType.TASK_CREATED] * len(created)
-    assert {event["task_id"] for event in created} == {task["id"] for task in body["tasks"]}
-    assert [event["seq"] for event in created] == sorted(event["seq"] for event in created)
+    # The contract, over everything that arrived rather than over a chosen
+    # subset: one unbroken run of sequence numbers continuing from the greeting,
+    # and the same events the log recorded.
+    assert [frame["seq"] for frame in frames] == expected_seqs
+    assert expected_seqs == list(
+        range(hello["current_seq"] + 1, hello["current_seq"] + 1 + len(expected_seqs))
+    ), "the project's sequence has a gap in it"
+    assert {frame["project_id"] for frame in frames} == {str(ingested_project.id)}
+
+    created = [frame for frame in frames if frame["event_type"] == EventType.TASK_CREATED]
+    assert len(created) == body["task_count"]
+    assert [frame["seq"] for frame in created] == sorted(frame["seq"] for frame in created)
+    assert all(frame["seq"] > started["seq"] for frame in created), (
+        "a task was announced before the run that created it"
+    )

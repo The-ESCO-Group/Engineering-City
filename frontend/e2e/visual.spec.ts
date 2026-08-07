@@ -16,11 +16,17 @@ test("major product surfaces match the approved 1440×900 layout", async ({ page
   await page.waitForTimeout(800);
   await expectVisual(page, "city-overview.png");
 
-  await page.getByRole("button", { name: /Automation Core: Logic review/ }).click();
+  // District and agent markers are projected from the live 3D scene, so their
+  // screen coordinates intentionally keep changing even while the timeline is
+  // paused. Dispatch to the exact visible DOM marker instead of waiting for a
+  // stable screen coordinate that the scene deliberately never has.
+  await page.getByRole("button", { name: /Automation Core: Logic review/ })
+    .evaluate((element: HTMLButtonElement) => element.click());
   await page.waitForTimeout(900);
   await expectVisual(page, "city-district-focus.png");
 
-  await page.getByRole("button", { name: /Inspect PLC Logic Agent/ }).click();
+  await page.getByRole("button", { name: /Inspect Theo Mercer, plc logic/i })
+    .evaluate((element: HTMLButtonElement) => element.click());
   await expect(page.getByRole("dialog")).toBeVisible();
   await expectVisual(page, "city-agent-inspector.png");
 

@@ -49,10 +49,10 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.core.clock import utcnow
+from app.core.clock import ensure_utc, utcnow
 from app.core.enums import (
     DECISIONS_REQUIRING_COMMENT,
     GATE_ORDER,
@@ -83,8 +83,9 @@ from app.core.enums import (
     ValidationRunStatus,
     ValidationSeverity,
 )
-from app.core.errors import ConflictError, PermissionDeniedError, ValidationError
+from app.core.errors import ConflictError, ValidationError
 from app.core.logging import get_logger
+from app.database.locking import lock_project_root
 from app.models.approval import Approval
 from app.models.finding import Finding, Recommendation
 from app.models.profile import TemplateSet
@@ -112,6 +113,7 @@ __all__ = [
     "GateContext",
     "GateSpec",
     "InvalidGateStateError",
+    "cancel_pending_gate_requests",
     "decision_of",
     "ensure_gates",
     "evaluate_all",
@@ -333,18 +335,60 @@ class GateContext:
 
     # -- validation --------------------------------------------------------
     @cached_property
+    def _validation_run_candidates(self) -> tuple[ValidationRun, ...]:
+        """The two leading completed runs in deterministic inspection order.
+
+        ``id`` is deliberately only a deterministic way to inspect an otherwise
+        tied pair.  It is not an authority tie-breaker: two current-revision runs
+        with the same recorded creation time make it impossible to prove which
+        result superseded the other.
+        """
+        return tuple(
+            self.db.execute(
+                select(ValidationRun)
+                .where(
+                    ValidationRun.project_id == self.project.id,
+                    ValidationRun.status == ValidationRunStatus.COMPLETED,
+                    ValidationRun.deleted_at.is_(None),
+                )
+                .order_by(
+                    ValidationRun.revision_number.desc(),
+                    ValidationRun.created_at.desc(),
+                    ValidationRun.id.desc(),
+                )
+                .limit(2)
+            ).scalars()
+        )
+
+    @cached_property
+    def validation_run_is_ambiguous(self) -> bool:
+        """Whether two equally current runs both claim to be authoritative."""
+        rows = self._validation_run_candidates
+        if len(rows) < 2:
+            return False
+        newest, other = rows
+        return (
+            newest.revision_number == self.revision_number
+            and other.revision_number == self.revision_number
+            and ensure_utc(newest.created_at) == ensure_utc(other.created_at)
+        )
+
+    @cached_property
+    def validation_run_is_from_future_revision(self) -> bool:
+        """Whether the leading completed run claims a revision the project has not reached."""
+        rows = self._validation_run_candidates
+        return bool(rows and rows[0].revision_number > self.revision_number)
+
+    @cached_property
     def validation_run(self) -> ValidationRun | None:
-        """The newest completed run. Runs that failed or are still going say nothing."""
-        return self.db.execute(
-            select(ValidationRun)
-            .where(
-                ValidationRun.project_id == self.project.id,
-                ValidationRun.status == ValidationRunStatus.COMPLETED,
-                ValidationRun.deleted_at.is_(None),
-            )
-            .order_by(ValidationRun.revision_number.desc(), ValidationRun.created_at.desc())
-            .limit(1)
-        ).scalar_one_or_none()
+        """The unambiguous newest completed run, if one can be identified."""
+        if (
+            self.validation_run_is_ambiguous
+            or self.validation_run_is_from_future_revision
+            or not self._validation_run_candidates
+        ):
+            return None
+        return self._validation_run_candidates[0]
 
     @cached_property
     def validation_results(self) -> list[ValidationResult]:
@@ -365,7 +409,7 @@ class GateContext:
         says nothing about the one being approved.
         """
         run = self.validation_run
-        if run is None or run.revision_number < self.revision_number:
+        if run is None or run.revision_number != self.revision_number:
             return False
         covered = set(run.disciplines)
         return all(discipline.value in covered for discipline in disciplines)
@@ -823,9 +867,7 @@ def _no_unwaived_errors(context: GateContext) -> str:
 
 
 def _serious_findings_senior_reviewed(context: GateContext) -> str:
-    outstanding = [
-        finding for finding in context.serious_findings if not finding.is_reviewed
-    ]
+    outstanding = [finding for finding in context.serious_findings if not finding.is_reviewed]
     if not outstanding:
         return ""
     outstanding.sort(key=lambda finding: -SEVERITY_ORDER[finding.severity])
@@ -1044,7 +1086,8 @@ def _every_decision_names_a_person(context: GateContext) -> str:
     unattributed = [
         approval
         for approval in context.gate_approvals
-        if approval.status is not ApprovalStatus.PENDING and approval.decided_by_id is None
+        if approval.status not in {ApprovalStatus.PENDING, ApprovalStatus.CANCELLED}
+        and approval.decided_by_id is None
     ]
     if not unattributed:
         return ""
@@ -1072,6 +1115,10 @@ def _skipped_gates_state_a_reason(context: GateContext) -> str:
 
 
 def _no_errors_at_release(context: GateContext) -> str:
+    if context.validation_run_is_from_future_revision:
+        return _future_validation_detail(context)
+    if context.validation_run_is_ambiguous:
+        return _ambiguous_validation_detail(context)
     return _error_summary(context, ALL_DISCIPLINES)
 
 
@@ -1104,10 +1151,14 @@ def _validation_currency(context: GateContext, disciplines: Sequence[ValidationD
     checked and it was clean" produce the same number of errors, and conflating
     them is how a gate ends up approving an unexamined revision.
     """
+    if context.validation_run_is_from_future_revision:
+        return _future_validation_detail(context)
+    if context.validation_run_is_ambiguous:
+        return _ambiguous_validation_detail(context)
     run = context.validation_run
     if run is None:
         return "No validation run has completed for this project."
-    if run.revision_number < context.revision_number:
+    if run.revision_number != context.revision_number:
         return (
             f"The newest validation run examined revision {run.revision_number}; the project "
             f"is at revision {context.revision_number}."
@@ -1543,32 +1594,57 @@ def ensure_gates(db: Session, *, project: Project) -> list[ApprovalGate]:
 # ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
-def evaluate_all(db: Session, *, project: Project) -> list[ApprovalGate]:
+def evaluate_all(
+    db: Session, *, project: Project, actor_user_id: uuid.UUID | None = None
+) -> list[ApprovalGate]:
     """Re-evaluate every gate, in order, and return them.
 
     Order is not an optimisation. A gate cannot be evaluated while an earlier one
     is undecided, so each gate is judged against the freshly computed state of its
     predecessors rather than against whatever the rows said before this call.
     """
-    gates = ensure_gates(db, project=project)
+    locked_project = lock_project_root(db, project.id)
+    if locked_project is None:  # pragma: no cover - gate rows cannot outlive their project
+        return []
+    project = locked_project
+    ensure_gates(db, project=project)
+    gates = list(
+        db.execute(
+            select(ApprovalGate)
+            .where(ApprovalGate.project_id == project.id)
+            .order_by(ApprovalGate.ordinal, ApprovalGate.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalars()
+    )
     by_key = {gate.gate_key: gate for gate in gates}
     context = GateContext(db=db, project=project, gates=by_key)
 
     for gate in gates:
         _evaluate(
-            db, context=context, gate=gate, preceding=gates[: spec_for(gate.gate_key).ordinal]
+            db,
+            context=context,
+            gate=gate,
+            preceding=gates[: spec_for(gate.gate_key).ordinal],
+            actor_user_id=actor_user_id,
         )
     db.flush()
     return gates
 
 
-def evaluate_gate(db: Session, *, project: Project, gate: ApprovalGate) -> ApprovalGate:
+def evaluate_gate(
+    db: Session,
+    *,
+    project: Project,
+    gate: ApprovalGate,
+    actor_user_id: uuid.UUID | None = None,
+) -> ApprovalGate:
     """Re-evaluate one gate against the model as it stands.
 
     Its predecessors are evaluated first — a single gate cannot be judged in
     isolation, because "an earlier gate is undecided" is one of the answers.
     """
-    gates = evaluate_all(db, project=project)
+    gates = evaluate_all(db, project=project, actor_user_id=actor_user_id)
     for candidate in gates:
         if candidate.gate_key is gate.gate_key:
             return candidate
@@ -1595,6 +1671,8 @@ def gate_blocking(
     gates = evaluate_all(db, project=project)
     ordinal = spec_for(gate_key).ordinal
     for gate in gates[: ordinal + 1]:
+        if gate.gate_key is ApprovalGateKey.RELEASE and not gate.is_enabled:
+            return gate
         if gate.is_enabled and gate.status not in _SETTLED_STATUSES:
             return gate
     return None
@@ -1606,11 +1684,31 @@ def _evaluate(
     context: GateContext,
     gate: ApprovalGate,
     preceding: Sequence[ApprovalGate],
+    actor_user_id: uuid.UUID | None = None,
 ) -> ApprovalGate:
     """Recompute one gate's criteria and status, and announce a change."""
     spec = spec_for(gate.gate_key)
     previous_status = gate.status
     outcomes = [_run_criterion(context, gate, criterion) for criterion in spec.criteria]
+
+    # A pending request is a snapshot, not an evergreen permission slip.  Close
+    # it before computing the gate status when the project has moved, the
+    # criteria no longer hold, an earlier gate reopened, or (for gate 6) a newer
+    # release candidate became the subject.  Leaving such a row ``pending``
+    # strands every approval-gated task because the queue quite correctly waits
+    # for *all* pending rows on the project to be settled.
+    pending = _pending_approval(db, gate)
+    if pending is not None:
+        invalid = _pending_request_invalid_reason(
+            context=context,
+            gate=gate,
+            spec=spec,
+            preceding=preceding,
+            outcomes=outcomes,
+            approval=pending,
+        )
+        if invalid:
+            _cancel_gate_request(db, gate, pending, invalid)
 
     status = _status_for(
         context=context, gate=gate, spec=spec, preceding=preceding, outcomes=outcomes
@@ -1623,7 +1721,13 @@ def _evaluate(
     gate.unmet_criteria = [dict(outcome) for outcome in outcomes if not outcome["met"]]
 
     if gate.status is not previous_status:
-        _announce(db, project=context.project, gate=gate, previous_status=previous_status)
+        _announce(
+            db,
+            project=context.project,
+            gate=gate,
+            previous_status=previous_status,
+            actor_user_id=actor_user_id,
+        )
     return gate
 
 
@@ -1650,6 +1754,17 @@ def _status_for(
     reached yet whatever its own criteria say. Only then does the gate's own
     content matter.
     """
+    if not gate.is_enabled and gate.gate_key is ApprovalGateKey.RELEASE:
+        return _Status(
+            GateStatus.NOT_READY,
+            _unmet(
+                "release_gate_required",
+                "The final release gate is enabled and decided by a named reviewer.",
+                "The final release gate cannot be disabled. Re-enable it and record a "
+                "current, named, commented decision before customer delivery.",
+            ),
+        )
+
     if not gate.is_enabled:
         return _Status(
             GateStatus.SKIPPED,
@@ -1689,9 +1804,70 @@ def _status_for(
                 _unmet("gate_unreachable", spec.title, reason),
             )
 
+    # ``request_changes`` and ``defer`` close the approval request but do not
+    # answer the gate.  They therefore hold the gate instead of returning it to
+    # READY immediately, which would make the worker raise the identical request
+    # again in a tight human-in-the-loop loop.  Requested changes release the
+    # hold only after a covered object changes.  A deferral is released only by
+    # the explicit workflow-resume path, which clears the pointer while keeping
+    # this approval row as history.
+    previous_request = _gate_request(context.db, gate)
+    if previous_request is not None:
+        if previous_request.status is ApprovalStatus.DEFERRED:
+            return _Status(
+                GateStatus.NOT_READY,
+                _unmet(
+                    "decision_deferred",
+                    "The deferred gate has been explicitly resumed by an operator.",
+                    "A reviewer deferred this gate"
+                    + (
+                        f": {previous_request.decision_notes.strip()}"
+                        if previous_request.decision_notes.strip()
+                        else "."
+                    ),
+                ),
+            )
+        if previous_request.status is ApprovalStatus.CHANGES_REQUESTED:
+            revision = previous_request.revision_number
+            changed = (
+                revision is not None
+                and context.revision_number > revision
+                and bool(context.changed_since(revision, spec.covers))
+            )
+            if not changed:
+                return _Status(
+                    GateStatus.NOT_READY,
+                    _unmet(
+                        "requested_changes_not_submitted",
+                        "The requested changes have been merged into a newer revision.",
+                        "A reviewer requested changes"
+                        + (
+                            f": {previous_request.decision_notes.strip()}"
+                            if previous_request.decision_notes.strip()
+                            else "."
+                        )
+                        + " Submit a covered change before asking for this decision again.",
+                    ),
+                )
+
+    if gate.status in _DECIDED_STATUSES:
+        malformed = _settled_decision_invalid_reason(gate, previous_request)
+        if malformed:
+            return _Status(
+                GateStatus.NOT_READY,
+                _unmet(
+                    "recorded_decision_valid",
+                    "The recorded gate decision is bound to a named reviewer and exact approval.",
+                    malformed,
+                ),
+            )
+
     reopened = _reopening_reason(context, gate, spec)
+    invalid_validation_authority_invalidates_decision = (
+        context.validation_run_is_ambiguous or context.validation_run_is_from_future_revision
+    ) and gate.gate_key in {ApprovalGateKey.QA_AND_RISK, ApprovalGateKey.RELEASE}
     decided = gate.decided_revision_number is not None and gate.status in _DECIDED_STATUSES
-    if decided and not reopened:
+    if decided and not reopened and not invalid_validation_authority_invalidates_decision:
         return _Status(gate.status)
 
     # Re-opened, or never decided: the gate stands or falls on its own criteria.
@@ -1806,13 +1982,257 @@ def _unmet(key: str, statement: str, detail: str) -> dict[str, Any]:
 
 
 def _pending_approval(db: Session, gate: ApprovalGate) -> Approval | None:
-    """The undecided request against this gate, if an agent raised one."""
+    """The one undecided request against this gate, converged under retries.
+
+    The gate pointer is the fast path, but it is not the invariant: an older
+    build or a concurrent writer may have left a pending row without updating
+    the pointer.  Find every pending request for the exact project/key pair,
+    choose one deterministically, and cancel duplicates so one malformed retry
+    cannot hold the whole project forever.
+    """
+    rows = [
+        row
+        for row in db.execute(
+            select(Approval)
+            .where(
+                Approval.project_id == gate.project_id,
+                Approval.gate_key == gate.gate_key,
+                Approval.kind == ApprovalKind.GATE_DECISION,
+                Approval.status == ApprovalStatus.PENDING,
+            )
+            .order_by(Approval.created_at, Approval.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalars()
+        if row.is_pending
+    ]
+    if not rows:
+        return None
+
+    selected = next((row for row in rows if row.id == gate.approval_id), rows[0])
+    gate.approval_id = selected.id
+    for duplicate in rows:
+        if duplicate.id == selected.id:
+            continue
+        _cancel_approval(
+            db,
+            duplicate,
+            "Cancelled as a duplicate pending request for the same workflow gate.",
+        )
+    return selected
+
+
+def _gate_request(db: Session, gate: ApprovalGate) -> Approval | None:
+    """The request currently attached to ``gate``, whether open or historical."""
     if gate.approval_id is None:
         return None
-    approval = db.get(Approval, gate.approval_id)
-    if approval is None or not approval.is_pending:
-        return None
-    return approval
+    return db.execute(
+        select(Approval)
+        .where(Approval.id == gate.approval_id)
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+
+
+def _cancel_approval(db: Session, approval: Approval, reason: str) -> bool:
+    transition = db.execute(
+        update(Approval)
+        .where(
+            Approval.id == approval.id,
+            Approval.status == ApprovalStatus.PENDING,
+        )
+        .values(
+            status=ApprovalStatus.CANCELLED,
+            decision=None,
+            decided_at=utcnow(),
+            decision_notes=reason[:4000],
+        )
+        .execution_options(synchronize_session=False)
+    )
+    changed = int(getattr(transition, "rowcount", 0) or 0) == 1
+    db.refresh(approval)
+    return changed
+
+
+def _cancel_gate_request(db: Session, gate: ApprovalGate, approval: Approval, reason: str) -> bool:
+    if not _cancel_approval(db, approval, reason):
+        return False
+    if gate.approval_id == approval.id:
+        transition = db.execute(
+            update(ApprovalGate)
+            .where(ApprovalGate.id == gate.id, ApprovalGate.approval_id == approval.id)
+            .values(approval_id=None)
+            .execution_options(synchronize_session=False)
+        )
+        if int(getattr(transition, "rowcount", 0) or 0) == 1:
+            db.refresh(gate)
+    return True
+
+
+def cancel_pending_gate_requests(db: Session, *, project: Project, reason: str) -> list[Approval]:
+    """Close every pending workflow-gate request without fabricating a verdict.
+
+    Cancellation is an orchestration decision, not an engineering approval, so
+    these rows become ``CANCELLED`` with no human decider or decision.  The
+    project root is a real write lock on SQLite as well as PostgreSQL; gates are
+    locked before approvals to preserve the canonical Project -> Gate ->
+    Approval -> Task order used by request, decision and run cancellation.
+    """
+    locked_project = lock_project_root(db, project.id)
+    if locked_project is None:  # pragma: no cover - a gate request cannot outlive its project
+        return []
+    project = locked_project
+
+    gate_rows = list(
+        db.execute(
+            select(ApprovalGate)
+            .where(ApprovalGate.project_id == project.id)
+            .order_by(ApprovalGate.ordinal, ApprovalGate.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalars()
+    )
+    pending = list(
+        db.execute(
+            select(Approval)
+            .where(
+                Approval.project_id == project.id,
+                Approval.kind == ApprovalKind.GATE_DECISION,
+                Approval.status == ApprovalStatus.PENDING,
+            )
+            .order_by(Approval.gate_key, Approval.created_at, Approval.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalars()
+    )
+
+    note = reason.strip()[:4000] or "Cancelled because the workflow run was cancelled."
+    decided_at = utcnow()
+    cancelled: list[Approval] = []
+    for approval in pending:
+        transition = db.execute(
+            update(Approval)
+            .where(
+                Approval.id == approval.id,
+                Approval.status == ApprovalStatus.PENDING,
+            )
+            .values(
+                status=ApprovalStatus.CANCELLED,
+                decision=None,
+                decided_at=decided_at,
+                decision_notes=note,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if int(getattr(transition, "rowcount", 0) or 0) != 1:
+            db.refresh(approval)
+            continue
+        db.refresh(approval)
+        cancelled.append(approval)
+
+    cancelled_ids = {approval.id for approval in cancelled}
+    for gate in gate_rows:
+        if gate.approval_id not in cancelled_ids:
+            continue
+        expected = gate.approval_id
+        transition = db.execute(
+            update(ApprovalGate)
+            .where(ApprovalGate.id == gate.id, ApprovalGate.approval_id == expected)
+            .values(approval_id=None)
+            .execution_options(synchronize_session=False)
+        )
+        if int(getattr(transition, "rowcount", 0) or 0) == 1:
+            db.refresh(gate)
+
+    # Recompute and announce the gate projection while the project root remains
+    # locked.  This produces gate.status_changed, not the misleading
+    # approval.decided event reserved for a named reviewer's verdict.
+    if cancelled:
+        evaluate_all(db, project=project)
+    return cancelled
+
+
+def _settled_decision_invalid_reason(gate: ApprovalGate, approval: Approval | None) -> str:
+    """Why a legacy/tampered settled gate is not a defensible decision."""
+    if gate.decided_revision_number is None:
+        return "The gate names no revision for its recorded decision."
+    if gate.decided_by_id is None or gate.decided_at is None:
+        return "The gate does not name both the reviewer and decision time."
+    if approval is None:
+        return "The gate is not bound to the approval row that records its decision."
+    if (
+        approval.project_id != gate.project_id
+        or approval.gate_key is not gate.gate_key
+        or approval.kind is not ApprovalKind.GATE_DECISION
+    ):
+        return "The bound approval does not describe this project and workflow gate."
+    if approval.decision not in _SETTLING_DECISIONS:
+        return "The bound approval carries no settling reviewer decision."
+    expected_approval_status, expected_gate_status = _OUTCOMES[approval.decision]
+    if approval.status is not expected_approval_status or gate.status is not expected_gate_status:
+        return "The approval and gate statuses do not match the recorded reviewer decision."
+    if (
+        approval.revision_number != gate.decided_revision_number
+        or approval.decided_by_id != gate.decided_by_id
+        or approval.decided_at is None
+        or ensure_utc(approval.decided_at) != ensure_utc(gate.decided_at)
+    ):
+        return "The approval does not match the gate's revision, reviewer and decision time."
+    return ""
+
+
+def _ambiguous_validation_detail(context: GateContext) -> str:
+    return (
+        "Two completed validation runs for current revision "
+        f"{context.revision_number} share the same recorded creation time. Neither can be "
+        "treated as authoritative; run validation again before deciding this gate."
+    )
+
+
+def _future_validation_detail(context: GateContext) -> str:
+    claimed_revision = context._validation_run_candidates[0].revision_number
+    return (
+        f"The leading completed validation run claims future revision {claimed_revision}, while "
+        f"the project is at revision {context.revision_number}. It cannot be authoritative; "
+        "repair the validation history and run validation at the current revision."
+    )
+
+
+def _pending_request_invalid_reason(
+    *,
+    context: GateContext,
+    gate: ApprovalGate,
+    spec: GateSpec,
+    preceding: Sequence[ApprovalGate],
+    outcomes: Sequence[dict[str, Any]],
+    approval: Approval,
+) -> str:
+    """Why a pending snapshot can no longer receive a safe decision."""
+    if approval.revision_number != context.revision_number:
+        return (
+            f"Cancelled because this request covers revision {approval.revision_number}, "
+            f"while the project is now at revision {context.revision_number}."
+        )
+    if not gate.is_enabled:
+        return "Cancelled because this workflow gate is disabled."
+    blocker = next(
+        (
+            earlier
+            for earlier in preceding
+            if earlier.is_enabled and earlier.status not in _SETTLED_STATUSES
+        ),
+        None,
+    )
+    if blocker is not None:
+        return f"Cancelled because the earlier gate '{blocker.title}' is {blocker.status.value}."
+    if any(not outcome["met"] for outcome in outcomes):
+        return "Cancelled because this gate's decision criteria no longer hold."
+    if spec.unreachable is not None and _run_hook(gate, spec.unreachable, context):
+        return "Cancelled because this gate is no longer reachable for the project configuration."
+    if gate.gate_key is ApprovalGateKey.RELEASE:
+        candidate = context.release_candidate
+        if candidate is None or approval.release_candidate_id != candidate.id:
+            return "Cancelled because a different release candidate is now the subject of release."
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -1836,8 +2256,30 @@ def set_gate_enabled(
     ever write. Removing a review step is also not something the people whose
     work it reviews should be able to do, which is why it takes the role it does.
     """
-    permissions.require_global_role(user, RoleName.ADMINISTRATOR)
+    locked_project = lock_project_root(db, project.id)
+    if locked_project is None:  # pragma: no cover - API authorisation loaded it already
+        raise ConflictError("The project attached to this approval gate no longer exists.")
+    project = locked_project
+    gate = db.execute(
+        select(ApprovalGate)
+        .where(ApprovalGate.id == gate.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+    if gate.project_id != project.id:
+        raise ConflictError("This approval gate does not belong to the supplied project.")
+    user = permissions.require_current_global_role(
+        db,
+        user_id=user.id,
+        allowed=frozenset({RoleName.ADMINISTRATOR}),
+        operation="change approval-gate enablement",
+    )
     stated = reason.strip()
+    if gate.gate_key is ApprovalGateKey.RELEASE and not is_enabled:
+        raise ValidationError(
+            "The final release gate cannot be disabled. Customer delivery always requires "
+            "a current, named, commented reviewer decision."
+        )
     if not is_enabled and not stated:
         raise ValidationError(
             f"Disabling '{gate.title}' requires a stated reason. A gate that was not applied "
@@ -1871,7 +2313,7 @@ def set_gate_enabled(
             "reason": stated,
         },
     )
-    return evaluate_gate(db, project=project, gate=gate)
+    return evaluate_gate(db, project=project, gate=gate, actor_user_id=user.id)
 
 
 # ---------------------------------------------------------------------------
@@ -1892,6 +2334,21 @@ def request_decision(
     own criteria are unmet is asking them to approve a list of things nobody has
     done, and it is how a gate becomes a button people press.
     """
+    # Lock project then gate, the same order used by the decision path. Without
+    # the gate lock, two workers can both observe READY and insert two pending
+    # approvals before either updates ``approval_id``.
+    locked_project = lock_project_root(db, project.id)
+    if locked_project is None:  # pragma: no cover - a gate cannot outlive its project
+        raise LookupError(f"approval gate {gate.id} references a project that no longer exists")
+    project = locked_project
+    gate = db.execute(
+        select(ApprovalGate)
+        .where(ApprovalGate.id == gate.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+    if gate.project_id != project.id:
+        raise ConflictError("This approval gate does not belong to the supplied project.")
     gate = evaluate_gate(db, project=project, gate=gate)
 
     if not gate.is_enabled:
@@ -1913,9 +2370,14 @@ def request_decision(
     if gate.status is not GateStatus.READY:
         raise InvalidGateStateError(gate, GateStatus.AWAITING_DECISION)
 
+    context = GateContext(db=db, project=project)
+    release_candidate = (
+        context.release_candidate if gate.gate_key is ApprovalGateKey.RELEASE else None
+    )
     approval = Approval(
         project_id=project.id,
         gate_key=gate.gate_key,
+        release_candidate_id=(release_candidate.id if release_candidate is not None else None),
         kind=ApprovalKind.GATE_DECISION,
         status=ApprovalStatus.PENDING,
         revision_number=project.current_revision_number,
@@ -1929,6 +2391,9 @@ def request_decision(
         context={
             "gate_key": gate.gate_key.value,
             "revision_number": project.current_revision_number,
+            "release_candidate_id": (
+                str(release_candidate.id) if release_candidate is not None else None
+            ),
             "criteria": gate.criteria,
             "unmet_criteria": gate.unmet_criteria,
         },
@@ -1968,7 +2433,12 @@ def request_decision(
             "gate_key": gate.gate_key.value,
         },
     )
-    _announce(db, project=project, gate=gate, previous_status=previous_status)
+    _announce(
+        db,
+        project=project,
+        gate=gate,
+        previous_status=previous_status,
+    )
     return approval
 
 
@@ -1995,15 +2465,35 @@ def record_decision(
       lies to itself, so it is a refusal and not a warning.
 
     ``REQUEST_CHANGES`` and ``DEFER`` are recorded on the approval but leave the
-    gate undecided and its ``decided_revision_number`` unset — neither is an
-    answer, and treating either as one would put a revision number against a
-    decision nobody made.
+    gate undecided and its ``decided_revision_number`` unset. They also hold the
+    gate until a covered revision is submitted or an operator explicitly resumes
+    a deferral; otherwise the worker would immediately ask the identical question
+    again.
     """
-    project = db.get(Project, gate.project_id)
+    # Lock the project first so a merge cannot advance the revision between the
+    # currency check and the write, then lock the exact gate/request pair. API
+    # callers also lock, but this service is the invariant and direct callers
+    # must receive the same guarantee.
+    project = lock_project_root(db, gate.project_id)
     if project is None:  # pragma: no cover - a gate cannot outlive its project
         raise LookupError(f"approval gate {gate.id} references a project that no longer exists")
 
-    _require_reviewer(db, project=project, user=user)
+    gate = db.execute(
+        select(ApprovalGate)
+        .where(ApprovalGate.id == gate.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+    if gate.project_id != project.id:
+        raise ConflictError("This approval gate no longer belongs to the locked project.")
+    approval = db.execute(
+        select(Approval)
+        .where(Approval.id == approval.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+
+    user = _require_reviewer(db, project=project, user=user)
 
     if approval.project_id != gate.project_id or approval.gate_key is not gate.gate_key:
         raise ConflictError(
@@ -2014,11 +2504,34 @@ def record_decision(
             f"This approval was already {approval.status.value}"
             + (f" on {approval.decided_at:%Y-%m-%d}." if approval.decided_at else ".")
         )
+    # Re-evaluate under the same project lock used by merges. This closes a
+    # request whose criteria changed and makes a stale revision/candidate a
+    # conflict rather than a signature over old content.
+    gate = evaluate_gate(db, project=project, gate=gate)
+    if not approval.is_pending:
+        raise ConflictError(
+            f"This approval request is no longer current: "
+            f"{approval.decision_notes or approval.status.value}."
+        )
+    if approval.revision_number != project.current_revision_number:
+        raise ConflictError(
+            f"This approval covers revision {approval.revision_number}, but the project is at "
+            f"revision {project.current_revision_number}. Request a current decision."
+        )
+    if gate.approval_id != approval.id:
+        raise ConflictError("This approval is no longer the request attached to the workflow gate.")
     if gate.status is not GateStatus.AWAITING_DECISION:
         raise InvalidGateStateError(gate, GateStatus.PASSED)
 
     context = GateContext(db=db, project=project)
     spec = spec_for(gate.gate_key)
+    if gate.gate_key is ApprovalGateKey.RELEASE:
+        candidate = context.release_candidate
+        if candidate is None or approval.release_candidate_id != candidate.id:
+            raise ConflictError(
+                "This release approval is not bound to the current release candidate. "
+                "Request a new final decision for the candidate being delivered."
+            )
 
     reason = _comment_required_because(context, spec=spec, decision=decision)
     if reason and not comment.strip():
@@ -2082,7 +2595,13 @@ def record_decision(
             "decided_by_id": str(user.id),
         },
     )
-    _announce(db, project=project, gate=gate, previous_status=previous_status)
+    _announce(
+        db,
+        project=project,
+        gate=gate,
+        previous_status=previous_status,
+        actor_user_id=user.id,
+    )
 
     logger.info(
         "approval gate decided",
@@ -2100,7 +2619,7 @@ def record_decision(
     # gate behind this one becomes ready the instant this decision lands, and a
     # city that only learns about it on the next unrelated page load would be
     # showing an engineer work they could already have started.
-    evaluate_all(db, project=project)
+    evaluate_all(db, project=project, actor_user_id=user.id)
     return gate
 
 
@@ -2118,22 +2637,19 @@ def decision_of(db: Session, gate: ApprovalGate) -> ApprovalDecision | None:
     return approval.decision if approval is not None else None
 
 
-def _require_reviewer(db: Session, *, project: Project, user: User) -> None:
+def _require_reviewer(db: Session, *, project: Project, user: User) -> User:
     """Only a human with the reviewer role on this project may settle a gate.
 
     Membership alone is not enough. An engineer signing off their own project's
     safety work is the separation the reviewer role exists to create, and a gate
     decision is the point where that separation either holds or does not.
     """
-    role = permissions.project_role_for(db, user, project.id)
-    if not permissions.can_decide_approval(user, role):
-        raise PermissionDeniedError(
-            "Recording an approval gate decision requires the reviewer role on this project. "
-            "This is an engineering sign-off, not a bookkeeping action.",
-            details={"required_any_of": sorted(item.value for item in permissions.REVIEW_ROLES)},
-        )
-    if not user.is_active:
-        raise PermissionDeniedError("A deactivated account cannot record an engineering decision.")
+    return permissions.require_current_reviewer(
+        db,
+        user_id=user.id,
+        project_id=project.id,
+        operation="record an approval gate decision",
+    )
 
 
 def _comment_required_because(
@@ -2164,7 +2680,12 @@ def _comment_required_because(
 # Announcing a change
 # ---------------------------------------------------------------------------
 def _announce(
-    db: Session, *, project: Project, gate: ApprovalGate, previous_status: GateStatus
+    db: Session,
+    *,
+    project: Project,
+    gate: ApprovalGate,
+    previous_status: GateStatus,
+    actor_user_id: uuid.UUID | None = None,
 ) -> None:
     """Broadcast a status change, carrying what is still outstanding.
 
@@ -2180,7 +2701,7 @@ def _announce(
         db,
         project_id=project.id,
         event_type=EventType.GATE_STATUS_CHANGED,
-        actor_user_id=gate.decided_by_id,
+        actor_user_id=actor_user_id,
         payload={
             "gate_key": gate.gate_key.value,
             "previous_status": previous_status.value,

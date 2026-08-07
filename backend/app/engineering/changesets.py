@@ -12,13 +12,13 @@ identified by ``(project_id, idempotency_key)``; building with a key that
 already exists returns the existing change set untouched.
 
 **Where the proposal lives.** :class:`~app.models.revision.ChangeOperation`
-stores ``before`` and ``after``, and has no separate column for "what was
-proposed" — by design, because the proposal *is* the after-state. So ``after``
-starts life holding the proposed field values and is finalised at merge time
-with what actually landed. The stated basis has nowhere else to go either, so it
-travels in the same dict under :data:`BASIS_KEY`, a key no column can collide
-with. Read both through :func:`proposed_values` and :func:`stated_basis` rather
-than indexing ``after`` directly.
+carries the proposal in ``values`` and ``basis``, which are written here and by
+nothing else. They are separate from ``before``/``after``, which are the merge's
+account of what actually happened. The two used to share ``after``: the proposal
+was written there and the merge overwrote it with the outcome, so a merged
+operation could no longer say what had been asked for. Read the proposal through
+:func:`proposed_values` and :func:`stated_basis`, which is where any future
+change of representation will stay contained.
 """
 
 from __future__ import annotations
@@ -40,7 +40,6 @@ from app.orchestration.events import record_event
 from app.security import audit
 
 __all__ = [
-    "BASIS_KEY",
     "RESUBMITTABLE_STATUSES",
     "TEMP_REFERENCE_PREFIX",
     "abandon",
@@ -61,10 +60,11 @@ __all__ = [
 #: substitutes the assigned id.
 TEMP_REFERENCE_PREFIX = "temp:"
 
-#: Reserved key inside ``ChangeOperation.after`` holding the operation's stated
-#: basis. ``$`` cannot begin a Python identifier, so it can never collide with a
-#: column name.
-BASIS_KEY = "$basis"
+# Must match ``ChangeSetAbandonedEventPayload.reason``. Event payload models
+# document the wire contract, but ``record_event`` intentionally does not run
+# Pydantic validation on every internal event, so the producer enforces this
+# before persisting or broadcasting an out-of-contract envelope.
+_MAX_ABANDON_REASON_LENGTH = 2_000
 
 #: Statuses a change set may be (re-)submitted from. A change set that came back
 #: conflicted or failed validation is corrected and submitted again rather than
@@ -93,14 +93,22 @@ def temp_key_of(value: Any) -> str:
 
 
 def proposed_values(operation: ChangeOperation) -> dict[str, Any]:
-    """The field values an operation proposes, without the reserved keys."""
-    return {key: value for key, value in operation.after.items() if not key.startswith("$")}
+    """The field values an operation proposes.
+
+    A copy, so that a caller reading the proposal cannot edit it by accident.
+    """
+    return dict(operation.values)
 
 
 def stated_basis(operation: ChangeOperation) -> list[dict[str, Any]]:
-    """The basis entries recorded with an operation, as plain dictionaries."""
-    raw = operation.after.get(BASIS_KEY)
-    return [entry for entry in raw if isinstance(entry, dict)] if isinstance(raw, list) else []
+    """The basis entries recorded with an operation, as plain dictionaries.
+
+    Anything in the column that is not a dictionary is dropped rather than
+    raising: the merge checks each entry and reports what it cannot resolve, and
+    a malformed entry must reach that check as "unresolvable", not as a crash
+    somewhere earlier that names no operation.
+    """
+    return [entry for entry in operation.basis if isinstance(entry, dict)]
 
 
 def find_by_idempotency_key(
@@ -173,11 +181,6 @@ def build_changeset(
     db.flush()
 
     for ordinal, proposal in enumerate(payload.operations):
-        after: dict[str, Any] = dict(proposal.values)
-        if proposal.basis:
-            after[BASIS_KEY] = [
-                basis.model_dump(mode="json", exclude_none=True) for basis in proposal.basis
-            ]
         db.add(
             ChangeOperation(
                 project_id=project.id,
@@ -189,8 +192,12 @@ def build_changeset(
                 temp_key=proposal.temp_key,
                 based_on_object_revision=proposal.based_on_object_revision,
                 field_name=proposal.field_name,
+                values=dict(proposal.values),
+                basis=[
+                    basis.model_dump(mode="json", exclude_none=True) for basis in proposal.basis
+                ],
                 before={},
-                after=after,
+                after={},
                 related_object_type=proposal.related_object_type,
                 related_object_id=proposal.related_object_id,
                 relationship_key=proposal.relationship_key,
@@ -280,10 +287,19 @@ def abandon(
     The reason is required. A change set that vanishes without one leaves the
     next person to look at the project unable to tell whether the work was
     rejected, superseded or simply forgotten.
+
+    Abandonment is announced as itself. It used to be recorded as a rejection
+    and broadcast as a review, which put a decision nobody made into both the
+    audit trail and the event stream: a rejection is a verdict on the work, and
+    this is a decision to stop carrying it.
     """
     cleaned = reason.strip()
     if not cleaned:
         raise ValidationError("Abandoning a change set requires a reason.")
+    if len(cleaned) > _MAX_ABANDON_REASON_LENGTH:
+        raise ValidationError(
+            f"An abandonment reason must be {_MAX_ABANDON_REASON_LENGTH:,} characters or fewer."
+        )
     if not changeset.is_open:
         raise InvalidStateTransitionError(
             "change set", changeset.status.value, ChangeSetStatus.ABANDONED.value
@@ -295,7 +311,7 @@ def abandon(
 
     audit.record(
         db,
-        AuditAction.CHANGESET_REJECTED,
+        AuditAction.CHANGESET_ABANDONED,
         actor_user_id=actor_user_id,
         actor_agent_kind=changeset.author_agent,
         project_id=changeset.project_id,
@@ -307,7 +323,7 @@ def abandon(
     record_event(
         db,
         project_id=changeset.project_id,
-        event_type=EventType.CHANGESET_REVIEWED,
+        event_type=EventType.CHANGESET_ABANDONED,
         actor_user_id=actor_user_id,
         task_id=changeset.task_id,
         payload={

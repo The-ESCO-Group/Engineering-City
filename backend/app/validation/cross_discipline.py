@@ -484,7 +484,21 @@ class TestCoverageValidator:
 
 
 class ApprovalIntegrityValidator:
-    """Objects that carry a signature for content they no longer hold."""
+    """Objects that carry a signature for content they no longer hold.
+
+    Staleness is established by revision, never by clock. ``object_revision`` is
+    bumped by every update and ``approved_object_revision`` is the revision the
+    reviewer signed, so an object edited since its approval is exactly one whose
+    revision has moved past the approved one — a comparison of two integers
+    written by the same transaction that changed them.
+
+    Wall-clock comparison was tried and is wrong. Recording an approval *is* an
+    update, so ``approved_at`` and ``updated_at`` are two independent reads of
+    the same clock in one flush: whether they land in the same tick decided
+    whether accepting a requirement reported the accepting reviewer for
+    tampering with it. A check that fires on the act it is meant to protect —
+    intermittently, at that — costs more trust than the defect it looks for.
+    """
 
     key = "cross.approval_integrity"
     discipline = _DISCIPLINE
@@ -497,43 +511,83 @@ class ApprovalIntegrityValidator:
             for row in rows:
                 if row.approval_state is not ObjectApprovalState.APPROVED:
                     continue
-                if row.approved_at is None:
+                approved_revision = row.approved_object_revision
+                if approved_revision is None:
+                    issues.append(self._unrecorded_issue(object_type, row, describe))
                     continue
-                approved_at = ensure_utc(row.approved_at)
-                updated_at = ensure_utc(row.updated_at)
-                if updated_at <= approved_at:
+                if row.object_revision <= approved_revision:
                     continue
-                issues.append(
-                    Issue(
-                        code="cross.approved_object_modified",
-                        discipline=_DISCIPLINE,
-                        # ERROR: an approved object is protected precisely so an
-                        # engineer's signature stays attached to what they read.
-                        # One that changed afterwards carries a name against
-                        # content that person never saw, which is the failure
-                        # the whole approval mechanism exists to prevent.
-                        severity=ValidationSeverity.ERROR,
-                        message=(
-                            f"{object_type.value} '{describe(row)}' was approved at "
-                            f"{approved_at.isoformat()} and modified at "
-                            f"{updated_at.isoformat()}, without a fresh approval."
-                        ),
-                        object_type=object_type,
-                        object_id=row.id,
-                        object_label=label(f"{object_type.value} / {describe(row)}"),
-                        suggested_action=(
-                            "Supersede the approved object with the edited version and take "
-                            "a fresh approval, or revert the edit."
-                        ),
-                        detail={
-                            "approved_at": approved_at.isoformat(),
-                            "updated_at": updated_at.isoformat(),
-                            "object_revision": row.object_revision,
-                        },
-                    )
-                )
+                issues.append(self._modified_issue(object_type, row, describe, approved_revision))
 
         return issues
+
+    @staticmethod
+    def _modified_issue(
+        object_type: ObjectType,
+        row: Any,
+        describe: Callable[[Any], str],
+        approved_revision: int,
+    ) -> Issue:
+        approved_at = ensure_utc(row.approved_at).isoformat() if row.approved_at else ""
+        return Issue(
+            code="cross.approved_object_modified",
+            discipline=_DISCIPLINE,
+            # ERROR: an approved object is protected precisely so an engineer's
+            # signature stays attached to what they read. One that changed
+            # afterwards carries a name against content that person never saw,
+            # which is the failure the whole approval mechanism exists to
+            # prevent.
+            severity=ValidationSeverity.ERROR,
+            message=(
+                f"{object_type.value} '{describe(row)}' was approved at revision "
+                f"{approved_revision} and has since been edited to revision "
+                f"{row.object_revision}, without a fresh approval."
+            ),
+            object_type=object_type,
+            object_id=row.id,
+            object_label=label(f"{object_type.value} / {describe(row)}"),
+            suggested_action=(
+                "Supersede the approved object with the edited version and take a fresh "
+                "approval, or revert the edit."
+            ),
+            detail={
+                "approved_object_revision": approved_revision,
+                "object_revision": row.object_revision,
+                "approved_at": approved_at,
+            },
+        )
+
+    @staticmethod
+    def _unrecorded_issue(
+        object_type: ObjectType, row: Any, describe: Callable[[Any], str]
+    ) -> Issue:
+        return Issue(
+            code="cross.approval_revision_unrecorded",
+            discipline=_DISCIPLINE,
+            # UNSUPPORTED, not ERROR: the object may be perfectly intact. What is
+            # missing is the evidence needed to say so, and claiming an edit
+            # nobody has shown would be the same over-reach in the other
+            # direction. Reported rather than skipped because an approval that
+            # does not state its subject silently removes this object from the
+            # only check that protects a signature.
+            severity=ValidationSeverity.UNSUPPORTED,
+            message=(
+                f"{object_type.value} '{describe(row)}' is approved but the approval does "
+                "not record which revision it covered, so whether it has been edited since "
+                "could not be checked."
+            ),
+            object_type=object_type,
+            object_id=row.id,
+            object_label=label(f"{object_type.value} / {describe(row)}"),
+            suggested_action=(
+                "Take a fresh approval, which records the revision it covers, or confirm by "
+                "hand that this object still holds the content that was signed."
+            ),
+            detail={
+                "object_revision": row.object_revision,
+                "approved_at": ensure_utc(row.approved_at).isoformat() if row.approved_at else "",
+            },
+        )
 
 
 class ReleaseFreshnessValidator:

@@ -18,9 +18,10 @@ validators over a three-row fixture would test those instead of these.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.agents.base.actions import (
@@ -70,6 +71,7 @@ from app.core.enums import (
     ValidationSeverity,
 )
 from app.core.errors import ConflictError, PermissionDeniedError, ValidationError
+from app.database.session import get_session_factory
 from app.engineering import changesets, gates, merge
 from app.models.approval import Approval
 from app.models.audit import AuditEntry
@@ -386,6 +388,58 @@ def test_ensure_gates_creates_the_six_in_order_and_is_idempotent(
     rows = db.execute(select(ApprovalGate).where(ApprovalGate.project_id == project.id)).scalars()
     assert len(rows.all()) == 6
     assert [gate.title for gate in second] == [spec.title for spec in gates.GATE_SPECS]
+
+
+def test_a_legacy_pass_without_a_bound_approval_fails_closed(
+    db: Session, project: Project, seeded: dict[str, User]
+) -> None:
+    _ready_project(db, project)
+    gate = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+    gate.status = GateStatus.PASSED
+    gate.decided_revision_number = project.current_revision_number
+    gate.decided_by_id = seeded["reviewer"].id
+    gate.decided_at = utcnow()
+    gate.approval_id = None
+    db.flush()
+
+    repaired = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+
+    assert repaired.status is GateStatus.NOT_READY
+    assert "recorded_decision_valid" in _keys(repaired)
+    assert "not bound" in _details(repaired)
+
+
+def test_a_settled_gate_whose_approval_names_another_decider_fails_closed(
+    db: Session, project: Project, seeded: dict[str, User]
+) -> None:
+    _ready_project(db, project)
+    gate = _pass(db, project, ApprovalGateKey.PROJECT_PROFILE, seeded["reviewer"])
+    approval = db.get(Approval, gate.approval_id)
+    assert approval is not None
+    approval.decided_by_id = seeded["engineer"].id
+    db.flush()
+
+    repaired = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+
+    assert repaired.status is GateStatus.NOT_READY
+    assert "recorded_decision_valid" in _keys(repaired)
+    assert "reviewer" in _details(repaired)
+
+
+def test_a_settled_gate_with_a_mismatched_decision_timestamp_fails_closed(
+    db: Session, project: Project, seeded: dict[str, User]
+) -> None:
+    _ready_project(db, project)
+    gate = _pass(db, project, ApprovalGateKey.PROJECT_PROFILE, seeded["reviewer"])
+    assert gate.decided_at is not None
+    gate.decided_at = gate.decided_at + timedelta(seconds=1)
+    db.flush()
+
+    repaired = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+
+    assert repaired.status is GateStatus.NOT_READY
+    assert "recorded_decision_valid" in _keys(repaired)
+    assert "decision time" in _details(repaired)
 
 
 def test_a_gate_that_is_not_ready_names_what_is_missing(db: Session, project: Project) -> None:
@@ -826,21 +880,23 @@ def test_accept_risk_passes_the_gate_but_stays_distinguishable_from_approve(
     assert entry.details["approval_status"] == ApprovalStatus.RISK_ACCEPTED.value
 
 
-def test_request_changes_returns_the_gate_to_the_queue_without_deciding_it(
+def test_request_changes_holds_the_gate_until_a_covered_change_is_merged(
     db: Session, project: Project, seeded: dict[str, User]
 ) -> None:
-    """Neither request-changes nor defer is an answer, so neither pins a revision."""
+    """The worker must not immediately ask the reviewer the identical question again."""
     _ready_project(db, project)
+    _pass(db, project, ApprovalGateKey.PROJECT_PROFILE, seeded["reviewer"])
     gate = _pass(
         db,
         project,
-        ApprovalGateKey.PROJECT_PROFILE,
+        ApprovalGateKey.DEVICES_IO_TAGS,
         seeded["reviewer"],
         decision=ApprovalDecision.REQUEST_CHANGES,
-        comment="Confirm the Studio version with the customer before I sign this.",
+        comment="Add the missing motor command tag before I sign this.",
     )
 
-    assert gate.status is GateStatus.READY
+    assert gate.status is GateStatus.NOT_READY
+    assert "requested_changes_not_submitted" in _keys(gate)
     assert gate.decided_revision_number is None
     assert gate.decided_at is None
     approval = db.get(Approval, gate.approval_id)
@@ -848,11 +904,38 @@ def test_request_changes_returns_the_gate_to_the_queue_without_deciding_it(
     assert approval.status is ApprovalStatus.CHANGES_REQUESTED
     assert approval.decided_by_id == seeded["reviewer"].id
 
-    # It can be asked again, and the second request is a new approval.
+    with pytest.raises(ConflictError):
+        gates.request_decision(db, project=project, gate=gate, requested_by_agent="project_manager")
+
+    _merge_a_tag(db, project, "MTR_104_Cmd_Run")
+    _validation_run(db, project)
+    gate = _gate(db, project, ApprovalGateKey.DEVICES_IO_TAGS)
+    assert gate.status is GateStatus.READY
+
+    # A covered revision is a real resubmission, so it receives a new request.
     again = gates.request_decision(
         db, project=project, gate=gate, requested_by_agent="project_manager"
     )
     assert again.id != approval.id
+
+
+def test_defer_holds_the_gate_without_reprompting(
+    db: Session, project: Project, seeded: dict[str, User]
+) -> None:
+    _ready_project(db, project)
+    gate = _pass(
+        db,
+        project,
+        ApprovalGateKey.PROJECT_PROFILE,
+        seeded["reviewer"],
+        decision=ApprovalDecision.DEFER,
+        comment="Resume after the customer design review.",
+    )
+
+    assert gate.status is GateStatus.NOT_READY
+    assert "decision_deferred" in _keys(gate)
+    with pytest.raises(ConflictError):
+        gates.request_decision(db, project=project, gate=gate, requested_by_agent="project_manager")
 
 
 # ---------------------------------------------------------------------------
@@ -936,7 +1019,7 @@ def test_import_verification_refuses_approval_when_no_workstation_ran_it(
     gate.status = GateStatus.AWAITING_DECISION
     db.flush()
 
-    with pytest.raises(ValidationError, match="cannot be approved"):
+    with pytest.raises(ConflictError, match="no longer current"):
         gates.record_decision(
             db,
             gate=gate,
@@ -945,7 +1028,10 @@ def test_import_verification_refuses_approval_when_no_workstation_ran_it(
             user=seeded["reviewer"],
             comment="Looks fine to me.",
         )
-    assert approval.is_pending
+    assert approval.status is ApprovalStatus.CANCELLED
+    assert "criteria no longer hold" in approval.decision_notes
+    assert gate.approval_id is None
+    assert gate.status is GateStatus.SKIPPED
 
 
 def test_import_verification_passes_only_on_a_real_verified_import(
@@ -1049,6 +1135,54 @@ def test_a_disabled_gate_is_recorded_with_its_reason_and_stops_blocking(
         )
     ).scalar_one()
     assert entry.details["reason"].startswith("The customer's own tag standard")
+    status_events = db.execute(
+        select(Event)
+        .where(
+            Event.project_id == project.id,
+            Event.event_type == EventType.GATE_STATUS_CHANGED,
+        )
+        .order_by(Event.seq.desc())
+    ).scalars()
+    status_event = next(
+        (
+            event
+            for event in status_events
+            if event.payload.get("gate_key") == ApprovalGateKey.DEVICES_IO_TAGS.value
+        ),
+        None,
+    )
+    assert status_event is not None
+    assert status_event.payload["gate_key"] == ApprovalGateKey.DEVICES_IO_TAGS.value
+    assert status_event.payload["status"] == GateStatus.SKIPPED.value
+    assert status_event.actor_user_id == seeded["admin"].id
+
+
+def test_gate_enablement_rejects_a_gate_bound_to_another_project(
+    db: Session, project: Project, seeded: dict[str, User]
+) -> None:
+    gate = _gate(db, project, ApprovalGateKey.DEVICES_IO_TAGS)
+    other = Project(
+        name="Another project",
+        description="Must not borrow another project's gate.",
+        client_reference="OTHER",
+        created_by_id=seeded["engineer"].id,
+    )
+    db.add(other)
+    db.commit()
+
+    with pytest.raises(ConflictError, match="does not belong"):
+        gates.set_gate_enabled(
+            db,
+            project=other,
+            gate=gate,
+            is_enabled=False,
+            reason="This reason must never land.",
+            user=seeded["admin"],
+        )
+    db.rollback()
+
+    db.expire_all()
+    assert db.get(ApprovalGate, gate.id).is_enabled is True  # type: ignore[union-attr]
 
 
 def test_disabling_a_gate_without_a_reason_is_refused(
@@ -1066,6 +1200,24 @@ def test_disabling_a_gate_without_a_reason_is_refused(
             user=seeded["admin"],
         )
     assert _gate(db, project, ApprovalGateKey.DEVICES_IO_TAGS).is_enabled
+
+
+def test_final_release_gate_cannot_be_disabled(
+    db: Session, project: Project, seeded: dict[str, User]
+) -> None:
+    gate = _gate(db, project, ApprovalGateKey.RELEASE)
+
+    with pytest.raises(ValidationError, match="cannot be disabled"):
+        gates.set_gate_enabled(
+            db,
+            project=project,
+            gate=gate,
+            is_enabled=False,
+            reason="Site integrator will sign later.",
+            user=seeded["admin"],
+        )
+
+    assert gate.is_enabled
 
 
 def test_only_an_administrator_may_disable_a_gate(
@@ -1175,6 +1327,246 @@ def test_requesting_a_decision_twice_yields_one_question(db: Session, project: P
     )
 
 
+def test_a_preloaded_session_cannot_overwrite_a_concurrent_gate_decision(
+    db: Session, project: Project, seeded: dict[str, User]
+) -> None:
+    _ready_project(db, project)
+    gate = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+    approval = gates.request_decision(
+        db, project=project, gate=gate, requested_by_agent="project_manager"
+    )
+    db.commit()
+
+    factory = get_session_factory()
+    stale = factory()
+    winner = factory()
+    try:
+        stale_gate = stale.get(ApprovalGate, gate.id)
+        stale_approval = stale.get(Approval, approval.id)
+        stale_reviewer = stale.get(User, seeded["reviewer"].id)
+        winner_gate = winner.get(ApprovalGate, gate.id)
+        winner_approval = winner.get(Approval, approval.id)
+        winner_reviewer = winner.get(User, seeded["reviewer"].id)
+        assert stale_gate is not None and stale_approval is not None and stale_reviewer is not None
+        assert winner_gate is not None and winner_approval is not None
+        assert winner_reviewer is not None
+
+        gates.record_decision(
+            winner,
+            gate=winner_gate,
+            approval=winner_approval,
+            decision=ApprovalDecision.APPROVE,
+            user=winner_reviewer,
+            comment="The first committed reviewer decision is authoritative.",
+        )
+        winner.commit()
+
+        with pytest.raises(ConflictError, match="already approved"):
+            gates.record_decision(
+                stale,
+                gate=stale_gate,
+                approval=stale_approval,
+                decision=ApprovalDecision.REJECT,
+                user=stale_reviewer,
+                comment="A stale session must not replace the first decision.",
+            )
+        stale.rollback()
+    finally:
+        stale.close()
+        winner.close()
+
+    db.expire_all()
+    stored = db.get(Approval, approval.id)
+    assert stored is not None
+    assert stored.status is ApprovalStatus.APPROVED
+    assert stored.decision is ApprovalDecision.APPROVE
+    assert stored.decision_notes == "The first committed reviewer decision is authoritative."
+
+
+def test_request_decision_refreshes_the_project_after_a_concurrent_revision_advance(
+    db: Session, project: Project
+) -> None:
+    _ready_project(db, project)
+    gate = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+    db.commit()
+
+    factory = get_session_factory()
+    stale = factory()
+    revision_writer = factory()
+    try:
+        stale_project = stale.get(Project, project.id)
+        stale_gate = stale.get(ApprovalGate, gate.id)
+        assert stale_project is not None and stale_gate is not None
+        old_revision = stale_project.current_revision_number
+
+        revision_writer.execute(
+            update(Project)
+            .where(Project.id == project.id)
+            .values(current_revision_number=Project.current_revision_number + 1)
+        )
+        revision_writer.commit()
+
+        approval = gates.request_decision(
+            stale,
+            project=stale_project,
+            gate=stale_gate,
+            requested_by_agent="project_manager",
+        )
+        assert stale_project.current_revision_number == old_revision + 1
+        assert approval.revision_number == old_revision + 1
+        stale.commit()
+    finally:
+        stale.close()
+        revision_writer.close()
+
+    db.expire_all()
+    stored = db.scalar(
+        select(Approval).where(
+            Approval.project_id == project.id,
+            Approval.kind == ApprovalKind.GATE_DECISION,
+            Approval.status == ApprovalStatus.PENDING,
+        )
+    )
+    assert stored is not None
+    assert stored.revision_number == old_revision + 1
+
+
+def test_record_decision_rechecks_a_reviewer_deactivated_after_page_load(
+    db: Session, project: Project, seeded: dict[str, User]
+) -> None:
+    _ready_project(db, project)
+    gate = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+    approval = gates.request_decision(
+        db, project=project, gate=gate, requested_by_agent="project_manager"
+    )
+    db.commit()
+
+    factory = get_session_factory()
+    stale = factory()
+    authority_writer = factory()
+    try:
+        stale_gate = stale.get(ApprovalGate, gate.id)
+        stale_approval = stale.get(Approval, approval.id)
+        stale_reviewer = stale.get(User, seeded["reviewer"].id)
+        assert stale_gate is not None and stale_approval is not None and stale_reviewer is not None
+
+        authority_writer.execute(
+            update(User).where(User.id == seeded["reviewer"].id).values(is_active=False)
+        )
+        authority_writer.commit()
+
+        with pytest.raises(PermissionDeniedError, match="deactivated"):
+            gates.record_decision(
+                stale,
+                gate=stale_gate,
+                approval=stale_approval,
+                decision=ApprovalDecision.APPROVE,
+                user=stale_reviewer,
+                comment="This stale authority must be refused.",
+            )
+        stale.rollback()
+    finally:
+        stale.close()
+        authority_writer.close()
+
+    db.expire_all()
+    stored = db.get(Approval, approval.id)
+    assert stored is not None and stored.status is ApprovalStatus.PENDING
+
+
+def test_duplicate_pending_gate_requests_converge_to_one(db: Session, project: Project) -> None:
+    _ready_project(db, project)
+    gate = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+    first = gates.request_decision(
+        db, project=project, gate=gate, requested_by_agent="project_manager"
+    )
+    duplicate = Approval(
+        project_id=project.id,
+        gate_key=gate.gate_key,
+        kind=ApprovalKind.GATE_DECISION,
+        status=ApprovalStatus.PENDING,
+        revision_number=project.current_revision_number,
+        title=first.title,
+        question=first.question,
+    )
+    db.add(duplicate)
+    db.flush()
+
+    converged = gates.request_decision(
+        db, project=project, gate=gate, requested_by_agent="project_manager"
+    )
+
+    assert converged.id == first.id
+    assert duplicate.status is ApprovalStatus.CANCELLED
+    assert "duplicate pending request" in duplicate.decision_notes
+    pending = list(
+        db.execute(
+            select(Approval).where(
+                Approval.project_id == project.id,
+                Approval.gate_key == gate.gate_key,
+                Approval.status == ApprovalStatus.PENDING,
+            )
+        ).scalars()
+    )
+    assert [row.id for row in pending] == [first.id]
+
+
+def test_pending_decision_is_cancelled_when_the_project_revision_moves(
+    db: Session, project: Project
+) -> None:
+    _ready_project(db, project)
+    gate = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+    approval = gates.request_decision(
+        db, project=project, gate=gate, requested_by_agent="project_manager"
+    )
+
+    _merge_a_tag(db, project, "MTR_105_Cmd_Run")
+    _validation_run(db, project)
+    refreshed = _gate(db, project, ApprovalGateKey.PROJECT_PROFILE)
+
+    assert approval.status is ApprovalStatus.CANCELLED
+    assert "project is now at revision" in approval.decision_notes
+    assert refreshed.approval_id is None
+    assert refreshed.status is GateStatus.READY
+
+
+def test_release_decision_is_bound_to_the_exact_current_candidate(
+    db: Session, project: Project, seeded: dict[str, User]
+) -> None:
+    _ready_project(db, project)
+    for key in (
+        ApprovalGateKey.PROJECT_PROFILE,
+        ApprovalGateKey.DEVICES_IO_TAGS,
+        ApprovalGateKey.LOGIC_AND_DELIVERY,
+        ApprovalGateKey.QA_AND_RISK,
+    ):
+        _pass(db, project, key, seeded["reviewer"])
+
+    gate = _gate(db, project, ApprovalGateKey.RELEASE)
+    first = gates.request_decision(db, project=project, gate=gate, requested_by_agent="delivery")
+    first_candidate = (
+        db.execute(
+            select(ReleaseCandidate)
+            .where(ReleaseCandidate.project_id == project.id)
+            .order_by(ReleaseCandidate.candidate_number.desc())
+        )
+        .scalars()
+        .first()
+    )
+    assert first_candidate is not None
+    assert first.release_candidate_id == first_candidate.id
+
+    second_candidate = _release(db, project, candidate_number=2, name="RC 2")
+    refreshed = _gate(db, project, ApprovalGateKey.RELEASE)
+    assert first.status is ApprovalStatus.CANCELLED
+    assert refreshed.status is GateStatus.READY
+
+    second = gates.request_decision(
+        db, project=project, gate=refreshed, requested_by_agent="delivery"
+    )
+    assert second.release_candidate_id == second_candidate.id
+
+
 def test_a_decision_cannot_be_recorded_against_another_gates_approval(
     db: Session, project: Project, seeded: dict[str, User]
 ) -> None:
@@ -1199,6 +1591,43 @@ def test_a_decision_cannot_be_recorded_against_another_gates_approval(
 # ---------------------------------------------------------------------------
 # What the city is told
 # ---------------------------------------------------------------------------
+def test_human_gate_events_name_the_actor_but_an_automated_reopen_does_not(
+    db: Session, project: Project, seeded: dict[str, User]
+) -> None:
+    _ready_project(db, project)
+    _pass(db, project, ApprovalGateKey.PROJECT_PROFILE, seeded["reviewer"])
+    _pass(db, project, ApprovalGateKey.DEVICES_IO_TAGS, seeded["reviewer"])
+    db.commit()
+
+    _merge_a_tag(db, project, "MTR_106_Cmd_Run")
+    gates.evaluate_all(db, project=project)
+    db.commit()
+
+    records = list(
+        db.execute(
+            select(Event)
+            .where(
+                Event.project_id == project.id,
+                Event.event_type == EventType.GATE_STATUS_CHANGED,
+            )
+            .order_by(Event.seq)
+        ).scalars()
+    )
+    device_events = [
+        record
+        for record in records
+        if record.payload["gate_key"] == ApprovalGateKey.DEVICES_IO_TAGS.value
+    ]
+    passed = next(
+        record for record in device_events if record.payload["status"] == GateStatus.PASSED.value
+    )
+    reopened = device_events[-1]
+    assert passed.actor_user_id == seeded["reviewer"].id
+    assert reopened.payload["status"] == GateStatus.NOT_READY.value
+    assert reopened.actor_user_id is None
+    assert reopened.payload["decided_by_id"] == str(seeded["reviewer"].id)
+
+
 def test_a_status_change_broadcasts_the_unmet_criteria_in_its_published_shape(
     db: Session, project: Project, seeded: dict[str, User]
 ) -> None:
@@ -1344,6 +1773,107 @@ def test_a_stale_validation_run_is_not_a_clean_one(db: Session, project: Project
     gate = _gate(db, project, ApprovalGateKey.DEVICES_IO_TAGS)
     assert "tag_and_io_validation_current" in _keys(gate)
     assert "no_open_tag_or_io_errors" not in _keys(gate)
+
+
+def test_equal_time_current_validation_runs_reopen_qa_and_release_fail_closed(
+    db: Session, project: Project, seeded: dict[str, User]
+) -> None:
+    """A UUID may make query output stable, but it cannot decide which run superseded which."""
+    _ready_project(db, project)
+    reviewer = seeded["reviewer"]
+    for key in (
+        ApprovalGateKey.PROJECT_PROFILE,
+        ApprovalGateKey.DEVICES_IO_TAGS,
+        ApprovalGateKey.LOGIC_AND_DELIVERY,
+        ApprovalGateKey.QA_AND_RISK,
+    ):
+        _pass(db, project, key, reviewer)
+    _pass(
+        db,
+        project,
+        ApprovalGateKey.RELEASE,
+        reviewer,
+        comment="Released after reviewing the complete current validation record.",
+    )
+
+    first = _validation_run(db, project)
+    second = _validation_run(db, project, errors=1)
+    tied_at = utcnow() + timedelta(days=1)
+    first.created_at = tied_at
+    second.created_at = tied_at
+    db.flush()
+
+    evaluated = {gate.gate_key: gate for gate in gates.evaluate_all(db, project=project)}
+    qa = evaluated[ApprovalGateKey.QA_AND_RISK]
+    release_gate = evaluated[ApprovalGateKey.RELEASE]
+
+    assert qa.status is GateStatus.NOT_READY
+    assert "full_validation_current" in _keys(qa)
+    assert "same recorded creation time" in _details(qa)
+    assert release_gate.status is GateStatus.NOT_READY
+    assert "no_errors_at_release" in _keys(release_gate)
+    assert "same recorded creation time" in _details(release_gate)
+    context = gates.GateContext(db=db, project=project)
+    assert context.validation_run_is_ambiguous is True
+    assert context.validation_run is None
+
+
+def test_equal_time_older_runs_do_not_hide_a_unique_current_run(
+    db: Session, project: Project
+) -> None:
+    """Revision order outranks timestamps; only an equal-time current head is ambiguous."""
+    project.current_revision_number = 2
+    current = _validation_run(db, project, revision=2)
+    older_first = _validation_run(db, project, revision=1)
+    older_second = _validation_run(db, project, revision=1)
+    tied_at = utcnow() + timedelta(days=1)
+    older_first.created_at = tied_at
+    older_second.created_at = tied_at
+    db.flush()
+
+    context = gates.GateContext(db=db, project=project)
+    assert context.validation_run_is_ambiguous is False
+    assert context.validation_run is current
+
+
+def test_a_future_revision_validation_run_reopens_qa_and_release_fail_closed(
+    db: Session, project: Project, seeded: dict[str, User]
+) -> None:
+    """A malformed future claim must not displace current validation by revision ordering."""
+    _ready_project(db, project)
+    reviewer = seeded["reviewer"]
+    for key in (
+        ApprovalGateKey.PROJECT_PROFILE,
+        ApprovalGateKey.DEVICES_IO_TAGS,
+        ApprovalGateKey.LOGIC_AND_DELIVERY,
+        ApprovalGateKey.QA_AND_RISK,
+    ):
+        _pass(db, project, key, reviewer)
+    _pass(
+        db,
+        project,
+        ApprovalGateKey.RELEASE,
+        reviewer,
+        comment="Released after reviewing the current validation record.",
+    )
+
+    _validation_run(db, project, revision=project.current_revision_number + 1)
+    db.flush()
+
+    evaluated = {gate.gate_key: gate for gate in gates.evaluate_all(db, project=project)}
+    qa = evaluated[ApprovalGateKey.QA_AND_RISK]
+    release_gate = evaluated[ApprovalGateKey.RELEASE]
+    context = gates.GateContext(db=db, project=project)
+
+    assert context.validation_run_is_from_future_revision is True
+    assert context.validation_run is None
+    assert context.run_covers(ALL_DISCIPLINES) is False
+    assert qa.status is GateStatus.NOT_READY
+    assert "full_validation_current" in _keys(qa)
+    assert "claims future revision" in _details(qa)
+    assert release_gate.status is GateStatus.NOT_READY
+    assert "no_errors_at_release" in _keys(release_gate)
+    assert "claims future revision" in _details(release_gate)
 
 
 def test_every_discipline_a_gate_asks_for_is_one_a_validator_covers(db: Session) -> None:

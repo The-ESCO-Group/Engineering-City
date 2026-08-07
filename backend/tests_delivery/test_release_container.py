@@ -62,7 +62,7 @@ def _write_package(tmp_path: Path) -> Path:
         "00_Manifest/LIMITATIONS.md": (
             b"# Known limitations\nNo Studio 5000 import was attempted.\n"
         ),
-        "01_Controller/Line4.L5X": b"<RSLogix5000Content SchemaRevision=\"1.0\"/>\n",
+        "01_Controller/Line4.L5X": b'<RSLogix5000Content SchemaRevision="1.0"/>\n',
         "02_HMI/HMI_Tags.csv": b"TagName,DataType\nLine4_Run,Boolean\n",
         "03_Alarms/Alarm_Register.csv": b"AlarmId,Trigger\nALM-1,Line4_Fault\n",
         "04_Testing/IAT_Plan.xlsx": b"synthetic-xlsx-test-bytes",
@@ -127,8 +127,7 @@ def _reindex_package(package: Path) -> None:
     checksummed = {**artifacts, MANIFEST_PATH: manifest_bytes}
     (package / CHECKSUM_PATH).write_bytes(
         "".join(
-            f"{_digest(data)}  {relative}\n"
-            for relative, data in sorted(checksummed.items())
+            f"{_digest(data)}  {relative}\n" for relative, data in sorted(checksummed.items())
         ).encode()
     )
 
@@ -225,9 +224,10 @@ def test_release_zip_is_complete_deterministic_and_truthful(tmp_path: Path) -> N
         assert f"{RELEASE_NAME}/05_Reports/Executive_Summary.pdf" in names
         assert f"{RELEASE_NAME}/06_Audit/evidence_index.json" in names
         assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in archive.infolist())
-        assert archive.read(f"{RELEASE_NAME}/01_Controller/Line4.L5X") == (
-            package / "01_Controller/Line4.L5X"
-        ).read_bytes()
+        assert (
+            archive.read(f"{RELEASE_NAME}/01_Controller/Line4.L5X")
+            == (package / "01_Controller/Line4.L5X").read_bytes()
+        )
 
 
 def test_release_zip_accepts_the_real_rockwell_core_package_layout(tmp_path: Path) -> None:

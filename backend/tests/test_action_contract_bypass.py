@@ -664,9 +664,9 @@ def test_a_changeset_proposal_without_a_declared_consumer_fails_closed(
     payload = minimal_payloads()[ActionType.PROPOSE_CHANGESET]
     outcome.accepted = [validated(ActionType.PROPOSE_CHANGESET, payload)]
 
-    result = ActionExecutor(
-        db, project, agent_kind=AGENT_KIND, run_id=outcome.run.id
-    ).execute(outcome)
+    result = ActionExecutor(db, project, agent_kind=AGENT_KIND, run_id=outcome.run.id).execute(
+        outcome
+    )
 
     assert result.handoffs == []
     assert [item.action_type for item in result.unexecuted] == ["propose_changeset"]

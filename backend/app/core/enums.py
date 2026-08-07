@@ -537,7 +537,12 @@ class AuditAction(StrEnum):
     CHANGESET_CREATED = "changeset.created"
     CHANGESET_SUBMITTED = "changeset.submitted"
     CHANGESET_MERGED = "changeset.merged"
+    #: A reviewer turned the change set down. Distinct from abandonment: a
+    #: rejection is a verdict on the work, abandonment is a decision to stop
+    #: carrying it. Reserved for the review path; nothing writes it yet, and
+    #: ``changesets.abandon`` deliberately no longer does.
     CHANGESET_REJECTED = "changeset.rejected"
+    CHANGESET_ABANDONED = "changeset.abandoned"
     REVISION_CREATED = "revision.created"
     TAG_RENAMED = "tag.renamed"
     GATE_DECIDED = "gate.decided"
@@ -601,6 +606,11 @@ class EventType(StrEnum):
     CHANGESET_VALIDATION_FAILED = "changeset.validation_failed"
     CHANGESET_SUBMITTED = "changeset.submitted"
     CHANGESET_REVIEWED = "changeset.reviewed"
+    #: Closed without ever being merged. Separate from ``CHANGESET_REVIEWED``
+    #: because a client that reads the stream to answer "what happened to this
+    #: proposal" cannot tell a verdict from a withdrawal if both arrive under
+    #: the same type.
+    CHANGESET_ABANDONED = "changeset.abandoned"
     CHANGESET_MERGED = "changeset.merged"
     REVISION_CREATED = "revision.created"
     GATE_STATUS_CHANGED = "gate.status_changed"

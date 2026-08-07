@@ -192,6 +192,19 @@ def test_abandoning_requires_a_reason(db: Session, project: Project) -> None:
         changesets.abandon(db, changeset, "   ")
 
 
+def test_abandoning_rejects_a_reason_outside_the_event_contract(
+    db: Session, project: Project
+) -> None:
+    """A persisted event must never violate its published 2,000-character shape."""
+    changeset = changesets.build_changeset(db, project=project, payload=_payload())
+
+    with pytest.raises(ValidationError, match="2,000 characters or fewer"):
+        changesets.abandon(db, changeset, "x" * 2_001)
+
+    assert changeset.status is ChangeSetStatus.DRAFT
+    assert not _events(db, project, EventType.CHANGESET_ABANDONED)
+
+
 def test_abandoning_records_why(db: Session, project: Project) -> None:
     changeset = changesets.build_changeset(db, project=project, payload=_payload())
     changesets.abandon(db, changeset, "Superseded by the revised motor template.")
@@ -200,8 +213,8 @@ def test_abandoning_records_why(db: Session, project: Project) -> None:
     assert changeset.status is ChangeSetStatus.ABANDONED
     assert changeset.disposition_reason == "Superseded by the revised motor template."
     assert not changeset.is_open
-    reviewed = _events(db, project, EventType.CHANGESET_REVIEWED)
-    assert reviewed[-1].payload["reason"] == "Superseded by the revised motor template."
+    abandoned = _events(db, project, EventType.CHANGESET_ABANDONED)
+    assert abandoned[-1].payload["reason"] == "Superseded by the revised motor template."
 
 
 # ---------------------------------------------------------------------------

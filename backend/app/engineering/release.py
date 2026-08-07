@@ -63,7 +63,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.adapters.workstation import get_adapter
-from app.core.clock import isoformat_z, utcnow
+from app.core.clock import ensure_utc, isoformat_z, utcnow
 from app.core.config import Settings, get_settings
 from app.core.enums import (
     MAX_OFFLINE_VALIDATION_LEVEL,
@@ -84,10 +84,12 @@ from app.core.enums import (
     TagScope,
     ValidationLevel,
     ValidationRunStatus,
+    ValidationSeverity,
 )
 from app.core.errors import ConflictError, NotFoundError
 from app.core.logging import get_logger
 from app.core.storage import ProjectStorage
+from app.database.locking import lock_project_root
 from app.engineering import gates, registry
 from app.engineering.revisions import (
     current_revision_number,
@@ -136,6 +138,7 @@ from app.models.release import (
     ImportDependency,
     ReleaseCandidate,
     ReleaseManifest,
+    ValidationResult,
     ValidationRun,
 )
 from app.models.requirements import Requirement
@@ -296,8 +299,13 @@ class ReleaseReadiness:
     #: Gates at or before :data:`_PRE_GENERATION_GATE` that are still open, in
     #: gate order, so a UI can point at the first one to work on.
     outstanding_gates: tuple[ApprovalGateKey, ...]
-    #: Unwaived errors in the newest completed validation run. Only ``ERROR``
-    #: blocks; warnings are information a human weighs.
+    #: Every error the newest completed validation run found, waived or not.
+    #: Deliberately the total and not the outstanding subset: it is the number the
+    #: package manifest records, and a project that reported zero once a reviewer
+    #: had carried them would look afterwards exactly like one that never had any.
+    #: What *blocks* is the unwaived subset, which is why this number can be
+    #: nonzero while :attr:`is_ready` is true — the waivers are on the results
+    #: themselves, each naming who carried it and why.
     validation_error_count: int
     #: The ceiling this deployment can reach at all — not what any package has
     #: reached. Without a licensed workstation it is ``ROUND_TRIP_PARSED``, and
@@ -321,6 +329,15 @@ class ReleaseReadiness:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class _ValidationRunSelection:
+    """The newest run plus whether its authoritative ordering is ambiguous."""
+
+    run: ValidationRun | None
+    ambiguous_current_revision: bool = False
+    future_revision: int | None = None
+
+
 # ---------------------------------------------------------------------------
 # Readiness
 # ---------------------------------------------------------------------------
@@ -337,12 +354,19 @@ def release_readiness(
     """
     active = settings or get_settings()
     revision = current_revision_number(db, project.id)
-    run = _latest_completed_run(db, project)
+    selection = _latest_completed_run_selection(db, project, revision_number=revision)
+    run = selection.run
 
     blocks = [
         *_profile_blocks(_profile_of(db, project)),
         *_controller_blocks(db, project),
-        *_validation_blocks(run, revision),
+        *_validation_blocks(
+            run,
+            revision,
+            unwaived_errors=_unwaived_error_count(db, run),
+            ambiguous_current_revision=selection.ambiguous_current_revision,
+            future_revision=selection.future_revision,
+        ),
     ]
     outstanding = _outstanding_gates(db, project, _PRE_GENERATION_GATE)
     if outstanding:
@@ -397,6 +421,14 @@ def create_release_candidate(
     and a profile that forbids generation are refusals, not warnings.
     """
     active = settings or get_settings()
+    # Candidate numbering and "latest candidate" gate binding are project-wide
+    # invariants. Take the same cross-dialect write root as gate decisions
+    # before reading readiness or MAX(candidate_number), then replace any
+    # route/worker-preloaded identity with the authoritative project row.
+    locked_project = lock_project_root(db, project.id)
+    if locked_project is None:  # pragma: no cover - callers already authorize the project
+        raise NotFoundError("Project", project.id)
+    project = locked_project
     readiness = release_readiness(db, project=project, settings=active)
     if not readiness.is_ready:
         raise ReleaseRefused(readiness.blocking)
@@ -861,7 +893,55 @@ def _controller_blocks(db: Session, project: Project) -> list[ReleaseBlock]:
     ]
 
 
-def _validation_blocks(run: ValidationRun | None, revision: int) -> list[ReleaseBlock]:
+def _validation_blocks(
+    run: ValidationRun | None,
+    revision: int,
+    *,
+    unwaived_errors: int,
+    ambiguous_current_revision: bool = False,
+    future_revision: int | None = None,
+) -> list[ReleaseBlock]:
+    """Why the newest validation run stops a release, or nothing if it does not.
+
+    ``unwaived_errors`` rather than :attr:`ValidationRun.is_blocking` is the whole
+    content of this signature, and it has no default deliberately: a caller that
+    omitted it would get "nothing is in the way", and this function's failure
+    direction has to be closed. ``error_count`` on the run is the total the
+    validators found, and it stays the total because the package manifest records
+    it. What a release turns on is narrower: an error a named reviewer has
+    carried, with a stated reason, through
+    :func:`app.core.services.validation_review.waive`, has been *decided* rather
+    than left outstanding. Gates 2 to 4 already count it that way
+    (:meth:`app.engineering.gates.GateContext.errors` filters waived results), so
+    reading the raw total here made a project able to pass every gate on accepted
+    risk and then be refused a package for the errors those gates had just
+    settled — the waiver mechanism blocking on the thing it exists to permit.
+    """
+    if future_revision is not None:
+        return [
+            ReleaseBlock(
+                code=BlockCode.NO_VALIDATION_RUN,
+                summary="The validation history claims a future project revision.",
+                detail=(
+                    f"The leading completed run claims revision {future_revision}; the project "
+                    f"is at revision {revision}. A future-revision run cannot be authoritative. "
+                    "Repair the validation history and run validation again at the current "
+                    "revision."
+                ),
+            )
+        ]
+    if ambiguous_current_revision:
+        return [
+            ReleaseBlock(
+                code=BlockCode.NO_VALIDATION_RUN,
+                summary="No authoritative validation run can be identified.",
+                detail=(
+                    f"Two completed runs for revision {revision} share the same recorded "
+                    "creation time. Neither can safely supersede the other; run validation "
+                    "again before creating a release candidate."
+                ),
+            )
+        ]
     if run is None:
         return [
             ReleaseBlock(
@@ -874,7 +954,7 @@ def _validation_blocks(run: ValidationRun | None, revision: int) -> list[Release
                 ),
             )
         ]
-    if run.revision_number < revision:
+    if run.revision_number != revision:
         return [
             ReleaseBlock(
                 code=BlockCode.NO_VALIDATION_RUN,
@@ -886,19 +966,45 @@ def _validation_blocks(run: ValidationRun | None, revision: int) -> list[Release
                 ),
             )
         ]
-    if not run.is_blocking:
+    if unwaived_errors <= 0:
         return []
+    carried = max(int(run.error_count or 0) - unwaived_errors, 0)
     return [
         ReleaseBlock(
             code=BlockCode.VALIDATION_ERRORS,
             summary="The model has unresolved validation errors.",
             detail=(
                 f"Validation run at revision {run.revision_number} reported "
-                f"{run.error_count} error(s). Generating from a model with errors "
-                "produces a package that fails at import for a reason already known."
+                f"{unwaived_errors} error(s) that nobody has resolved or waived"
+                + (f", alongside {carried} a reviewer has carried" if carried else "")
+                + ". Generating from a model with errors produces a package that fails at "
+                "import for a reason already known."
             ),
         )
     ]
+
+
+def _unwaived_error_count(db: Session, run: ValidationRun | None) -> int:
+    """Errors in ``run`` that no reviewer has carried.
+
+    Counted with a query rather than from ``run.error_count`` because a waiver is
+    recorded on the result long after the run computed its totals, and because
+    those totals are what the manifest reports and must stay the totals.
+    """
+    if run is None:
+        return 0
+    return int(
+        db.execute(
+            select(func.count())
+            .select_from(ValidationResult)
+            .where(
+                ValidationResult.validation_run_id == run.id,
+                ValidationResult.severity == ValidationSeverity.ERROR,
+                ValidationResult.is_waived.is_(False),
+            )
+        ).scalar_one()
+        or 0
+    )
 
 
 def _gate_block(outstanding: Sequence[ApprovalGateKey]) -> ReleaseBlock:
@@ -1873,23 +1979,57 @@ def _export_profile_of(db: Session, candidate: ReleaseCandidate) -> ExportProfil
     return db.get(ExportProfile, candidate.export_profile_id)
 
 
-def _latest_completed_run(db: Session, project: Project) -> ValidationRun | None:
+def _latest_completed_run_selection(
+    db: Session,
+    project: Project,
+    *,
+    revision_number: int | None = None,
+) -> _ValidationRunSelection:
     """The newest completed run. A run still going or failed says nothing.
 
     Same rule and same ordering as
     :attr:`~app.engineering.gates.GateContext.validation_run`, so the gate and
     the release service cannot form different opinions about which run counts.
     """
-    return db.execute(
-        select(ValidationRun)
-        .where(
-            ValidationRun.project_id == project.id,
-            ValidationRun.status == ValidationRunStatus.COMPLETED,
-            ValidationRun.deleted_at.is_(None),
-        )
-        .order_by(ValidationRun.revision_number.desc(), ValidationRun.created_at.desc())
-        .limit(1)
-    ).scalar_one_or_none()
+    rows = tuple(
+        db.execute(
+            select(ValidationRun)
+            .where(
+                ValidationRun.project_id == project.id,
+                ValidationRun.status == ValidationRunStatus.COMPLETED,
+                ValidationRun.deleted_at.is_(None),
+            )
+            .order_by(
+                ValidationRun.revision_number.desc(),
+                ValidationRun.created_at.desc(),
+                ValidationRun.id.desc(),
+            )
+            .limit(2)
+        ).scalars()
+    )
+    if not rows:
+        return _ValidationRunSelection(run=None)
+
+    revision = (
+        current_revision_number(db, project.id) if revision_number is None else revision_number
+    )
+    newest = rows[0]
+    if newest.revision_number > revision:
+        return _ValidationRunSelection(run=None, future_revision=newest.revision_number)
+    ambiguous = (
+        len(rows) > 1
+        and newest.revision_number == revision
+        and rows[1].revision_number == revision
+        and ensure_utc(newest.created_at) == ensure_utc(rows[1].created_at)
+    )
+    return _ValidationRunSelection(
+        run=None if ambiguous else newest,
+        ambiguous_current_revision=ambiguous,
+    )
+
+
+def _latest_completed_run(db: Session, project: Project) -> ValidationRun | None:
+    return _latest_completed_run_selection(db, project).run
 
 
 def _latest_completed_run_id(db: Session, project: Project) -> uuid.UUID | None:

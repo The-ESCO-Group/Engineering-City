@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "./routing";
 import { Activity, AlertTriangle, Archive, Bell, BellRing, Bot, Building2, ChevronDown, ClipboardCheck, Clock3, Database, FileText, Filter, FlaskConical, FolderKanban, ListChecks, LogOut, Menu, Monitor, Plus, Search, Settings, ShieldAlert, Wifi } from "lucide-react";
+import { apiServerBaseUrl, engineeringApi } from "./api/client";
 import { useEngineeringData } from "./api/live";
+import type { ExternalAgentDeployRequest } from "./api/types";
 import { City } from "./components/City";
 import { ConnectionCenter } from "./components/ConnectionCenter";
 import { DesktopCenter } from "./components/DesktopCenter";
@@ -261,11 +263,43 @@ function OperationsCenterPage({ view }: { view: OperationsView }) {
   const engineering = useEngineeringData();
   const navigate = useNavigate();
   const source = useMemo(() => operationsSourceFromEngineering(engineering), [engineering]);
+  const projectRole = engineering.projectId
+    ? engineering.currentUser?.project_roles[engineering.projectId]
+    : undefined;
+  const projectAcceptsAgent = Boolean(
+    engineering.project
+      && !engineering.project.is_paused
+      && !["archived", "completed", "failed"].includes(engineering.project.status)
+  );
+  const canDeployExternalAgent = engineering.dataMode === "live"
+    && Boolean(engineering.projectId)
+    && (projectRole === "owner" || projectRole === "engineer")
+    && projectAcceptsAgent;
+  const externalAgentDisabledReason = engineering.dataMode !== "live"
+    ? "Sign in to a live local project before sending an SDK agent."
+    : !engineering.projectId
+      ? "Select a project before sending an SDK agent."
+      : projectRole !== "owner" && projectRole !== "engineer"
+        ? "Project owner or engineer access is required."
+        : !projectAcceptsAgent
+          ? "Resume or reopen this project before sending an SDK agent."
+          : "Agent deployment is unavailable.";
+  const deployExternalAgent = canDeployExternalAgent && engineering.projectId
+    ? async (payload: ExternalAgentDeployRequest) => {
+        const response = await engineeringApi.deployExternalAgent(engineering.projectId!, payload);
+        await engineering.refresh();
+        return response;
+      }
+    : undefined;
   return (
     <Suspense fallback={<FeatureLoading label={view === "agents" ? "agent operations" : "Audit Trail"} />}>
       <OperationsCenter
         source={source}
         view={view}
+        serverBaseUrl={apiServerBaseUrl()}
+        canDeployExternalAgent={canDeployExternalAgent}
+        externalAgentDisabledReason={externalAgentDisabledReason}
+        onDeployExternalAgent={deployExternalAgent}
         onOpenCityLocation={(semanticLocation) => navigate(`/?location=${encodeURIComponent(semanticLocation)}`)}
       />
     </Suspense>

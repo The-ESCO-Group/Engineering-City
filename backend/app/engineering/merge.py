@@ -55,7 +55,6 @@ from app.core.enums import (
 )
 from app.engineering import registry
 from app.engineering.changesets import (
-    BASIS_KEY,
     is_temp_reference,
     proposed_values,
     stated_basis,
@@ -162,6 +161,23 @@ class _Issue:
 
     def render(self) -> str:
         return f"operation {self.ordinal}: {self.message}"
+
+    def record(self) -> dict[str, Any]:
+        """The same error as structured data, for ``MergeResult.validation_errors``.
+
+        The rendered sentence is carried alongside the parts rather than derived
+        from them by a reader: it is the wording an engineer was actually shown,
+        and a report that reconstructs its own phrasing later would quietly stop
+        matching the explanation the merge published.
+        """
+        return {
+            "ordinal": self.ordinal,
+            "object_type": self.object_type.value,
+            "object_label": self.object_label,
+            "field_name": self.field_name,
+            "message": self.message,
+            "rendered": self.render(),
+        }
 
 
 @dataclass(slots=True)
@@ -919,6 +935,19 @@ def _coerce_fields(
     failed = False
 
     for name, value in fields.items():
+        restriction = registry.field_write_restriction(object_type, name)
+        if restriction:
+            issues.append(
+                _Issue(
+                    message=(f"field {name!r} is not writable through a change set: {restriction}"),
+                    ordinal=operation.ordinal,
+                    object_type=object_type,
+                    object_label=label,
+                    field_name=name,
+                )
+            )
+            failed = True
+            continue
         if name in registry.PROTECTED_FIELDS:
             issues.append(
                 _Issue(
@@ -1440,16 +1469,16 @@ def _write_back(applied: Sequence[_Applied], *, dry_run: bool) -> None:
     A dry run records ``before`` and ``after`` too, and nothing else: knowing
     what *would* change is the entire point of rehearsing, but the operation was
     not applied and must not claim to have been.
+
+    ``values`` and ``basis`` are not touched here, by either path. They are what
+    was asked for, and the answer to that question does not change because a
+    merge happened.
     """
     now = utcnow()
     for item in applied:
         operation = item.operation
-        basis = operation.after.get(BASIS_KEY)
-        after = dict(item.after)
-        if basis is not None:
-            after[BASIS_KEY] = basis
         operation.before = item.before
-        operation.after = after
+        operation.after = dict(item.after)
         operation.failure_reason = ""
         if not dry_run:
             operation.object_id = item.object_id
@@ -1489,6 +1518,7 @@ def _record(
         operations_skipped=operations_total - operations_applied,
         conflict_count=len(conflicts),
         validation_error_count=len(issues),
+        validation_errors=[issue.record() for issue in issues],
         explanation=explanation,
         performed_by_id=actor_user_id,
     )

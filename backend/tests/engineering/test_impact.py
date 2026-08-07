@@ -1037,7 +1037,7 @@ def test_an_update_of_the_name_field_is_analysed_as_a_rename(db: Session, projec
 
     operation = changeset.operations[0]
     operation.field_name = "name"
-    operation.after = {"name": "MTR_101_Cmd_Run"}
+    operation.values = {"name": "MTR_101_Cmd_Run"}
     db.flush()
 
     reports = impact.analyse_changeset(db, changeset=changeset)

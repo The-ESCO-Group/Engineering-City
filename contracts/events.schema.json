@@ -11,6 +11,7 @@
     "agent.status_changed": "#/$defs/AgentStatusEventPayload",
     "approval.decided": "#/$defs/ApprovalEventPayload",
     "approval.requested": "#/$defs/ApprovalEventPayload",
+    "changeset.abandoned": "#/$defs/ChangeSetAbandonedEventPayload",
     "changeset.created": "#/$defs/ChangeSetEventPayload",
     "changeset.merged": "#/$defs/ChangeSetMergedEventPayload",
     "changeset.reviewed": "#/$defs/ChangeSetReviewedEventPayload",
@@ -300,6 +301,38 @@
       ],
       "title": "ChangeOperationType",
       "type": "string"
+    },
+    "ChangeSetAbandonedEventPayload": {
+      "description": "A change set closed without ever being merged, and why.\n\nNot a verdict. A reviewer turning work down is\n:class:`ChangeSetReviewedEventPayload`; this is the author, the orchestrator\nor an engineer deciding the proposal will not be carried any further —\nsuperseded by a later template, overtaken by a clarification, abandoned\nbecause the task that raised it was cancelled. A client answering \"what\nbecame of this proposal\" needs to tell those apart, which is why ``reason``\nis required rather than an optional note: a change set that disappears\nwithout one is indistinguishable from a bug.",
+      "properties": {
+        "changeset_id": {
+          "format": "uuid",
+          "title": "Changeset Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 300,
+          "title": "Title",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ChangeSetStatus"
+        },
+        "reason": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "changeset_id",
+        "title",
+        "status",
+        "reason"
+      ],
+      "title": "ChangeSetAbandonedEventPayload",
+      "type": "object"
     },
     "ChangeSetEventPayload": {
       "description": "A proposed, scoped batch of changes to the canonical model.\n\nCounts and scope, never the operations: a change set may carry two thousand\nof them, and inlining them would put a document on the wire. ``confidence``,\n``assumption_count`` and ``warning_count`` are here because a proposal that\nstates no uncertainty is more suspicious than one that does.",
@@ -806,6 +839,7 @@
         "changeset.validation_failed",
         "changeset.submitted",
         "changeset.reviewed",
+        "changeset.abandoned",
         "changeset.merged",
         "revision.created",
         "gate.status_changed",

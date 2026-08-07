@@ -73,6 +73,62 @@ describe("engineering API client", () => {
     expect(new Headers(uploadInit.headers).has("Content-Type")).toBe(false);
   });
 
+  it("posts explicit gate decisions against the exact gate and approval ids", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(responseJson({ status: "risk_accepted" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { engineeringApi } = await loadClient();
+
+    await engineeringApi.decideApprovalGate(
+      "gate-1",
+      "approval-1",
+      "accept_risk",
+      "Named engineering rationale."
+    );
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      `${window.location.origin}/api/approval-gates/gate-1/approvals/approval-1/decision`
+    );
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(JSON.stringify({
+      decision: "accept_risk",
+      comment: "Named engineering rationale."
+    }));
+  });
+
+  it("posts a confirmed validation waiver with optimistic concurrency", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(responseJson({ decision_replayed: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { engineeringApi } = await loadClient();
+
+    await engineeringApi.waiveValidationResult(
+      "result-1",
+      "Reviewed against the approved risk assessment.",
+      "2026-08-05T10:15:00Z"
+    );
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${window.location.origin}/api/validation-results/result-1/waiver`);
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(JSON.stringify({
+      confirm: true,
+      reason: "Reviewed against the approved risk assessment.",
+      expected_updated_at: "2026-08-05T10:15:00Z"
+    }));
+  });
+
+  it("loads the newest validation results for the authorized project", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(responseJson([]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { engineeringApi } = await loadClient();
+
+    await engineeringApi.validationResults("project-1");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${window.location.origin}/api/projects/project-1/validation-results`);
+    expect(init.method).toBeUndefined();
+  });
+
   it("retains a successful desktop login token in memory for subsequent REST requests", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(responseJson({
@@ -334,6 +390,42 @@ describe("engineering API client", () => {
     for (const [, init] of fetchMock.mock.calls) {
       expect(init.method).toBeUndefined();
     }
+  });
+
+  it("deploys an external SDK agent through the project-scoped endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(responseJson({
+      instance: { id: "agent-1", display_name: "Orbit · Openai SDK" },
+      agent_token: "one-time-token",
+      token_expires_at: "2026-08-06T14:00:00Z",
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      mission: "Review the evidence.",
+      allowed_actions: ["create_finding"],
+      endpoints: {
+        context: "/api/external-agents/session/context",
+        progress: "/api/external-agents/session/progress",
+        submit: "/api/external-agents/session/submit"
+      }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { engineeringApi } = await loadClient();
+    const payload = {
+      provider: "openai" as const,
+      display_name: "Orbit",
+      specialty: "PLC reviewer",
+      mission: "Review the evidence.",
+      model: "gpt-5.6-sol",
+      initial_location: "project_intake" as const,
+      ttl_seconds: 3600,
+      acknowledge_external_processing: true as const
+    };
+
+    await engineeringApi.deployExternalAgent("project-1", payload);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${window.location.origin}/api/projects/project-1/external-agents`);
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual(payload);
   });
 
   it("cursor-pages the oldest-first message feed so activity beyond the first page is loaded", async () => {

@@ -10,6 +10,7 @@ import { createDemoWorkspaceModel } from "./demo";
 import type {
   EvidenceSourceKind,
   WorkspaceApproval,
+  WorkspaceApprovalDecision,
   WorkspaceChangeSet,
   WorkspaceEvidence,
   WorkspaceFinding,
@@ -391,17 +392,27 @@ function contextEvidence(context: Record<string, unknown>): WorkspaceEvidence[] 
 
 function approvalToWorkspace(approval: ApprovalRead): WorkspaceApproval {
   const context = approvalContext(approval);
+  const isGateDecision = approval.kind === "gate_decision" && Boolean(approval.gate_id && approval.gate_key);
+  const allowedDecisions: WorkspaceApprovalDecision[] = approval.status !== "pending" || !approval.decision_allowed
+    ? []
+    : isGateDecision
+      ? ["approve", "reject", "request_changes", "accept_risk", "defer"]
+      : ["approve", "reject"];
   return {
     id: approval.id,
     projectId: approval.project_id,
+    gateId: approval.gate_id,
+    gateKey: approval.gate_key,
+    releaseCandidateId: approval.release_candidate_id,
+    recordedDecision: approval.decision,
     findingId: approval.finding_id,
     changesetId: nullableString(context.changeset_id),
-    gate: stringValue(context.gate, approval.kind),
+    gate: approval.gate_key ?? stringValue(context.gate, approval.kind),
     kind: approval.kind,
     status: approval.status,
     title: approval.title,
     requestedDecision: approval.question,
-    affectedRevision: nullableNumber(context.affected_revision),
+    affectedRevision: approval.revision_number ?? nullableNumber(context.affected_revision),
     affectedObjects: stringArray(context.affected_objects),
     evidence: contextEvidence(context),
     validationResults: stringArray(context.validation_results),
@@ -414,10 +425,11 @@ function approvalToWorkspace(approval: ApprovalRead): WorkspaceApproval {
     priorDecisions: stringArray(context.prior_decisions),
     downstreamImpact: stringValue(context.downstream_impact),
     restrictedDomain: booleanValue(context.restricted_domain),
-    finalRelease: approval.kind === "release_candidate" || booleanValue(context.final_release),
+    finalRelease: approval.gate_key === "release" || approval.kind === "release_candidate" || booleanValue(context.final_release),
     requestedBy: approval.requested_by_agent_kind,
     requestedAt: approval.requested_at,
-    allowedDecisions: approval.status === "pending" ? ["approve", "reject"] : []
+    decisionDisabledReason: approval.decision_disabled_reason,
+    allowedDecisions
   };
 }
 
@@ -465,9 +477,9 @@ export function buildWorkspaceModel(source: WorkspaceSource): WorkspaceModel {
         reason: live ? "Finding citations are loaded from the local backend on demand." : source.fallbackReason
       },
       approvalDecisions: {
-        level: live ? "summary_only" : "unavailable",
+        level: live ? "available" : "unavailable",
         reason: live
-          ? "The current endpoint supports signed Approve or Reject decisions only."
+          ? "Signed gate decisions support approve, reject, request changes, accept risk, and defer; other approvals support approve or reject."
           : source.fallbackReason
       }
     },

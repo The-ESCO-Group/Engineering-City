@@ -26,13 +26,14 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.clock import utcnow
 from app.core.config import Settings
 from app.core.enums import AgentKind, ProjectStatus, TaskKind, TaskStatus
 from app.core.services import projects as project_service
+from app.database.session import get_session_factory
 from app.models.project import Project
 from app.models.task import Task, TaskDependency
 from app.models.user import User
@@ -162,6 +163,62 @@ def test_enqueuing_the_same_key_twice_returns_the_existing_task(
 
     _settle(db)
     assert _task_count(db, project.id) == 1
+
+
+def test_losing_an_enqueue_uniqueness_race_preserves_the_callers_transaction(
+    db: Session,
+    project: Project,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The duplicate INSERT must fail inside, not before, its savepoint."""
+    db.commit()
+    factory = get_session_factory()
+    loser = factory()
+    winner = factory()
+    try:
+        loser_project = loser.get(Project, project.id)
+        assert loser_project is not None
+        loser_project.description = "This caller-owned edit must survive the enqueue race."
+
+        original_begin_nested = loser.begin_nested
+        winner_inserted = False
+
+        def begin_nested_after_winner() -> Any:
+            nonlocal winner_inserted
+            if not winner_inserted:
+                winner_inserted = True
+                DatabaseTaskQueue(winner, settings).enqueue(
+                    project.id, _request("race:one", title="The winning task")
+                )
+                winner.commit()
+            return original_begin_nested()
+
+        monkeypatch.setattr(loser, "begin_nested", begin_nested_after_winner)
+        queue = DatabaseTaskQueue(loser, settings)
+        duplicate = queue.enqueue(project.id, _request("race:one", title="The losing duplicate"))
+        follow_up = queue.enqueue(project.id, _request("race:two"))
+        loser.commit()
+
+        assert duplicate.title == "The winning task"
+        assert follow_up.id != duplicate.id
+    finally:
+        loser.close()
+        winner.close()
+
+    db.expire_all()
+    stored_project = db.get(Project, project.id)
+    assert stored_project is not None
+    assert stored_project.description == "This caller-owned edit must survive the enqueue race."
+    assert (
+        db.scalar(
+            select(func.count(Task.id)).where(
+                Task.project_id == project.id,
+                Task.idempotency_key.in_(["race:one", "race:two"]),
+            )
+        )
+        == 2
+    )
 
 
 def test_a_different_idempotency_key_creates_a_second_task(
@@ -357,6 +414,56 @@ def test_claim_returns_a_dependent_task_once_its_dependency_completes(
     _settle(db)
 
     assert [item.id for item in queue.claim("worker-two", limit=5)] == [downstream_id]
+
+
+def test_claim_rereads_dependencies_after_a_gate_reopens_between_check_and_cas(
+    queue: DatabaseTaskQueue,
+    db: Session,
+    project: Project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upstream = _enqueue(queue, project, "claim-race:gate", priority=10)
+    upstream.status = TaskStatus.COMPLETED
+    upstream.finished_at = utcnow()
+    downstream = _enqueue(
+        queue,
+        project,
+        "claim-race:dependent",
+        priority=20,
+        depends_on=[upstream.id],
+    )
+    db.commit()
+
+    original = queue.dependencies_satisfied
+    interleaved = False
+
+    def reopen_after_first_check(task: Task) -> bool:
+        nonlocal interleaved
+        result = original(task)
+        if task.id == downstream.id and result and not interleaved:
+            interleaved = True
+            with get_session_factory()() as reopening:
+                reopening.execute(
+                    update(Task)
+                    .where(Task.id == upstream.id)
+                    .values(
+                        status=TaskStatus.BLOCKED,
+                        blocked_reason="The approval gate reopened on a newer revision.",
+                        finished_at=None,
+                    )
+                )
+                reopening.commit()
+        return result
+
+    monkeypatch.setattr(queue, "dependencies_satisfied", reopen_after_first_check)
+
+    assert queue.claim("worker-one", limit=1) == []
+    db.expire_all()
+    stored = db.get(Task, downstream.id)
+    assert stored is not None
+    assert stored.status is TaskStatus.QUEUED
+    assert stored.locked_by is None
+    assert stored.attempts == 0
 
 
 def test_claim_ignores_a_task_whose_backoff_has_not_elapsed(
