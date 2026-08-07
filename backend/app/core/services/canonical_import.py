@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.core.enums import (
     AddressAssignmentStatus,
+    AlarmSeverity,
     BaseDataType,
     ControllerTaskType,
     DeviceCategory,
@@ -50,13 +51,21 @@ from app.generators.plc.instructions import (
     spec_for,
 )
 from app.models.core import EngineeringObjectMixin
-from app.models.delivery import HMIBinding, HMIObjectInstance, HMIScreen
+from app.models.delivery import (
+    AlarmDefinition,
+    AlarmMessage,
+    HMIBinding,
+    HMIObjectInstance,
+    HMIScreen,
+)
 from app.models.file import ParsedArtifact, UploadedFile
+from app.models.interlocks import Interlock
 from app.models.plant import AddressAssignment, Device, HardwareModule, IOPoint, Signal
 from app.models.plc import (
     ControllerModel,
     ControllerTask,
     LogicInstruction,
+    LogicNetwork,
     LogicOperand,
     LogicRung,
     Program,
@@ -127,6 +136,71 @@ _IO_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "required": ("required", "is required"),
     "status": ("status", "point status"),
 }
+
+#: ``reference`` reads ``Alarm Tag`` as the alarm's identity rather than as its
+#: trigger, which is the reading :mod:`app.core.services.evidence_graph` already
+#: takes of the same column: a register of that shape names the trigger in a
+#: separate ``Source Tag``.
+_ALARM_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
+    "reference": (
+        "alarm id",
+        "alarm reference",
+        "alarm number",
+        "alarm no",
+        "alarm tag",
+        "reference",
+        "id",
+        "alarm",
+        "tag",
+    ),
+    "name": ("alarm name", "name", "alarm title", "title"),
+    "message": ("message", "alarm message", "operator message", "text", "description"),
+    "operator_guidance": (
+        "operator response",
+        "operator guidance",
+        "operator action",
+        "response",
+    ),
+    "severity": ("severity", "alarm severity", "priority", "alarm priority"),
+    "group": ("group", "alarm group", "area", "category"),
+    "alarm_class": ("alarm class", "class"),
+    "trigger": ("trigger tag", "trigger", "trigger tag name", "input tag", "source tag"),
+    "trigger_type": ("trigger type", "alarm type", "condition type"),
+    "limit_value": ("limit", "limit value", "setpoint", "set point", "threshold", "trip point"),
+    "deadband": ("deadband", "dead band", "hysteresis"),
+    "delay_seconds": ("delay", "on delay", "delay seconds", "on delay seconds"),
+    #: Recognised so the column is not reported as one nothing here understands,
+    #: and then deliberately not written — see :func:`_import_alarm_csv`.
+    "latched": ("latched", "latch", "is latched"),
+    "requires_acknowledge": (
+        "ack required",
+        "acknowledge required",
+        "requires acknowledge",
+        "acknowledgement required",
+    ),
+    "message_key": ("message key",),
+}
+
+#: Alarm-list severity words this importer will read, and nothing else.
+#: :attr:`~app.models.delivery.AlarmDefinition.severity` states how fast an
+#: operator has to respond, so an unrecognised word is reported rather than
+#: bent onto the nearest member.  ``critical`` maps to ``URGENT`` rather than
+#: ``HIGH`` because a register that uses both words orders them, and collapsing
+#: the two into one member would lose that order — the only property anything
+#: downstream reads severity for.
+_ALARM_SEVERITIES: dict[str, AlarmSeverity] = {
+    "diagnostic": AlarmSeverity.DIAGNOSTIC,
+    "diagnostics": AlarmSeverity.DIAGNOSTIC,
+    "low": AlarmSeverity.LOW,
+    "medium": AlarmSeverity.MEDIUM,
+    "med": AlarmSeverity.MEDIUM,
+    "high": AlarmSeverity.HIGH,
+    "urgent": AlarmSeverity.URGENT,
+    "critical": AlarmSeverity.URGENT,
+}
+
+_AFFIRMATIVE = {"true", "yes", "y", "1"}
+_NEGATIVE = {"false", "no", "n", "0"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +283,23 @@ def _bool(value: Any) -> bool | None:
     return None
 
 
+def _flag(value: Any) -> bool | None:
+    """``_bool`` widened to the words a schedule column actually uses.
+
+    ``None`` for anything else, because these values feed columns where ``False``
+    is a positive engineering claim rather than an absence.
+    """
+    result = _bool(value)
+    if result is not None:
+        return result
+    normalised = _text(value).lower()
+    if normalised in _AFFIRMATIVE:
+        return True
+    if normalised in _NEGATIVE:
+        return False
+    return None
+
+
 def _int(value: Any) -> int | None:
     if isinstance(value, bool):
         return None
@@ -231,19 +322,42 @@ def _normalise(value: str) -> str:
     return " ".join("".join(char.lower() if char.isalnum() else " " for char in value).split())
 
 
-def _header_map(headers: Any) -> dict[str, str]:
-    if not isinstance(headers, list):
-        return {}
-    available = {_normalise(str(header)): str(header) for header in headers if header is not None}
+def _record_keys(content: dict[str, Any]) -> list[str]:
+    """The keys each parsed CSV row is actually keyed by, in column order.
+
+    The parser keeps ``headers`` verbatim and derives ``column_names`` from it —
+    trimming whitespace, naming a blank heading by position and suffixing a
+    repeat — because a duplicate key would drop a whole column out of every
+    record.  Reading the verbatim headers would then look up names no record
+    holds, so the derived names are what a header map has to be built from.
+    """
+    names = content.get("column_names")
+    if isinstance(names, list) and names:
+        return [str(name) for name in names if name is not None]
+    headers = content.get("headers")
+    if isinstance(headers, list):
+        return [str(header) for header in headers if header is not None]
+    return []
+
+
+def _resolve_headers(keys: Sequence[str], aliases: dict[str, tuple[str, ...]]) -> dict[str, str]:
+    """Map canonical field names onto the columns this source actually has."""
+
+    available = {_normalise(key): key for key in keys}
     resolved: dict[str, str] = {}
     claimed: set[str] = set()
-    for field_name, aliases in _IO_HEADER_ALIASES.items():
-        for alias in aliases:
+    for field_name, field_aliases in aliases.items():
+        for alias in field_aliases:
             key = _normalise(alias)
             if key in available and key not in claimed:
                 resolved[field_name] = available[key]
                 claimed.add(key)
                 break
+    return resolved
+
+
+def _io_header_map(keys: Sequence[str]) -> dict[str, str]:
+    resolved = _resolve_headers(keys, _IO_HEADER_ALIASES)
 
     # ``Device Tag`` is intentionally shared.  Many real I/O schedules use one
     # column as both the controller tag and the only explicit identity for the
@@ -253,13 +367,39 @@ def _header_map(headers: Any) -> dict[str, str]:
     # approval gate could never become ready.  Sharing is safe here because the
     # source explicitly calls the value a device tag; no identity is derived
     # from a naming convention.  More-specific Device/Signal columns still win.
-    device_tag = available.get(_normalise("device tag"))
+    device_tag = next((key for key in keys if _normalise(key) == _normalise("device tag")), None)
     if device_tag is not None:
         resolved.setdefault("tag", device_tag)
         resolved.setdefault("device", device_tag)
         resolved.setdefault("device_prefix", device_tag)
         resolved.setdefault("signal", device_tag)
     return resolved
+
+
+def _report_unplaced_columns(
+    ctx: _Context,
+    keys: Sequence[str],
+    resolved: dict[str, str],
+    subject: str,
+) -> None:
+    """Record every column of a tabular source this importer cannot store.
+
+    A column nobody placed is not nothing.  It is the mechanism by which a whole
+    document goes unread with no trace: the file parses, rows appear, counts look
+    right, and a statement the customer wrote down never reaches the model or the
+    review.  Naming each dropped column here is what lets a report say which part
+    of the schedule was examined and which part was not.
+    """
+    placed = set(resolved.values())
+    for key in keys:
+        if key in placed:
+            continue
+        ctx.issue(
+            "unplaced_source_column",
+            f"Column {key!r} of this {subject} matches no field of the canonical model, so "
+            "its values were not imported and nothing downstream can cite them.",
+            f"column:{key}",
+        )
 
 
 def _value(record: dict[str, Any], headers: dict[str, str], field_name: str) -> str:
@@ -353,6 +493,24 @@ def _update[T: EngineeringObjectMixin](
     return row
 
 
+def _import_rank(record: UploadedFile) -> int:
+    """Which pass a document belongs to, so a citation is never read too early.
+
+    A document that only *cites* tags — an alarm register, an HMI export — has to
+    be imported after every document that *declares* them, or the same files
+    import differently depending on the order the uploads happened to be
+    timestamped in.  The failure that shape produces is subtle: the first pass
+    records an unresolved trigger, a later pass finds the declaration and
+    "updates" a row nothing in the source changed, so the import stops being
+    idempotent and a revision gains an edit with no author.
+    """
+    if record.file_kind is FileKind.L5X:
+        return 0
+    if record.file_kind is FileKind.CSV and record.document_role is DocumentRole.IO_LIST:
+        return 1
+    return 2
+
+
 def _latest_inputs(db: Session, project_id: uuid.UUID) -> list[tuple[UploadedFile, ParsedArtifact]]:
     files = list(
         db.execute(
@@ -377,7 +535,7 @@ def _latest_inputs(db: Session, project_id: uuid.UUID) -> list[tuple[UploadedFil
         for record in sorted(
             (item for item in files if item.id in latest),
             key=lambda item: (
-                0 if item.file_kind is FileKind.L5X else 1,
+                _import_rank(item),
                 item.created_at,
                 item.original_filename,
                 item.id,
@@ -387,10 +545,11 @@ def _latest_inputs(db: Session, project_id: uuid.UUID) -> list[tuple[UploadedFil
 
 
 def import_latest_parsed_artifacts(db: Session, project_id: uuid.UUID) -> CanonicalImportResult:
-    """Import current L5X, I/O-list and HMI-export facts for ``project_id``.
+    """Import current L5X, I/O-list, alarm-register and HMI-export facts.
 
     The caller owns the surrounding transaction.  This function flushes so all
     returned rows and relationships have stable identifiers, but never commits.
+    Documents are imported in :func:`_import_rank` order, not upload order.
     """
 
     project = db.get(Project, project_id)
@@ -410,6 +569,13 @@ def import_latest_parsed_artifacts(db: Session, project_id: uuid.UUID) -> Canoni
         ):
             result.artifact_ids.append(artifact.id)
             _import_io_csv(ctx)
+        elif (
+            artifact.artifact_kind == FileKind.CSV.value
+            and record.file_kind is FileKind.CSV
+            and record.document_role is DocumentRole.ALARM_LIST
+        ):
+            result.artifact_ids.append(artifact.id)
+            _import_alarm_csv(ctx)
         elif (
             artifact.artifact_kind == FileKind.XML.value
             and record.file_kind is FileKind.XML
@@ -433,9 +599,7 @@ def _import_hmi_xml(ctx: _Context) -> None:
     """
     elements = _as_list(_as_dict(ctx.artifact.content).get("elements"))
     by_path = {
-        _text(element.get("xpath")): element
-        for element in elements
-        if _text(element.get("xpath"))
+        _text(element.get("xpath")): element for element in elements if _text(element.get("xpath"))
     }
     display_elements = [
         element for element in elements if _normalise(_text(element.get("tag"))) == "display"
@@ -541,9 +705,7 @@ def _import_hmi_xml(ctx: _Context) -> None:
                             .order_by(HMIObjectInstance.created_at, HMIObjectInstance.id)
                         ).scalars()
                     )
-                    object_existing, object_occupied = _occupant(
-                        object_rows, ctx, object_path
-                    )
+                    object_existing, object_occupied = _occupant(object_rows, ctx, object_path)
                     label = _text(_as_dict(by_path.get(f"{object_path}/Caption")).get("text"))
                     ordinal = object_ordinals.get(display_path, 0)
                     object_ordinals[display_path] = ordinal + 1
@@ -561,9 +723,7 @@ def _import_hmi_xml(ctx: _Context) -> None:
                         "ordinal": ordinal,
                     }
                     if object_existing is not None:
-                        object_instance = _update(
-                            ctx, object_existing, values, object_path
-                        )
+                        object_instance = _update(ctx, object_existing, values, object_path)
                     elif object_occupied:
                         object_instance = object_rows[0]
                     else:
@@ -583,7 +743,7 @@ def _import_hmi_xml(ctx: _Context) -> None:
             expression = _text(attributes.get("Expression") or attributes.get("expression"))
             property_name = _text(attributes.get("Name") or attributes.get("name"))[:60]
             reference = _hmi_tag_reference(expression)
-            tag = _resolve_hmi_tag(reference, all_tags, programs)
+            tag = _resolve_tag_reference(reference, all_tags, programs)
             access = _hmi_access(object_type)
             binding_rows = list(
                 ctx.db.execute(
@@ -598,9 +758,7 @@ def _import_hmi_xml(ctx: _Context) -> None:
                     .order_by(HMIBinding.created_at, HMIBinding.id)
                 ).scalars()
             )
-            binding_existing, binding_occupied = _occupant(
-                binding_rows, ctx, connection_path
-            )
+            binding_existing, binding_occupied = _occupant(binding_rows, ctx, connection_path)
             binding_values: dict[str, Any] = {
                 "tag_name": reference[:120],
                 "tag_id": tag.id if tag is not None else None,
@@ -634,11 +792,19 @@ def _hmi_tag_reference(expression: str) -> str:
     return match.group("reference").strip() if match is not None else ""
 
 
-def _resolve_hmi_tag(
+def _resolve_tag_reference(
     reference: str,
     tags: list[Tag],
     programs: list[Program],
 ) -> Tag | None:
+    """The one canonical tag a written reference names, or ``None``.
+
+    Shared by the HMI export and the alarm register because both cite a tag the
+    same way — optionally program-qualified, optionally down a member or element
+    path — and both have to fail the same way. An ambiguous reference resolves to
+    nothing rather than to a first match: a binding or a trigger attached to the
+    wrong tag reads as verified and is worse than one left unresolved.
+    """
     if not reference:
         return None
     program_id: uuid.UUID | None = None
@@ -685,8 +851,12 @@ def _import_l5x(ctx: _Context) -> None:
         _as_list(content.get("programs")),
         _as_list(content.get("rungs")),
     )
+    # Before the rungs, so a rung is created already inside its network rather
+    # than created loose and then edited to join one — which would report every
+    # first import as having updated logic nothing had touched.
+    networks = _import_logic_networks(ctx, programs)
     tags = _import_l5x_tags(ctx, _as_list(content.get("tags")), programs, udts, aois)
-    _import_l5x_logic(ctx, _as_list(content.get("rungs")), programs, tags)
+    _import_l5x_logic(ctx, _as_list(content.get("rungs")), programs, tags, networks)
     _link_module_parents(ctx, modules, _as_list(content.get("modules")))
 
 
@@ -1118,6 +1288,126 @@ def _import_controller_structure(
     return programs
 
 
+def _requirement_claims(ctx: _Context) -> dict[uuid.UUID, set[str]]:
+    """Which requirements each routine is already recorded as implementing.
+
+    Read off the model rather than worked out here.  :class:`Interlock` carries
+    both the requirement a documented protection traces to and the rung an
+    implementation search located, and ``has_implementation`` is the model's own
+    rule for when that pair may be believed — ``is_implemented`` without a rung
+    behind it is a claim rather than evidence for one.  Nothing in this function
+    decides that a rung implements a requirement; it asks only which routine the
+    rung somebody already named is in.
+    """
+    claims: dict[uuid.UUID, set[str]] = {}
+    for interlock in ctx.db.execute(
+        select(Interlock).where(
+            Interlock.project_id == ctx.project.id,
+            Interlock.deleted_at.is_(None),
+            Interlock.requirement_reference != "",
+        )
+    ).scalars():
+        if not interlock.has_implementation:
+            continue
+        rung = ctx.db.get(LogicRung, interlock.implementing_rung_id)
+        if rung is None or rung.deleted_at is not None:
+            continue
+        claims.setdefault(rung.routine_id, set()).add(interlock.requirement_reference)
+    return claims
+
+
+def _import_logic_networks(
+    ctx: _Context,
+    programs: dict[str, tuple[Program, dict[str, Routine]]],
+) -> dict[tuple[str, str], LogicNetwork]:
+    """Record the one group of rungs each imported routine actually evidences.
+
+    A network is the unit a template expands into, so generated logic arrives
+    already grouped and parsed logic does not: between a ``<Routine>`` and its
+    ``<Rung>`` elements the export states nothing at all.  Rung comments do name
+    the interlock a rung belongs to, and cutting a routine up by reading them
+    would be parsing text back into structure — the direction
+    :mod:`app.models.plc` exists to forbid — so the blocks would be this
+    importer's invention rather than the customer's export.
+
+    The boundary is therefore the routine, and it is knowingly coarser than the
+    ladder: a routine usually holds several unrelated patterns, so this records
+    one group where a reviewer reading it would see three.  Of the two answers
+    available that is the honest one, because the alternative is not a finer
+    grouping but a guessed one.  ``template_id`` and ``template_version`` stay
+    empty for the same reason — these rungs were expanded from no template, and
+    naming the project's controller template here would assert that they were.
+    """
+    claims = _requirement_claims(ctx)
+    imported: dict[tuple[str, str], LogicNetwork] = {}
+    for program_name, (_, routines) in programs.items():
+        for routine in routines.values():
+            if routine.rung_count < 1:
+                # No rungs in the source means no group of rungs to name.  A
+                # routine the export declares and leaves empty is a fact about
+                # the controller worth keeping, not a network.
+                continue
+            # The parsed anchor for the routine.  The network is exactly that
+            # routine's rungs, so the routine element is what cites it.
+            key = f"routine:{program_name}/{routine.name}"
+            references = claims.get(routine.id, set())
+            if len(references) > 1:
+                ctx.issue(
+                    "ambiguous_network_requirement",
+                    f"Routine {routine.name!r} holds the implementing rung of "
+                    f"{len(references)} documented requirements "
+                    f"({', '.join(sorted(references))}). The routine is the only rung "
+                    "grouping the export states, so its network records none of them.",
+                    key,
+                )
+            rows = list(
+                ctx.db.execute(
+                    select(LogicNetwork)
+                    .where(
+                        LogicNetwork.routine_id == routine.id,
+                        LogicNetwork.name == routine.name,
+                    )
+                    .order_by(LogicNetwork.created_at, LogicNetwork.id)
+                ).scalars()
+            )
+            existing, occupied = _occupant(rows, ctx, key)
+            values: dict[str, Any] = {
+                # The routine's own description: the network is coextensive with
+                # the routine, so this is the one line the export offers about
+                # what these rungs are for.  Empty when it offers none.
+                "purpose": routine.description[:200],
+                # A routine holds exactly one imported network, so it is the
+                # first.  Ordering only becomes a question once a template adds
+                # a second one beside it.
+                "ordinal": 0,
+                "rung_count": routine.rung_count,
+                # One reference or none.  Two documented requirements implemented
+                # inside a single routine cannot both belong to a network that is
+                # the whole routine, and picking between them is a judgement the
+                # source does not support — so the network claims neither and the
+                # provider goes on asking about both.
+                "requirement_reference": next(iter(references)) if len(references) == 1 else "",
+            }
+            if existing is not None:
+                network = _update(ctx, existing, values, key)
+            elif occupied:
+                continue
+            else:
+                network = _create(
+                    ctx,
+                    LogicNetwork(
+                        project_id=ctx.project.id,
+                        routine_id=routine.id,
+                        name=routine.name,
+                        **values,
+                    ),
+                    key,
+                )
+            if network.deleted_at is None:
+                imported[(program_name, routine.name)] = network
+    return imported
+
+
 def _import_l5x_tags(
     ctx: _Context,
     sources: list[dict[str, Any]],
@@ -1253,6 +1543,7 @@ def _import_l5x_logic(
     rung_sources: list[dict[str, Any]],
     programs: dict[str, tuple[Program, dict[str, Routine]]],
     tags: dict[tuple[str, str, str], Tag],
+    networks: dict[tuple[str, str], LogicNetwork],
 ) -> None:
     for source in rung_sources:
         program_name = _text(source.get("program"))
@@ -1290,11 +1581,17 @@ def _import_l5x_logic(
             ):
                 has_unresolved = True
                 break
-        rung_values = {
+        rung_values: dict[str, Any] = {
             "comment": _text(source.get("comment")),
             "text": _text(source.get("text")),
             "has_unresolved_operands": has_unresolved,
         }
+        network = networks.get((program_name, routine_name))
+        if network is not None:
+            # Stated only where this importer owns the network.  Where another
+            # row owns that canonical key there is no link to state, and writing
+            # NULL would retract a membership this importer never recorded.
+            rung_values["logic_network_id"] = network.id
         writable = True
         if existing is not None:
             rung = _update(ctx, existing, rung_values, key)
@@ -1486,7 +1783,9 @@ def _device_category(raw: str) -> DeviceCategory:
 
 def _import_io_csv(ctx: _Context) -> None:
     content = _as_dict(ctx.artifact.content)
-    headers = _header_map(content.get("headers"))
+    keys = _record_keys(content)
+    headers = _io_header_map(keys)
+    _report_unplaced_columns(ctx, keys, headers, "I/O schedule")
     if "address" not in headers and "tag" not in headers and "module" not in headers:
         ctx.issue(
             "not_an_io_schedule",
@@ -1494,13 +1793,14 @@ def _import_io_csv(ctx: _Context) -> None:
         )
         return
     device_signal_ordinals: dict[uuid.UUID, int] = {}
+    points_by_address: dict[str, IOPoint] = {}
     for fallback_ordinal, row_source in enumerate(_as_list(content.get("rows"))):
         record = _as_dict(row_source.get("record"))
         row_number = _int(row_source.get("row")) or fallback_ordinal + 1
         row_key = f"csv-row:{row_number}"
         module = _io_module(ctx, record, headers, row_key)
         io_type = _io_type(_value(record, headers, "signal_type"))
-        point = _io_point(ctx, record, headers, row_key, module, io_type)
+        point = _io_point(ctx, record, headers, row_key, module, io_type, points_by_address)
         device = _io_device(ctx, record, headers, row_key)
         signal = _io_signal(
             ctx,
@@ -1570,7 +1870,19 @@ def _io_point(
     row_key: str,
     module: HardwareModule | None,
     io_type: tuple[SignalType, SignalDirection] | None,
+    seen: dict[str, IOPoint],
 ) -> IOPoint | None:
+    """The terminal one I/O-list row names, created or refreshed.
+
+    ``seen`` carries the terminals this schedule has already named, and it is
+    what makes a duplicated address safe.  A terminal is one physical thing, so
+    two rows claiming it produce one :class:`IOPoint` and two assignments — the
+    shape the duplicate-assignment rule reads.  Letting the second row also write
+    the terminal's own description and channel would leave the point describing
+    whichever conflicting row happened to come last, and would make the import
+    non-idempotent: every pass would rewrite the row twice and bump its revision,
+    so a re-import looked like somebody had edited an approved terminal.
+    """
     address = _value(record, headers, "address")
     if not address:
         return None
@@ -1585,6 +1897,16 @@ def _io_point(
             key,
         )
         return None
+    first = seen.get(address)
+    if first is not None:
+        ctx.issue(
+            "repeated_io_address",
+            f"Address {address!r} is named by more than one row of this I/O schedule. The "
+            "terminal keeps the values of the first row that named it; both rows still get "
+            "their own address assignment, so the conflict stays reportable.",
+            key,
+        )
+        return first
     rows = list(
         ctx.db.execute(
             select(IOPoint)
@@ -1604,11 +1926,16 @@ def _io_point(
         "fail_state": _fail_state(_value(record, headers, "fail_state")),
         "is_spare": status == "spare",
     }
+    point: IOPoint | None
     if existing is not None:
-        return _update(ctx, existing, values, key)
-    if occupied:
-        return rows[0] if rows[0].deleted_at is None else None
-    return _create(ctx, IOPoint(project_id=ctx.project.id, address=address, **values), key)
+        point = _update(ctx, existing, values, key)
+    elif occupied:
+        point = rows[0] if rows[0].deleted_at is None else None
+    else:
+        point = _create(ctx, IOPoint(project_id=ctx.project.id, address=address, **values), key)
+    if point is not None:
+        seen[address] = point
+    return point
 
 
 def _io_device(
@@ -1807,6 +2134,211 @@ def _io_tag(
     if occupied:
         return rows[0] if rows[0].deleted_at is None else None
     return _create(ctx, Tag(project_id=ctx.project.id, name=name, **values), key)
+
+
+def _operand_base_name(operand: str) -> str:
+    match = _TAG_OPERAND.fullmatch(operand.strip())
+    return match.group("name") if match is not None else ""
+
+
+def _written_tag_names(ctx: _Context) -> set[str]:
+    """Folded names of every tag an imported rung writes.
+
+    :attr:`~app.models.delivery.AlarmDefinition.is_driven` is the flag that finds
+    an alarm nothing in the controller can ever raise, and this is the only place
+    both halves of that comparison are in hand: the L5X is imported before any
+    other artifact, so the destination operands it recorded are already rows.
+    Those operands were marked destructive from the instruction catalogue during
+    that pass, so this reads a recorded fact rather than deciding again which
+    operand of which mnemonic is a write.
+    """
+    names: set[str] = set()
+    for resolved_name, operand_text in ctx.db.execute(
+        select(LogicOperand.resolved_name, LogicOperand.text).where(
+            LogicOperand.project_id == ctx.project.id,
+            LogicOperand.is_destination.is_(True),
+            LogicOperand.deleted_at.is_(None),
+        )
+    ):
+        for candidate in (_text(resolved_name), _text(operand_text)):
+            base = _operand_base_name(candidate)
+            if base:
+                names.add(base.casefold())
+    return names
+
+
+def _import_alarm_csv(ctx: _Context) -> None:
+    """Import an alarm register as canonical alarm definitions.
+
+    The register is the operator's side of the plant, and until it reaches the
+    model no validator can compare it with anything: an alarm whose trigger no
+    rung writes, one that names no trigger at all, and one whose trigger the
+    controller does not declare are all invisible while the rows sit in a parsed
+    artifact.  Only columns the source states are read.  Severity in particular is
+    never defaulted — see :data:`_ALARM_SEVERITIES`.
+    """
+    content = _as_dict(ctx.artifact.content)
+    keys = _record_keys(content)
+    headers = _resolve_headers(keys, _ALARM_HEADER_ALIASES)
+    _report_unplaced_columns(ctx, keys, headers, "alarm register")
+    if "reference" not in headers:
+        ctx.issue(
+            "not_an_alarm_register",
+            "CSV marked as an alarm list has no column this importer reads as the alarm "
+            "identifier, so no alarm definition was created from it.",
+        )
+        return
+    if "latched" in headers:
+        # Read, and deliberately not applied.  ``AlarmDefinition.latched`` says
+        # whether the *controller* holds the alarm until something clears it, and
+        # it is the sole gate on the release-blocking reset-behaviour rule.  A
+        # terminal alarm register describes annunciation — it sits beside an
+        # acknowledge column for that reason — so it is not evidence about the
+        # ladder, and the ladder's own OTL/OTU pairs are already in the model
+        # where the logic validator reads them directly.  Writing the column here
+        # produced a release blocker stating that nothing clears an alarm the
+        # export unlatches on the next rung.
+        ctx.issue(
+            "unapplied_source_column",
+            f"Column {headers['latched']!r} of this alarm register was read but not applied to "
+            "the canonical latch state, which is a statement about the controller rather than "
+            "about the terminal. Its stated value is in the parsed artifact against this "
+            "register's row anchors.",
+            f"column:{headers['latched']}",
+        )
+
+    written = _written_tag_names(ctx)
+    all_tags = list(
+        ctx.db.execute(
+            select(Tag)
+            .where(Tag.project_id == ctx.project.id, Tag.deleted_at.is_(None))
+            .order_by(Tag.created_at, Tag.id)
+        ).scalars()
+    )
+    programs = list(
+        ctx.db.execute(
+            select(Program)
+            .where(Program.project_id == ctx.project.id, Program.deleted_at.is_(None))
+            .order_by(Program.created_at, Program.id)
+        ).scalars()
+    )
+
+    for fallback_ordinal, row_source in enumerate(_as_list(content.get("rows"))):
+        record = _as_dict(row_source.get("record"))
+        row_number = _int(row_source.get("row")) or fallback_ordinal + 1
+        row_key = f"csv-row:{row_number}"
+        reference = _value(record, headers, "reference")
+        if not reference or len(reference) > 40:
+            ctx.issue(
+                "invalid_alarm_reference",
+                "Alarm identifier is missing or exceeds the canonical 40-character key limit.",
+                row_key,
+            )
+            continue
+        key = f"{row_key}/alarm:{reference}"
+        severity = _ALARM_SEVERITIES.get(_normalise(_value(record, headers, "severity")))
+        if severity is None:
+            stated = _value(record, headers, "severity")
+            ctx.issue(
+                "unsupported_alarm_severity",
+                f"Alarm {reference} states severity {stated!r}, which is not a severity band "
+                "this importer reads. Severity is how fast an operator must respond, so no "
+                "band was chosen for it and the alarm was not imported.",
+                key,
+            )
+            continue
+
+        rows = list(
+            ctx.db.execute(
+                select(AlarmDefinition)
+                .where(
+                    AlarmDefinition.project_id == ctx.project.id,
+                    AlarmDefinition.reference == reference,
+                )
+                .order_by(AlarmDefinition.created_at, AlarmDefinition.id)
+            ).scalars()
+        )
+        existing, occupied = _occupant(rows, ctx, key)
+        trigger = _value(record, headers, "trigger")
+        tag = _resolve_tag_reference(trigger, all_tags, programs)
+        message = _value(record, headers, "message")
+        values: dict[str, Any] = {
+            # The register carries one piece of human-readable text per alarm.
+            # It is the alarm's name to an engineer reading the list and the
+            # operator's message at the terminal, so it is recorded as both
+            # rather than picked for one and dropped from the other.
+            "name": (_value(record, headers, "name") or message)[:120],
+            "message_key": _value(record, headers, "message_key")[:60],
+            "severity": severity,
+            "alarm_class": _value(record, headers, "alarm_class")[:40],
+            "trigger_tag_name": trigger[:120],
+            "trigger_tag_id": tag.id if tag is not None else None,
+            "trigger_type": _value(record, headers, "trigger_type")[:24],
+            "limit_value": _value(record, headers, "limit_value")[:60],
+            "deadband": _value(record, headers, "deadband")[:60],
+            "delay_seconds": _float(_value(record, headers, "delay_seconds")),
+            "is_resolved": tag is not None,
+            "is_driven": bool(trigger) and _operand_base_name(trigger).casefold() in written,
+            "group_name": _value(record, headers, "group")[:60],
+            "ordinal": fallback_ordinal,
+        }
+        # Written only when the register states it: ``False`` here is the
+        # positive claim that the operator does not have to acknowledge this
+        # alarm, which is not the same as a register that says nothing.
+        acknowledge = _flag(_value(record, headers, "requires_acknowledge"))
+        if acknowledge is not None:
+            values["requires_acknowledge"] = acknowledge
+
+        if existing is not None:
+            alarm = _update(ctx, existing, values, key)
+        elif occupied:
+            continue
+        else:
+            alarm = _create(
+                ctx,
+                AlarmDefinition(project_id=ctx.project.id, reference=reference, **values),
+                key,
+            )
+        if alarm.deleted_at is None:
+            _import_alarm_message(ctx, record, headers, key, alarm, message)
+
+
+def _import_alarm_message(
+    ctx: _Context,
+    record: dict[str, Any],
+    headers: dict[str, str],
+    alarm_key: str,
+    alarm: AlarmDefinition,
+    message: str,
+) -> None:
+    """Record the operator text the register states, and nothing more.
+
+    ``operator_guidance`` stays empty unless the source has a column for it. An
+    alarm that states a condition and no response is a documented gap the alarm
+    delivery audit reports, and filling the field in with the condition text
+    would close that gap without anybody having decided what the operator does.
+    """
+    guidance = _value(record, headers, "operator_guidance")
+    if not message and not guidance:
+        return
+    key = f"{alarm_key}/message"
+    rows = list(
+        ctx.db.execute(
+            select(AlarmMessage)
+            .where(AlarmMessage.alarm_id == alarm.id)
+            .order_by(AlarmMessage.created_at, AlarmMessage.id)
+        ).scalars()
+    )
+    existing, occupied = _occupant(rows, ctx, key)
+    values = {"text": message, "operator_guidance": guidance, "ordinal": 0}
+    if existing is not None:
+        _update(ctx, existing, values, key)
+    elif not occupied:
+        _create(
+            ctx,
+            AlarmMessage(project_id=ctx.project.id, alarm_id=alarm.id, **values),
+            key,
+        )
 
 
 __all__ = [

@@ -24,14 +24,33 @@ Only ``check`` can fail the run. The other three collect into one report at the
 end, because a smoke script that went red on a known limitation would be
 silenced within a week and the limitation would stop being visible at all.
 
-The largest gap caps most of the others: **no HTTP route decides an approval
-gate.** ``POST /api/approvals/{id}/decision`` settles the approval row and leaves
-the ``ApprovalGate`` untouched, so a production run driven entirely over the API
-parks at gate 1 and never reaches design, generation or release. Everything
-downstream of that gate is therefore unobservable here, and is recorded as a gap
-rather than pretended away. ``backend/tests/test_line4_end_to_end.py`` reaches
-further by calling :mod:`app.engineering` directly, and carries the same list as
-``xfail(strict=True)`` markers with the full diagnosis of each.
+**The reviewer resolves what blocks, the way an engineer would.** Two devices on
+``Local:1:I.Data.10`` is a real defect in the customer's input; only one can be
+wired and nothing in the eight documents says which. So this script does what the
+brief's step 12 says — *resolved or approved* — and records a named waiver over
+every blocker nothing else can clear, last in a round and only when answering and
+deciding have already moved everything they can. Gates 1 and 2 then pass, and the
+gate that proceeded over carried risk is decided ``accept_risk`` rather than
+``approve`` so the release record keeps the two apart.
+
+What stops the run is now one step further on, and it is not the fixture's fault:
+``design_plc_architecture`` parks because the deterministic provider will not
+choose which approved template implements a requirement, and this project has no
+logic network claiming any of the seven accepted ones. Without generated logic
+there is no delivery and no package, so the release gaps below are a limitation of
+running with no model rather than a defect, and the acceptance test records each
+as ``xfail(strict=True)`` with the full diagnosis.
+
+**Where a report is read from matters more than it looks.** The product speaks in
+two voices, and most of what it says about this plant is the deterministic one:
+``GET /projects/{id}/validation-results`` carries the newest run's results, one
+row per defect, naming the tag and the terminal. ``release-readiness`` carries
+only per-category summaries — "the model has unresolved validation errors" names
+no tag — so a script that judged the seven planted issues from readiness alone
+would report four of them missing and blame the importer. This one reads both,
+and ranks a validation severity onto the finding scale exactly as
+``backend/tests/test_line4_end_to_end.py`` does, so the two instruments cannot
+disagree about the same run.
 
 Restart is exercised for real rather than simulated: the server is stopped and a
 second process is booted against the same database and data directory, which is
@@ -60,14 +79,34 @@ ADMIN_PASSWORD = "esco-demo-admin"  # noqa: S105 - the seeded demo credential
 
 PROJECT_NAME = "Line 4 Packaging Conveyor Upgrade"
 
-#: Why nothing past gate 1 can be observed over HTTP. Quoted on every gap it
-#: causes, so a reader never has to guess whether a step is broken or merely
-#: out of reach.
-GATE_WALL = (
-    "the run parks at gate 1: no HTTP route reaches "
-    "app.engineering.gates.record_decision, so a reviewer cannot pass a gate and "
-    "nothing behind one ever runs"
+#: Why the run stops short of a release, quoted on every gap it causes so that a
+#: reader never has to guess whether a step is broken or correctly refused.
+BLOCKED_BY_DESIGN = (
+    "design_plc_architecture parks: the deterministic provider will not choose which approved "
+    "template implements a requirement, and nothing in this project claims any of the seven "
+    "accepted ones, so no logic is generated and no package follows. Running with no model is "
+    "the limitation, not the fixture — gates 1 and 2 pass on a carried risk and the release "
+    "door no longer refuses the waived errors"
 )
+
+#: The two severities the product itself lets a reviewer carry. Anything else is
+#: refused by POST /validation-results/{id}/waiver, so this set is read off the
+#: product rather than chosen.
+WAIVABLE: frozenset[str] = frozenset({"error", "human_review_required"})
+
+#: How a deterministic validation severity compares with a finding severity.
+#: Same table as the acceptance test's, for the same reason: the README's ground
+#: truth is written in the finding vocabulary and the product answers in both.
+#: ``error`` stops a release and so ranks with ``high``; ``warning`` and
+#: ``human_review_required`` both put a decision in front of a person and rank
+#: with ``medium``; the rest are the platform describing its own coverage.
+VALIDATION_RANK: dict[str, str] = {
+    "error": "high",
+    "warning": "medium",
+    "human_review_required": "medium",
+    "information": "informational",
+    "unsupported": "informational",
+}
 
 #: The eight artifacts and the engineering purpose the uploader declares.
 ARTIFACTS: tuple[tuple[str, str], ...] = (
@@ -313,15 +352,26 @@ def _settle(client: httpx.Client, project_id: str, auth: dict[str, str], decided
 
     approvals = client.get(f"/api/projects/{project_id}/approvals", headers=auth)
     if approvals.status_code == 200:
+        carried = _carried_risk(client, project_id, auth)
         for row in approvals.json():
             key = f"{row['kind']}:{row['title']}"
             if row["status"] != "pending" or not row["decision_allowed"] or key in decided:
                 continue
-            decision = client.post(
-                f"/api/approvals/{row['id']}/decision",
-                headers=auth,
-                json={"approved": True, "notes": "Reviewed against the source documents."},
-            )
+            if row["kind"] == "gate_decision" and row.get("gate_id"):
+                decision = client.post(
+                    f"/api/approval-gates/{row['gate_id']}/approvals/{row['id']}/decision",
+                    headers=auth,
+                    json={
+                        "decision": "accept_risk" if carried else "approve",
+                        "comment": _gate_comment(carried),
+                    },
+                )
+            else:
+                decision = client.post(
+                    f"/api/approvals/{row['id']}/decision",
+                    headers=auth,
+                    json={"approved": True, "notes": "Reviewed against the source documents."},
+                )
             if decision.status_code == 200:
                 decided.add(key)
                 moved += 1
@@ -329,23 +379,94 @@ def _settle(client: httpx.Client, project_id: str, auth: dict[str, str], decided
     return moved
 
 
+def _carried_risk(client: httpx.Client, project_id: str, auth: dict[str, str]) -> list[str]:
+    """Which validation risks this project is already knowingly carrying."""
+    results = client.get(f"/api/projects/{project_id}/validation-results", headers=auth)
+    if results.status_code != 200:
+        return []
+    return [
+        f"{row['code']} at {row['object_label']}" for row in results.json() if row.get("is_waived")
+    ]
+
+
+def _gate_comment(carried: list[str]) -> str:
+    """What the reviewer signs. Mandatory for accept_risk, which is the point of it."""
+    comment = (
+        "Checked against the functional description, interlock matrix, and current "
+        "validation evidence."
+    )
+    if not carried:
+        return comment
+    return (
+        comment + f" Proceeding on accepted risk: this project carries {len(carried)} waived "
+        "validation result(s) — " + "; ".join(carried) + " — each raised with the customer "
+        "and scheduled into the upgrade scope."
+    )
+
+
+def _carry_the_remaining_risk(client: httpx.Client, project_id: str, auth: dict[str, str]) -> int:
+    """Record a named reviewer's waiver over every blocker nothing else can clear.
+
+    Step 12 of the brief is "resolved **or approved**", and the second half needs a
+    door. The product has exactly one — ``POST /validation-results/{id}/waiver`` —
+    and no API by which a human edits an I/O assignment, so carrying the
+    double-booked channel is both what the product supports and what an engineer
+    does with a conflict a drawing set does not resolve.
+
+    Called only when nothing else in the round moved, which is the order the work
+    happens in: answer what can be answered, then decide what is left. Waiving on
+    sight would sign for ``requirements.unanswered_question`` results that the
+    previous step clears by answering the question.
+    """
+    results = client.get(f"/api/projects/{project_id}/validation-results", headers=auth)
+    if results.status_code != 200:
+        return 0
+    moved = 0
+    for row in results.json():
+        if row.get("is_waived") or row.get("severity") not in WAIVABLE:
+            continue
+        waiver = client.post(
+            f"/api/validation-results/{row['id']}/waiver",
+            headers=auth,
+            json={
+                "confirm": True,
+                "reason": (
+                    f"{row['code']} at {row['object_label']} is a defect this upgrade "
+                    "inherits from the existing installation, and the documents the "
+                    "customer supplied do not resolve it. Raised with the customer, "
+                    "carried knowingly into this revision, and scheduled into the "
+                    "upgrade scope."
+                ),
+                "expected_updated_at": row["updated_at"],
+            },
+        )
+        moved += 1 if waiver.status_code == 200 else 0
+    return moved
+
+
 def _run_to_rest(client: httpx.Client, project_id: str, auth: dict[str, str]) -> dict[str, Any]:
-    """Work, answer, decide, repeat, until a turn changes nothing."""
+    """Work, answer, decide, carry, repeat, until a turn changes nothing."""
     decided: set[str] = set()
     state = _quiesce(client, project_id, auth)
     for _ in range(12):
-        if not _settle(client, project_id, auth, decided):
+        moved = _settle(client, project_id, auth, decided)
+        if not moved:
+            moved = _carry_the_remaining_risk(client, project_id, auth)
+        if not moved:
             break
         state = _quiesce(client, project_id, auth)
     return state
 
 
 def _reports(client: httpx.Client, project_id: str, auth: dict[str, str]) -> list[dict[str, Any]]:
-    """Everything the product said about this plant that costs somebody time.
+    """Everything the product said about this plant, in whichever voice.
 
-    Findings, and whatever stops a release. Standing capability disclosures are
-    excluded: they describe the limits of what was checked, not this plant. Same
-    scope as the acceptance test's, so the two cannot disagree.
+    Findings, plus the newest deterministic validation run — including the waived
+    results, marked. A waiver decides a claim; it does not retract one. Dropping
+    them would report this run as having found three fewer defects than it did,
+    and would let an over-reaching error escape the decoy score by being signed
+    for. What a waiver does change is whether a result still *blocks*, and that is
+    read from the flag rather than from the row's absence.
     """
     rows: list[dict[str, Any]] = []
 
@@ -371,19 +492,24 @@ def _reports(client: httpx.Client, project_id: str, auth: dict[str, str]) -> lis
                             "limitations",
                         )
                     ).lower(),
+                    "is_waived": False,
                 }
             )
 
-    readiness = client.get(f"/api/projects/{project_id}/release-readiness", headers=auth)
-    if readiness.status_code == 200:
-        for item in readiness.json().get("blocks", []):
+    results = client.get(f"/api/projects/{project_id}/validation-results", headers=auth)
+    if results.status_code == 200:
+        for item in results.json():
             rows.append(
                 {
-                    "source": "release_block",
+                    "source": "validation",
                     "code": str(item.get("code", "")),
-                    "severity": "high",
+                    "severity": VALIDATION_RANK.get(str(item.get("severity", "")), "informational"),
                     "title": str(item.get("message", ""))[:120],
-                    "text": " ".join(str(value) for value in item.values()).lower(),
+                    "text": " ".join(
+                        str(item.get(key, ""))
+                        for key in ("code", "message", "object_label", "suggested_action")
+                    ).lower(),
+                    "is_waived": bool(item.get("is_waived")),
                 }
             )
     return rows
@@ -395,6 +521,26 @@ def _names(report: dict[str, Any], *subjects: str) -> bool:
 
 def _rank(value: str) -> int:
     return {"informational": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}.get(value, 0)
+
+
+def _judged(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The reports a decoy rule applies to: findings, and every error-severity result.
+
+    Narrower than the whole set on purpose, and the same scope the acceptance
+    test judges its decoys on. A finding costs an engineer time and an
+    error-severity result stops a job; the information and unsupported rows are
+    the platform declaring the limits of what it checked, and holding those to a
+    ground truth about this plant would score the disclosure, not the review.
+
+    Waived errors stay in. A false claim a reviewer had to read and sign for cost
+    them exactly as much as one nobody signed, so over-reach is not cured by a
+    waiver.
+    """
+    return [
+        report
+        for report in reports
+        if report["source"] == "finding" or _rank(report["severity"]) >= 3
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -539,13 +685,24 @@ def run_checks(base_url: str) -> str:
         extracted.text[:300],
     )
 
+    # Two scopes of question, and the difference is load-bearing. A
+    # ``Clarification`` is addressed to a document — it is the voice a reading of
+    # the customer's prose is put back in. A project question is addressed to the
+    # project, and the run raises ten of them asking which accepted requirement a
+    # tag derives from. The end-to-end search below reads both, because either
+    # would settle the accumulation release; the check reads only the first,
+    # because a run that never asks a document anything has not read one.
     inbox = client.get(f"/api/projects/{project_id}/clarifications", headers=auth)
-    questions = (
-        [row["question"].lower() for row in inbox.json()["clarifications"]]
-        if inbox.status_code == 200
-        else []
+    body = inbox.json() if inbox.status_code == 200 else {}
+    clarifications = [str(row["question"]).lower() for row in body.get("clarifications", [])]
+    questions = clarifications + [
+        str(row["question"]).lower() for row in body.get("project_questions", [])
+    ]
+    check(
+        "at least one clarification was raised",
+        bool(clarifications),
+        f"{len(questions)} question(s) were asked and none is addressed to a document",
     )
-    check("at least one clarification was raised", bool(questions), "no question was asked")
 
     raised = client.get(f"/api/projects/{project_id}/approvals", headers=auth)
     check(
@@ -565,56 +722,52 @@ def run_checks(base_url: str) -> str:
             _names(r, "pe402") and _rank(r["severity"]) >= 3 and "missing" in r["code"]
             for r in reports
         ),
-        "PE401_BLOCKED is offered as a candidate for PE402_BLOCKED on the 'same word "
-        "initials' rule at 0.923, so a missing protection is downgraded to a medium naming "
-        "mismatch that names the wrong photo-eye.",
+        "the absence of PE402 from the export is not reported as an absence.",
     )
     found(
         "issue 2: Local:1:I.Data.10 carrying two devices is reported",
         any(_names(r, "local:1:i.data.10") for r in reports),
-        "the I/O list has no device column, so no Signal and no AddressAssignment is created "
-        "and io.duplicate_point_assignment has nothing to compare; the two rows collapse into "
-        "a single I/O point.",
+        "io.duplicate_point_assignment has nothing to compare: the two I/O rows collapsed "
+        "into one point instead of producing two address assignments.",
     )
     found(
         "issue 3: the CV401 run command carrying two names is reported",
         any(_names(r, "mtr401_run_cmd", "cv401_run_output") for r in reports),
-        f"found in-process by logic.output_without_driving_rung, but {GATE_WALL} - and the "
-        "first validation run is behind it.",
+        "neither name is reported, so nothing noticed that one terminal carries two of them.",
     )
     found(
         "issue 4: the ALM_CYL402_FAIL alarm that can never annunciate is reported",
         any(_names(r, "alm_cyl402_fail") and _rank(r["severity"]) >= 2 for r in reports),
-        "Alarm_Register.csv never reaches the evidence graph - its 'Alarm ID' header matches "
-        "no alarm-name alias, so all seven rows are dropped - and no AlarmDefinition is "
-        "imported, so the check that would find it has no rows to check.",
+        "the alarm register did not reach the model, so the check that finds an unwritten "
+        "trigger has no alarm rows to check.",
     )
     found(
         "issue 5: the HMI binding to the missing Accum_Case_Count tag is reported",
         any(_names(r, "accum_case_count") for r in reports),
-        "the FactoryTalk display export contributes no bindings to the evidence graph and no "
-        "HMIBinding rows to the canonical model, so the expression is never read at all.",
+        "the display export contributed no bindings, so the expression was never read.",
     )
     found(
         "issue 6: the ambiguous accumulation release is put back to the customer",
         any("accumulat" in item and "releas" in item for item in questions),
-        "the clarifications raised are all generated from the Cause and Effect worksheet's "
-        "blank columns; the one deliberate ambiguity in the document set is never quoted.",
+        "the accumulation-release sentence in Project_Description.docx section 3 is quoted "
+        "by no question. It reaches one because Functional_Description.docx section 8 "
+        "records that passage as not settled and names both the document and the section "
+        "(app.agents.base.providers.mock._deferred_passages), so the thing to check is "
+        "whether that notice still parses into a statement carrying an anchor.",
         f"{len(questions)} question(s) raised",
     )
-    cyl401 = [r for r in reports if _names(r, "cyl401", "ilk-403")]
+    cyl401 = [r for r in _judged(reports) if _names(r, "cyl401", "ilk-403")]
     found(
         "issue 7: the correctly implemented CYL401 diverter produces no findings",
         not cyl401,
-        "the Cause and Effect worksheet is read as seven more interlock rows with no "
-        "trip_tag, trip_condition, action or failsafe column, so every interlock - including "
-        "the correct one - is reported as incompletely specified.",
+        "over-reach against the one device the fixture implements correctly end to end, which "
+        "is the single most misleading thing this review can do.",
         "; ".join(item["title"] for item in cyl401),
     )
 
     print("\n[the eleven decoys]")
     for label, subjects in DECOYS:
-        fired = [r for r in reports if _names(r, *subjects)]
+        fired = [r for r in _judged(reports) if _names(r, *subjects)]
         quiet(
             f"decoy stayed quiet: {label}",
             not fired,
@@ -626,30 +779,113 @@ def run_checks(base_url: str) -> str:
     print("\n[gates, generation and release]")
     openapi = client.get("/openapi.json")
     paths = list(openapi.json().get("paths", {})) if openapi.status_code == 200 else []
-    gap(
+    check(
         "a reviewer can decide an approval gate through the API",
-        any("gate" in path.lower() for path in paths),
-        "no HTTP route reaches app.engineering.gates.record_decision. "
-        "POST /api/approvals/{id}/decision settles the approval row and leaves the gate "
-        "untouched, so the six gates cannot be passed from outside the process at all.",
-        f"{len(paths)} paths, none naming a gate",
+        "/api/approval-gates/{gate_id}/approvals/{approval_id}/decision" in paths,
+        f"{len(paths)} paths, none binding an approval to its exact gate",
     )
     validations = client.get(
         f"/api/projects/{project_id}/events",
         headers=auth,
         params={"event_type": "validation.completed", "limit": 5},
     )
-    gap(
+    check(
         "a validation run completes",
         validations.status_code == 200 and len(validations.json()) > 0,
-        f"{GATE_WALL}; the first validation task sits behind gate 1.",
+        validations.text[:300],
+    )
+    print("\n[what the reviewer carried, and what it did]")
+    carried = _carried_risk(client, project_id, auth)
+    check(
+        "the reviewer carried the blockers the documents cannot resolve",
+        bool(carried),
+        "nothing was waived, so the 'or approved' half of step 12 never ran",
+    )
+    for item in carried:
+        print(f"        carried: {item}")
+    check(
+        "the duplicate channel is one of them, by name",
+        any("Local:1:I.Data.10" in item for item in carried),
+        "; ".join(carried),
+    )
+    waived_rows = [
+        row
+        for row in client.get(f"/api/projects/{project_id}/validation-results", headers=auth).json()
+        if row.get("is_waived")
+    ]
+    check(
+        "every waiver names a reviewer and states a reason",
+        all(
+            row.get("waived_by_id") and str(row.get("waiver_reason", "")).strip()
+            for row in waived_rows
+        ),
+        f"{len(waived_rows)} waived result(s)",
+    )
+
+    # ACCEPT_RISK and APPROVE both leave a gate passed. Only the approval row
+    # keeps them apart, and a delivery that went out over a double-booked safety
+    # input has to stay distinguishable afterwards from one that went out clean.
+    # Only settled rows: a gate task that is unblocked and re-run raises a fresh
+    # request and cancels the stale one, so reading whichever row came last would
+    # report a decided gate as undecided.
+    approvals = client.get(f"/api/projects/{project_id}/approvals", headers=auth)
+    decisions = {
+        str(row.get("gate_key")): str(row.get("decision"))
+        for row in (approvals.json() if approvals.status_code == 200 else [])
+        if row.get("gate_key")
+        and row.get("status") in {"approved", "risk_accepted", "rejected"}
+        and row.get("decision")
+    }
+    check(
+        "gate 2 passed, over the carried channel conflict",
+        "devices_io_tags" in decisions,
+        f"gate decisions: {decisions}",
+    )
+    check(
+        "the gate that proceeded on carried risk is recorded as accept_risk, not approve",
+        decisions.get("devices_io_tags") == "accept_risk",
+        f"gate decisions: {decisions}",
+    )
+    check(
+        "the gate decided before anything was carried is a plain approve",
+        decisions.get("project_profile") == "approve",
+        f"gate decisions: {decisions}",
+    )
+
+    readiness = client.get(f"/api/projects/{project_id}/release-readiness", headers=auth)
+    body = readiness.json() if readiness.status_code == 200 else {}
+    print(f"        outstanding gates: {body.get('outstanding_gates')}")
+    print(f"        validation errors: {body.get('validation_error_count')}")
+    for block in body.get("blocking", []):
+        print(f"        blocking: {block.get('code')} - {block.get('summary')}")
+    blocking_codes = [str(block.get("code")) for block in body.get("blocking", [])]
+    check(
+        "the carried errors are still counted rather than erased",
+        int(body.get("validation_error_count") or 0) >= 1,
+        f"validation_error_count is {body.get('validation_error_count')} with "
+        f"{len(waived_rows)} waived result(s)",
+    )
+    check(
+        "the carried errors no longer block the release door",
+        "validation_errors" not in blocking_codes,
+        "; ".join(
+            f"{block.get('code')}: {block.get('detail')}" for block in body.get("blocking", [])
+        ),
+    )
+    check(
+        "the platform states the ceiling it can actually reach offline",
+        body.get("highest_attainable_validation_level") == "round_trip_parsed"
+        and body.get("import_verification_possible") is False
+        and bool(str(body.get("import_verification_detail", "")).strip()),
+        f"level={body.get('highest_attainable_validation_level')} "
+        f"possible={body.get('import_verification_possible')}",
     )
 
     candidates = client.get(f"/api/projects/{project_id}/release-candidates", headers=auth)
     candidate_rows = (
         list(candidates.json().get("items", [])) if candidates.status_code == 200 else []
     )
-    gap("a release candidate is generated", bool(candidate_rows), GATE_WALL)
+    gap("a release candidate is generated", bool(candidate_rows), BLOCKED_BY_DESIGN)
 
     over_claimed: list[str] = []
     limitations = ""
@@ -663,13 +899,13 @@ def run_checks(base_url: str) -> str:
     gap(
         "no artifact claims more than round-trip parsed",
         bool(candidate_rows) and not over_claimed,
-        f"unreachable: {GATE_WALL}.",
+        "unreachable while no candidate exists; see the gap above.",
         "; ".join(over_claimed),
     )
     gap(
         "LIMITATIONS.md calls the package an import-ready candidate",
         "import-ready candidate" in limitations.lower(),
-        f"unreachable: {GATE_WALL}.",
+        "unreachable while no candidate exists; see the gap above.",
     )
 
     project = client.get(f"/api/projects/{project_id}", headers=auth).json()
@@ -681,7 +917,9 @@ def run_checks(base_url: str) -> str:
     gap(
         "the project reaches READY_FOR_EXPORT",
         project["status"] == "ready_for_export",
-        f"{GATE_WALL}.",
+        f"{BLOCKED_BY_DESIGN}. Blocked is the honest state while the design step is parked; a "
+        "genuinely finalized archive converges to COMPLETED, so READY_FOR_EXPORT is the "
+        "pre-finalization state rather than the durable one.",
         f"status is {project['status']}",
     )
 

@@ -10,15 +10,21 @@ engineering,generators,validation,adapters}`, `backend/app/agents/{base,review}`
 said so
 **Endpoints:** 65 HTTP + 1 WebSocket at `01e289f`; 68 + 1 in the working tree
 (see [Uncommitted](#uncommitted-work-in-the-tree))
-**Checks, run against the working tree on 2026-08-05:** `ruff check` clean ·
-`mypy` clean (180 files) · `alembic` round-trips and `alembic check` passes *with*
-the uncommitted revision `4f7a9c2d1e6b` and fails without it ·
-`generate_contracts.py --check` **stale** on all three files · `pytest` **not
-green**: `test_contracts.py` (2, the staleness above) and
-`test_workflow_api.py::test_a_run_started_over_rest_is_streamed_to_a_connected_socket`
-(1, `agent.status_changed` now interleaves with the `task.created` burst the test
-expects contiguously). Do not read "the suite is green" out of an older version of
-this file.
+**Checks, re-run against the working tree late on 2026-08-05:** `ruff format` and
+`ruff check` clean · `mypy` clean (186 files) · `alembic` round-trips and
+`alembic check` passes *with* the uncommitted revisions `4f7a9c2d1e6b` and
+`4000cd6b1757` and fails without them · `generate_contracts.py --check` **up to
+date** (both were stale earlier today and someone regenerated them) ·
+`backend/tests/api` + `backend/tests/validation` **361 passed** · full `pytest`
+**one failure**:
+`test_line4_end_to_end.py::test_requirements_are_extracted_and_at_least_one_clarification_is_raised`,
+because the evidence graph no longer reads the Cause and Effect worksheet as
+seven more interlock requirements — the spurious clarifications that satisfied it
+are gone and the one genuine ambiguity (planted issue 6) is still not found. That
+is the same in-flight work that removed the planted-issue-1 and -7 markers, not a
+regression. **Several agents are editing this tree at once**, so re-derive every
+number here rather than quoting it, and do not read "the suite is green" out of
+any version of this file.
 
 Read this file for what the API is and what it will not do. Read
 [`docs/backend/project-core.md`](../backend/project-core.md) before writing to the
@@ -518,6 +524,19 @@ warning, or a claim the code could not support. A green suite found none of them
 
 **Schema and persistence**
 
+* **An approval could invalidate itself.** An approval recorded who and when but
+  never *what*, so `ApprovalIntegrityValidator` inferred "edited since approval"
+  from `updated_at > approved_at`. Recording an approval is itself an update, so
+  those are two reads of one clock inside a single flush: accepting a requirement
+  reported the reviewer who accepted it, as a release-blocking
+  `cross.approved_object_modified`, whenever the two reads landed in different
+  ticks. This is the counter-example to "a green run means it works" — it failed
+  intermittently, and the run that passed was equally good evidence of the
+  defect. Fixed by recording `approved_object_revision` on
+  `EngineeringObjectMixin` (revision `4000cd6b1757`) and comparing revisions,
+  which cannot race. It is in `registry.PROTECTED_FIELDS`: an agent that could
+  move the baseline could edit an approved object and leave the signature
+  reading as intact.
 * **Enum columns did not round-trip.** `Mapped[ProjectStatus]` on a plain
   `String(32)` stores correctly and loads back as a `str`, so
   `status is ProjectStatus.ARCHIVED` was `False` for every persisted row — which
@@ -861,8 +880,18 @@ is part of why the contracts read stale. The enum shortfall in
    `strict=True` and only still xfails because it enumerates `application.routes`
    in a way that does not see prefixed routers — a test that would pass for the
    wrong reason is worse than one that fails.
-8. **`test_workflow_api.py::test_a_run_started_over_rest_is_streamed_to_a_connected_socket`
-   fails.** It expects `workflow.started` followed by a contiguous run of
-   `task.created` frames, and an `agent.status_changed` now lands in the middle.
-   Either the agent-provisioning events moved or the assertion was always too
-   strict about interleaving; I have not decided which, and it is mine to settle.
+8. **Settled: the socket test was too strict, not the presence events.** It
+   expected `workflow.started` followed by a contiguous run of `task.created`
+   frames. The socket's contract is that `seq` is gap-free and monotonic per
+   project; it has never promised that two event types arrive adjacently, and
+   `agent.status_changed` interleaving is legitimate. The test now takes the
+   frame count from `GET /events` and holds **every** frame that arrived to the
+   sequence contract — presence frames included rather than filtered out — so it
+   passes whether the roster is announced before, inside or after the burst
+   (verified by flipping `provision_workflow_agents(announce=…)` both ways).
+   Nothing in the product changed. One thing left for whoever owns event order:
+   `orchestration/engine.py` still defers the roster announcement until after the
+   `task.created` loop, and its comment invites consumers to treat
+   `workflow.started` + `task_count` × `task.created` as "one contiguous,
+   deterministic snapshot". No test needs that any more, and the comment promises
+   more than the socket does. Check the frontend before dropping it.

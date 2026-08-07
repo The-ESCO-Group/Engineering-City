@@ -32,11 +32,20 @@ from app.agents.base.providers import build_provider
 from app.agents.base.registry import AgentSpec, spec_for
 from app.agents.base.runner import AgentRunner, RunOutcome, resolve_model_configuration
 from app.core.config import Settings
-from app.core.enums import ActionType, AgentKind, AgentStatus, ObjectType
+from app.core.enums import (
+    ActionType,
+    AgentKind,
+    AgentStatus,
+    ClarificationStatus,
+    EvidenceKind,
+    ObjectType,
+)
 from app.core.logging import get_logger
 from app.core.services.evidence_graph import EvidenceGraph, build_graph
 from app.models.evidence import EvidenceAnchor
+from app.models.profile import ProjectDecision, ProjectQuestion
 from app.models.project import Project
+from app.models.user import User
 
 logger = get_logger(__name__)
 
@@ -74,10 +83,57 @@ Absolute rules:
    finding you made.
 8. Do not include reasoning traces. `rationale` is a short, human-readable
    justification that will be stored and shown to an engineer.
+9. `answered_questions` holds questions a named engineer has already answered.
+   Each answer is a fact you may state and cite by its `decision_reference`; it
+   is not a fact you established. Never ask again what one of them answers — the
+   same question a second time is not a question, it is a run that cannot move —
+   and never treat a question as answered because you would have answered it
+   that way. Where no answer covers it, it stays a question.
 
 Reply with a single JSON object: {"rationale": str, "actions": [...],
 "warnings": [str]}.
 """.strip()
+
+
+@dataclass(frozen=True, slots=True)
+class AnsweredQuestion:
+    """A question a named human has already answered.
+
+    An answer is *evidence*, not conversation: resolving a question records a
+    :class:`~app.models.profile.ProjectDecision`, which is what
+    :data:`~app.core.enums.EvidenceKind.HUMAN_DECISION` resolves to and what an
+    object built on the answer cites. That is why the decision's reference and
+    the decider's name travel with the text — an answer nobody is named for is
+    not a human decision, and an agent that cannot cite one cannot build on it.
+
+    Carried into every agent's turn because an agent that cannot see the answers
+    asks again. The question is idempotent by reference, so the second asking
+    returns the answered row, the step blocks on the same sentence, and a human
+    who answered correctly watches the run refuse to move.
+    """
+
+    reference: str
+    category: str
+    question: str
+    answer: str
+    answered_by: str
+    #: The ``ProjectDecision`` that records this answer. Empty only for a row
+    #: answered by something that did not record one, and an agent must then
+    #: treat the answer as read rather than as citable.
+    decision_reference: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "reference": self.reference,
+            "category": self.category,
+            "question": self.question,
+            "answer": self.answer,
+            "answered_by": self.answered_by,
+            "decision_reference": self.decision_reference,
+            # Stated rather than left to be worked out: this is the basis kind an
+            # object built on this answer has to cite.
+            "basis_kind": EvidenceKind.HUMAN_DECISION.value,
+        }
 
 
 @dataclass(slots=True)
@@ -91,6 +147,13 @@ class AgentContext:
     task_id: uuid.UUID | None = None
     workflow_run_id: uuid.UUID | None = None
     payload: dict[str, Any] | None = None
+    #: Questions on this project a human has answered, built by the caller with
+    #: :func:`answered_questions_for`. Handed over rather than queried per agent,
+    #: for the same reason the evidence graph is: what an agent reasons over is
+    #: assembled once, by the caller, and is the same view for every agent in the
+    #: turn. Defaults to empty so a caller with no session-level view — a unit
+    #: test exercising one agent — is unchanged.
+    answered_questions: tuple[AnsweredQuestion, ...] = ()
 
 
 @dataclass(slots=True)
@@ -215,7 +278,7 @@ class BaseAgent(ABC):
         )
         outcome = runner.run(
             system_prompt=self.system_prompt(context),
-            context=self.build_context(context),
+            context=self._context_view(context),
             allowed_actions=self.allowed_actions,
             anchor_ids=anchor_ids,
             allowed_object_types=self.allowed_object_types,
@@ -243,6 +306,22 @@ class BaseAgent(ABC):
         return AgentResult(outcome=outcome, execution=execution)
 
     # -- shared context helpers ------------------------------------------
+    def _context_view(self, context: AgentContext) -> dict[str, Any]:
+        """What the agent chose to look at, plus the answers it may not re-ask.
+
+        The answers are added here rather than inside each ``build_context``
+        because they are not one agent's concern: a question a human has answered
+        must not be asked again by *any* of them, and a rule that depended on each
+        agent remembering to include it would be a rule that held for some.
+        ``setdefault`` so an agent that assembles its own view of the answers —
+        one that needs them grouped by requirement, say — keeps it.
+        """
+        view = self.build_context(context)
+        view.setdefault(
+            "answered_questions", [item.as_dict() for item in context.answered_questions]
+        )
+        return view
+
     @staticmethod
     def anchor_index(db: Session, project_id: uuid.UUID) -> dict[str, str]:
         """Map parser-assigned anchor keys to anchor ids.
@@ -262,3 +341,63 @@ class BaseAgent(ABC):
 
 def graph_for(context_db: Session, project: Project) -> EvidenceGraph:
     return build_graph(context_db, project.id)
+
+
+def answered_questions_for(db: Session, project_id: uuid.UUID) -> tuple[AnsweredQuestion, ...]:
+    """Every project question a named human has answered, oldest first.
+
+    Only ``ANSWERED``, and only with text on the row. ``DEFERRED`` records that
+    somebody looked at the question and chose to come back to it, and
+    ``DISMISSED`` that the answer is no longer needed; neither states what the
+    answer *is*, and an agent that read one as an answer would be acting on words
+    nobody offered as one.
+    """
+    decisions = {
+        decision.question_id: decision
+        for decision in db.execute(
+            select(ProjectDecision).where(
+                ProjectDecision.project_id == project_id,
+                ProjectDecision.question_id.is_not(None),
+                ProjectDecision.deleted_at.is_(None),
+            )
+        ).scalars()
+    }
+    answered: list[AnsweredQuestion] = []
+    for question in db.execute(
+        select(ProjectQuestion)
+        .where(
+            ProjectQuestion.project_id == project_id,
+            ProjectQuestion.status == ClarificationStatus.ANSWERED,
+            ProjectQuestion.deleted_at.is_(None),
+        )
+        .order_by(ProjectQuestion.created_at, ProjectQuestion.reference)
+    ).scalars():
+        if not question.answer.strip():
+            continue
+        decision = decisions.get(question.id)
+        answered.append(
+            AnsweredQuestion(
+                reference=question.reference,
+                category=question.category.value,
+                question=question.question,
+                answer=question.answer,
+                answered_by=_answered_by(db, question, decision),
+                decision_reference=decision.reference if decision is not None else "",
+            )
+        )
+    return tuple(answered)
+
+
+def _answered_by(db: Session, question: ProjectQuestion, decision: ProjectDecision | None) -> str:
+    """Who answered, by name.
+
+    The decision's own denormalised name first: it was captured when the decision
+    was recorded, so it survives a rename or a deactivated account, which is the
+    point of storing it there.
+    """
+    if decision is not None and decision.decided_by_name:
+        return decision.decided_by_name
+    if question.answered_by_id is None:
+        return ""
+    user = db.get(User, question.answered_by_id)
+    return user.display_name if user is not None else ""

@@ -68,9 +68,7 @@ def waive_validation_result(
         "waive validation results",
     )
     if not permissions.can_decide_approval(user, access.role):
-        raise PermissionDeniedError(
-            "Waiving a validation result requires the reviewer role."
-        )
+        raise PermissionDeniedError("Waiving a validation result requires the reviewer role.")
     outcome = validation_review.waive(
         db,
         project=access.project,

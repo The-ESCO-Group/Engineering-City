@@ -41,6 +41,7 @@ rather than the tuple alone:
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -67,6 +68,7 @@ from app.generators.plc.instructions import (
     supports,
 )
 from app.models.plc import LogicInstruction
+from app.models.tags import Tag
 from app.validation.base import (
     DestructiveWrite,
     Issue,
@@ -214,6 +216,7 @@ def operand_dependent_writes(context: ValidationContext) -> list[DestructiveWrit
             writes.append(
                 DestructiveWrite(
                     tag_name=name,
+                    operand_text=operand.text.strip() or name,
                     mnemonic=spec.mnemonic,
                     rung_id=instruction.rung_id,
                     rung_label=context.rung_label(instruction.rung_id),
@@ -337,14 +340,48 @@ class _RangeWrite:
     mnemonic: str
     rung_id: uuid.UUID
     rung_label: str
+    operand_ordinal: int
     start: int | None
     length: int | None
+
+    @property
+    def identity(self) -> tuple[uuid.UUID, str, int, str]:
+        """The matching identity of this destination in destructive writes."""
+        return (self.rung_id, self.mnemonic, self.operand_ordinal, fold(self.tag_name))
 
     def covers(self, index: int | None) -> bool | None:
         """Whether this range writes element ``index``. ``None`` if undecidable."""
         if self.start is None or self.length is None or index is None:
             return None
+        if self.length <= 0:
+            return False
         return self.start <= index < self.start + self.length
+
+    def overlaps(self, other: _RangeWrite) -> bool | None:
+        """Whether two destination intervals intersect, or ``None`` if unknown."""
+        if self.length is not None and self.length <= 0:
+            return False
+        if other.length is not None and other.length <= 0:
+            return False
+        if self.start is None or self.length is None or other.start is None or other.length is None:
+            return None
+        return max(self.start, other.start) < min(
+            self.start + self.length,
+            other.start + other.length,
+        )
+
+
+def _range_sort_key(item: _RangeWrite) -> tuple[str, int, int, str, str, str, int]:
+    """Stable presentation order independent of row/UUID creation order."""
+    return (
+        base_name(item.tag_name),
+        item.start is None,
+        item.start if item.start is not None else 0,
+        fold(item.tag_name),
+        item.rung_label,
+        item.mnemonic,
+        item.operand_ordinal,
+    )
 
 
 def _range_writes(context: ValidationContext) -> list[_RangeWrite]:
@@ -372,10 +409,11 @@ def _range_writes(context: ValidationContext) -> list[_RangeWrite]:
                 continue
             found.append(
                 _RangeWrite(
-                    tag_name=name,
+                    tag_name=destination.text.strip() or name,
                     mnemonic=mnemonic,
                     rung_id=instruction.rung_id,
                     rung_label=context.rung_label(instruction.rung_id),
+                    operand_ordinal=ordinal,
                     start=_subscript_index(destination.text or name),
                     length=_literal_count(length.text) if length is not None else None,
                 )
@@ -391,29 +429,30 @@ class DestructiveWriteValidator:
     description = "Two or more instructions writing the same tag."
 
     def check(self, context: ValidationContext) -> Iterable[Issue]:
-        writes = all_destructive_writes(context)
+        all_writes = all_destructive_writes(context)
         grouped: dict[str, list[DestructiveWrite]] = {}
-        for write in writes:
-            grouped.setdefault(fold(write.tag_name), []).append(write)
+        for write in all_writes:
+            grouped.setdefault(fold(write.operand_text), []).append(write)
 
         issues: list[Issue] = []
-        for writes in grouped.values():
-            if len(writes) < 2:
+        for destination in sorted(grouped):
+            destination_writes = grouped[destination]
+            if len(destination_writes) < 2:
                 continue
 
-            mnemonics = {write.mnemonic for write in writes}
-            if len(mnemonics) == len(writes) and any(
+            mnemonics = {write.mnemonic for write in destination_writes}
+            if len(mnemonics) == len(destination_writes) and any(
                 mnemonics <= allowed for allowed in _COMPLEMENTARY_WRITER_SETS
             ):
                 continue
 
-            locations = sorted({write.rung_label for write in writes})
-            name = writes[0].tag_name
+            locations = sorted({write.rung_label for write in destination_writes})
+            name = destination_writes[0].operand_text
             detail = {
                 "tag_name": name,
                 "mnemonics": sorted(mnemonics),
                 "locations": locations,
-                "write_count": len(writes),
+                "write_count": len(destination_writes),
             }
 
             if mnemonics <= _MASKED_WRITERS:
@@ -429,14 +468,14 @@ class DestructiveWriteValidator:
                         # judgement where the evidence is.
                         severity=ValidationSeverity.WARNING,
                         message=(
-                            f"'{name}' is written by {len(writes)} masked instructions "
+                            f"'{name}' is written by {len(destination_writes)} masked instructions "
                             f"({', '.join(sorted(mnemonics))}) at: {'; '.join(locations)}. "
                             "Whether they conflict depends on whether their masks overlap, "
                             "which was not evaluated."
                         ),
                         object_type=ObjectType.LOGIC_RUNG,
-                        object_id=writes[0].rung_id,
-                        object_label=writes[0].rung_label,
+                        object_id=destination_writes[0].rung_id,
+                        object_label=destination_writes[0].rung_label,
                         suggested_action=(
                             "Check the masks against each other; if they overlap, one of the "
                             "two writes is being lost."
@@ -457,13 +496,13 @@ class DestructiveWriteValidator:
                     # either rung says.
                     severity=ValidationSeverity.ERROR,
                     message=(
-                        f"'{name}' is written by {len(writes)} instructions "
+                        f"'{name}' is written by {len(destination_writes)} instructions "
                         f"({', '.join(sorted(mnemonics))}) at: {'; '.join(locations)}. "
                         "The last one scanned wins and the others have no effect."
                     ),
                     object_type=ObjectType.LOGIC_RUNG,
-                    object_id=writes[0].rung_id,
-                    object_label=writes[0].rung_label,
+                    object_id=destination_writes[0].rung_id,
+                    object_label=destination_writes[0].rung_label,
                     suggested_action=(
                         "Combine the conditions onto one rung that writes the tag once, or "
                         "give each writer its own tag."
@@ -472,7 +511,7 @@ class DestructiveWriteValidator:
                 )
             )
 
-        issues.extend(self._range_overlaps(context, writes))
+        issues.extend(self._range_overlaps(context, all_writes))
         return issues
 
     def _range_overlaps(
@@ -487,13 +526,24 @@ class DestructiveWriteValidator:
         copy's extent against the other writer's element, is what makes that
         findable.
         """
-        ranges = _range_writes(context)
+        ranges = sorted(_range_writes(context), key=_range_sort_key)
         if not ranges:
             return []
 
         by_base: dict[str, list[DestructiveWrite]] = {}
         for write in writes:
-            by_base.setdefault(base_name(write.tag_name), []).append(write)
+            by_base.setdefault(base_name(write.operand_text), []).append(write)
+        for base_writes in by_base.values():
+            base_writes.sort(
+                key=lambda write: (
+                    fold(write.operand_text),
+                    write.rung_label,
+                    write.mnemonic,
+                    write.operand_ordinal,
+                )
+            )
+
+        ranges_by_identity = {item.identity: item for item in ranges}
 
         issues: list[Issue] = []
         for base in sorted({base_name(item.tag_name) for item in ranges}):
@@ -503,34 +553,78 @@ class DestructiveWriteValidator:
             # same defect as a copy reaching into a MOV's element, so the two
             # cases are not separated here.
             proven = False
-            reached: list[tuple[_RangeWrite, DestructiveWrite]] = []
+            reached: list[tuple[_RangeWrite, DestructiveWrite, bool]] = []
             for item in in_range:
                 for write in by_base.get(base, []):
-                    if fold(write.tag_name) == fold(item.tag_name):
+                    identity = (
+                        write.rung_id,
+                        write.mnemonic,
+                        write.operand_ordinal,
+                        fold(write.operand_text),
+                    )
+                    if identity == item.identity:
                         continue
-                    covered = item.covers(_subscript_index(write.tag_name))
+                    if fold(write.operand_text) == fold(item.tag_name):
+                        # The exact destination is already covered by the
+                        # ordinary duplicate check; do not emit a second issue
+                        # merely because one writer happens to be a range.
+                        continue
+                    other_range = ranges_by_identity.get(identity)
+                    if other_range is not None:
+                        # Exact destinations are already reported by the
+                        # ordinary duplicate check.  Different ranges are
+                        # compared once, as intervals, so a zero-length copy
+                        # cannot become a false collision merely because its
+                        # nominal start lies inside another copy.
+                        if _range_sort_key(other_range) <= _range_sort_key(item):
+                            continue
+                        covered = item.overlaps(other_range)
+                    else:
+                        covered = item.covers(_subscript_index(write.operand_text))
                     if covered is False:
                         continue
                     proven = proven or covered is True
-                    reached.append((item, write))
+                    reached.append((item, write, covered is True))
             if not reached:
                 # Either nothing else writes the array, or every element was
                 # accounted for and none of them collide.
                 continue
 
             first = reached[0][0]
-            involved = [write for _, write in reached]
+            involved = [write for _, write, _ in reached]
             locations = sorted(
-                {item.rung_label for item, _ in reached} | {write.rung_label for write in involved}
+                {item.rung_label for item, _, _ in reached}
+                | {write.rung_label for write in involved}
             )
-            elements = sorted({write.tag_name for write in involved})
+            elements = sorted({write.operand_text for write in involved}, key=fold)
+            overlaps = sorted(
+                (
+                    {
+                        "range_start": item.tag_name,
+                        "range_mnemonic": item.mnemonic,
+                        "range_location": item.rung_label,
+                        "other_destination": write.operand_text,
+                        "other_mnemonic": write.mnemonic,
+                        "other_location": write.rung_label,
+                        "overlap_proven": overlap_proven,
+                    }
+                    for item, write, overlap_proven in reached
+                ),
+                key=lambda overlap: (
+                    fold(str(overlap["range_start"])),
+                    str(overlap["range_location"]),
+                    fold(str(overlap["other_destination"])),
+                    str(overlap["other_location"]),
+                ),
+            )
             detail: dict[str, object] = {
                 "array": base,
-                "range_writers": sorted({item.mnemonic for item, _ in reached}),
+                "range_writers": sorted({item.mnemonic for item, _, _ in reached}),
                 "other_writers": sorted({write.mnemonic for write in involved}),
                 "elements": elements[:20],
                 "locations": locations,
                 "overlap_proven": proven,
+                "overlaps": overlaps,
             }
             issues.append(
                 Issue(
@@ -570,12 +664,69 @@ class DestructiveWriteValidator:
         return issues
 
 
+def _terminal_pattern(address: str) -> re.Pattern[str]:
+    """A pattern matching one I/O address and nothing that merely starts with it.
+
+    ``Local:2:O.Data.1`` occurs inside ``Local:2:O.Data.10``, so a substring test
+    pairs a tag with the wrong terminal — and in a finding whose whole subject is
+    which name belongs to which terminal, that is the one mistake that must not
+    happen. The lookahead therefore rejects anything an address can continue
+    with, while still allowing the full stop that ends a sentence: a description
+    reading "wired to Local:2:O.Data.0." names the terminal as plainly as one
+    that stops short of the punctuation.
+    """
+    return re.compile(
+        rf"(?<![A-Za-z0-9_.:]){re.escape(address)}(?![A-Za-z0-9_:\[])(?!\.[A-Za-z0-9_])",
+        re.IGNORECASE,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _TerminalDriver:
+    """A tag the ladder writes that the model states drives one terminal.
+
+    ``basis_kind`` is carried alongside the sentence because the three ways this
+    can be established are not equally strong: a second tag row on the same I/O
+    point is a binding this platform holds, an alias target is a declaration the
+    controller resolves, and a description naming the address is the author's own
+    note. Which one answered decides how far a reader should trust the pairing,
+    so it is reported rather than flattened into "we matched them up".
+    """
+
+    tag_name: str
+    address: str
+    #: The clause the message reads with, e.g. ``whose description names
+    #: 'Local:2:O.Data.0'``. Composed here so the finding stays one sentence.
+    basis: str
+    basis_kind: str
+
+
+#: Presentation order for :class:`_TerminalDriver`, strongest evidence first. Any
+#: one of them establishes that the terminal is driven; the order only decides
+#: which is quoted when more than one tag claims the same address.
+_DRIVER_BASIS_ORDER: tuple[str, ...] = ("binding", "alias", "description")
+
+
 class OutputCoverageValidator:
-    """Outputs, alarms and latches that no rung ever drives or clears."""
+    """Outputs, alarms and latches that no rung ever drives or clears.
+
+    An output the ladder does not write by name is two different findings, and
+    collapsing them was worse than missing one. Nothing driving the terminal at
+    all is a device that ships wired, documented and dead. A terminal the ladder
+    *does* drive, through a tag the I/O list spells differently, is a name
+    disagreement between two documents — the ``naming_mismatch`` class in the
+    product's finding vocabulary (:attr:`~app.core.enums.FindingCategory.NAMING_MISMATCH`)
+    rather than the missing-logic one. Reported as the same release-blocking
+    error, the second outranks every genuine protection gap in the same run,
+    which is how a validator loses the reader it was written for.
+    """
 
     key = "logic.output_coverage"
     discipline = _DISCIPLINE
-    description = "Field outputs, alarm triggers and latched bits nothing in the ladder writes."
+    description = (
+        "Field outputs, alarm triggers and latched bits nothing in the ladder writes, and "
+        "field outputs it drives under a name the I/O list does not use."
+    )
 
     def check(self, context: ValidationContext) -> Iterable[Issue]:
         if not context.has_ladder_logic:
@@ -618,10 +769,16 @@ class OutputCoverageValidator:
 
     def _undriven_outputs(self, context: ValidationContext, written: frozenset[str]) -> list[Issue]:
         issues: list[Issue] = []
+        driven = [tag for tag in context.tags if self._is_written(written, tag.name)]
+        driven_ids = {tag.id for tag in driven}
         for tag in context.tags:
             if not self._is_field_output(context, tag.signal_id, tag.io_point_id):
                 continue
-            if self._is_written(written, tag.name):
+            if tag.id in driven_ids:
+                continue
+            drivers = self._drivers_of_terminal(context, tag, driven)
+            if drivers:
+                issues.append(self._name_mismatch_issue(tag, drivers))
                 continue
             issues.append(
                 Issue(
@@ -631,6 +788,12 @@ class OutputCoverageValidator:
                     # instruction writes is a terminal that can never energise.
                     # The device is wired, documented and dead, and no amount of
                     # reading the tag list or the I/O schedule shows it.
+                    #
+                    # Only reached once no written tag can be shown to drive the
+                    # same terminal, so this is the missing-driver case and not
+                    # the disagreeing-name one. The distinction is the check's,
+                    # not the severity's: an output nothing drives stays an
+                    # error, at full strength.
                     severity=ValidationSeverity.ERROR,
                     message=(
                         f"'{tag.name}' is bound to a field output but no rung writes it. "
@@ -647,6 +810,148 @@ class OutputCoverageValidator:
                 )
             )
         return issues
+
+    def _terminal_addresses(self, context: ValidationContext, tag: Tag) -> list[str]:
+        """Every physical address this tag is bound to, as written.
+
+        Both routes are read because a project arrives either way: an I/O list
+        binds the tag to its point directly, while a device-and-signal model
+        reaches the point through the address assignment. A tag bound to a signal
+        nobody has assigned an address to has no terminal here, and answering
+        ``[]`` for it is what keeps "driven under another name" from being
+        claimed on no evidence at all.
+        """
+        point_ids = [tag.io_point_id] if tag.io_point_id is not None else []
+        if tag.signal_id is not None:
+            point_ids.extend(
+                assignment.io_point_id
+                for assignment in context.assignments_by_signal.get(tag.signal_id, [])
+                if assignment.io_point_id is not None
+            )
+
+        addresses: list[str] = []
+        for point_id in point_ids:
+            point = context.io_points_by_id.get(point_id)
+            if point is None:
+                continue
+            address = point.address.strip()
+            if address and address not in addresses:
+                addresses.append(address)
+        return addresses
+
+    def _drivers_of_terminal(
+        self, context: ValidationContext, tag: Tag, driven: list[Tag]
+    ) -> list[_TerminalDriver]:
+        """Tags the ladder writes that the model states drive ``tag``'s terminal.
+
+        This is what separates a naming disagreement from a dead output. The
+        I/O list and the logic can name one signal differently — ``MTR401_RUN_CMD``
+        on the schedule, ``CV401_Run_Output`` in the rung — and no name comparison
+        finds that, by construction: two names a normaliser joins are not a
+        mismatch anybody has to report. What identifies them as one signal is the
+        terminal they share, so the terminal is what is compared.
+        """
+        addresses = self._terminal_addresses(context, tag)
+        patterns = [(address, _terminal_pattern(address)) for address in addresses]
+
+        found: list[_TerminalDriver] = []
+        for other in driven:
+            if other.id == tag.id:
+                continue
+            binding = ""
+            if tag.io_point_id is not None and other.io_point_id == tag.io_point_id:
+                binding = "which this project binds to the same I/O point"
+            elif tag.signal_id is not None and other.signal_id == tag.signal_id:
+                binding = "which this project binds to the same signal"
+            if binding:
+                found.append(
+                    _TerminalDriver(
+                        tag_name=other.name,
+                        # Two tag rows on one binding share the terminal whatever
+                        # its address says, so the address here is a locator for
+                        # the reader rather than the evidence.
+                        address=addresses[0] if addresses else "",
+                        basis=binding,
+                        basis_kind="binding",
+                    )
+                )
+                continue
+            for address, pattern in patterns:
+                # The alias first: an alias target is what the controller
+                # resolves, so it settles the question. A description naming the
+                # address is weaker and is still worth acting on — it is the
+                # author saying which terminal they wrote the tag for.
+                if pattern.search(other.alias_for):
+                    found.append(
+                        _TerminalDriver(
+                            tag_name=other.name,
+                            address=address,
+                            basis=f"which aliases '{address}'",
+                            basis_kind="alias",
+                        )
+                    )
+                    break
+                if pattern.search(other.description):
+                    found.append(
+                        _TerminalDriver(
+                            tag_name=other.name,
+                            address=address,
+                            basis=f"whose description names '{address}'",
+                            basis_kind="description",
+                        )
+                    )
+                    break
+
+        found.sort(
+            key=lambda item: (_DRIVER_BASIS_ORDER.index(item.basis_kind), fold(item.tag_name))
+        )
+        return found
+
+    @staticmethod
+    def _name_mismatch_issue(tag: Tag, drivers: list[_TerminalDriver]) -> Issue:
+        """The terminal is driven; the two documents disagree about its name."""
+        driver = drivers[0]
+        terminal = f" '{driver.address}'" if driver.address else ""
+        return Issue(
+            code="logic.output_name_mismatch",
+            discipline=_DISCIPLINE,
+            # WARNING, and the argument against ERROR is the check's whole
+            # reason for existing: the terminal is driven, the wiring is right
+            # and nothing ships dead, so blocking the release here would stop a
+            # job over a name — and would rank this level with the missing
+            # interlock in the same run, which is the comparison an engineer
+            # reads a severity for.
+            #
+            # Not INFORMATION either, and that matters as much. Two documents
+            # name one signal differently, so the I/O list, the wiring
+            # schedule, the HMI and the test procedure all cite a tag the
+            # controller does not have. Whoever is on the floor spends the
+            # morning proving an output is alive before finding the second name,
+            # and an informational note is the level nobody reads first.
+            severity=ValidationSeverity.WARNING,
+            message=(
+                f"'{tag.name}' is bound to field output{terminal} and no rung writes it, but "
+                f"the ladder writes '{driver.tag_name}', {driver.basis}. The output is driven "
+                "under a name this project's I/O list does not use."
+            ),
+            object_type=ObjectType.TAG,
+            object_id=tag.id,
+            object_label=label(f"Output / {tag.name}"),
+            suggested_action=(
+                f"Settle which name the signal carries — rename '{driver.tag_name}' in the "
+                f"logic, or correct '{tag.name}' where the I/O list states it — so the wiring "
+                "schedule, the HMI and the test procedures all name the tag the controller "
+                "drives. Dropping either name without deciding which is right loses the "
+                "terminal."
+            ),
+            detail={
+                "tag_name": tag.name,
+                "role": tag.role.value,
+                "address": driver.address,
+                "driven_by": [item.tag_name for item in drivers],
+                "established_from": driver.basis_kind,
+            },
+        )
 
     def _is_field_output(
         self,

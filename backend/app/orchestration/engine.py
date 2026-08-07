@@ -274,9 +274,7 @@ def start_run(
         .where(
             Task.project_id == project.id,
             Task.run_id.isnot(None),
-            Task.status.notin_(
-                [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
-            ),
+            Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]),
         )
         .limit(1)
     ).scalar_one_or_none()
@@ -1040,10 +1038,7 @@ def cancel(
     cancelled_gate_requests = gates.cancel_pending_gate_requests(
         db,
         project=project,
-        reason=(
-            "Cancelled because the workflow run was cancelled. "
-            f"Reason: {effective_reason}"
-        ),
+        reason=(f"Cancelled because the workflow run was cancelled. Reason: {effective_reason}"),
     )
     queue = DatabaseTaskQueue(db, settings)
     unfinished = list(
@@ -1062,9 +1057,7 @@ def cancel(
     for task in unfinished:
         stopped += int(queue.cancel(task, effective_reason))
 
-    project.status = (
-        ProjectStatus.PLANNED if stopped or cancelled_gate_requests else project.status
-    )
+    project.status = ProjectStatus.PLANNED if stopped or cancelled_gate_requests else project.status
     project.is_paused = False
     project.paused_at = None
     db.flush()

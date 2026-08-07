@@ -250,9 +250,7 @@ def _record_ordinary_decision(
         raise NotFoundError("Project", project_id)
 
     project = db.execute(
-        select(Project)
-        .where(Project.id == project_id)
-        .execution_options(populate_existing=True)
+        select(Project).where(Project.id == project_id).execution_options(populate_existing=True)
     ).scalar_one()
     if project.status is ProjectStatus.ARCHIVED:
         raise ConflictError("Archived projects are read-only; this approval cannot be changed.")
@@ -297,9 +295,7 @@ def _record_ordinary_decision(
     if approval is None:
         raise ConflictError("This approval no longer belongs to the authorized project.")
     if approval.kind is ApprovalKind.GATE_DECISION or approval.gate_key is not None:
-        raise ConflictError(
-            "Workflow gate decisions must use the gate-bound decision transition."
-        )
+        raise ConflictError("Workflow gate decisions must use the gate-bound decision transition.")
     if approval.status is not ApprovalStatus.PENDING:
         raise ConflictError(
             f"This approval was already {approval.status.value}"

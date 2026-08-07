@@ -196,9 +196,7 @@ def test_losing_an_enqueue_uniqueness_race_preserves_the_callers_transaction(
 
         monkeypatch.setattr(loser, "begin_nested", begin_nested_after_winner)
         queue = DatabaseTaskQueue(loser, settings)
-        duplicate = queue.enqueue(
-            project.id, _request("race:one", title="The losing duplicate")
-        )
+        duplicate = queue.enqueue(project.id, _request("race:one", title="The losing duplicate"))
         follow_up = queue.enqueue(project.id, _request("race:two"))
         loser.commit()
 
@@ -212,12 +210,15 @@ def test_losing_an_enqueue_uniqueness_race_preserves_the_callers_transaction(
     stored_project = db.get(Project, project.id)
     assert stored_project is not None
     assert stored_project.description == "This caller-owned edit must survive the enqueue race."
-    assert db.scalar(
-        select(func.count(Task.id)).where(
-            Task.project_id == project.id,
-            Task.idempotency_key.in_(["race:one", "race:two"]),
+    assert (
+        db.scalar(
+            select(func.count(Task.id)).where(
+                Task.project_id == project.id,
+                Task.idempotency_key.in_(["race:one", "race:two"]),
+            )
         )
-    ) == 2
+        == 2
+    )
 
 
 def test_a_different_idempotency_key_creates_a_second_task(

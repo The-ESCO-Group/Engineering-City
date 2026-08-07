@@ -212,9 +212,11 @@ def test_submission_uses_native_action_validation_and_is_exactly_idempotent(
     assert conflict.status_code == 409
 
     instance_id = uuid.UUID(deployed["instance"]["id"])
-    runs = db.execute(
-        select(AgentRun).where(AgentRun.agent_instance_id == instance_id)
-    ).scalars().all()
+    runs = (
+        db.execute(select(AgentRun).where(AgentRun.agent_instance_id == instance_id))
+        .scalars()
+        .all()
+    )
     assert len(runs) == 1
 
     late_progress = engineer_client.post(
@@ -273,9 +275,9 @@ def test_external_agent_cannot_submit_review_or_release_authority(
     assert response.status_code == 200, response.text
     assert response.json()["accepted_actions"] == 0
     assert response.json()["rejected_actions"] == 1
-    assert "not permitted" in response.json()["run"]["rejected_actions"][0][
-        "rejection_reason"
-    ].lower()
+    assert (
+        "not permitted" in response.json()["run"]["rejected_actions"][0]["rejection_reason"].lower()
+    )
 
 
 def test_revocation_and_deployer_membership_loss_invalidate_the_agent_token(

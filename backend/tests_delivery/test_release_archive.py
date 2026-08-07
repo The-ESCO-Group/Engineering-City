@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import stat
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,7 +21,10 @@ from app.api.routes.releases import router as release_router
 from app.core.clock import utcnow
 from app.core.config import Settings, get_settings
 from app.core.enums import (
+    ApprovalDecision,
     ApprovalGateKey,
+    ApprovalKind,
+    ApprovalStatus,
     GateStatus,
     ImportVerificationStatus,
     ObjectApprovalState,
@@ -33,6 +37,7 @@ from app.engineering.release_archive import (
     open_verified_archive,
 )
 from app.generators.rockwell import build_release_package
+from app.models.approval import Approval
 from app.models.project import Project
 from app.models.release import ReleaseCandidate
 from app.models.release_archive import ReleaseArchive
@@ -186,6 +191,53 @@ def test_finalization_persists_a_sibling_zip_and_survives_restart(
         restarted.close()
 
 
+def test_finalization_refreshes_a_candidate_changed_after_preload(
+    db: Session,
+    approved_release: ReleaseCandidate,
+    seeded: dict[str, User],
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The project-root lock must not leave a stale approved candidate in memory."""
+    _bypass_gate(monkeypatch)
+    factory = db_session.get_session_factory()
+    stale = factory()
+    writer = factory()
+    try:
+        stale_candidate = stale.get(ReleaseCandidate, approved_release.id)
+        assert stale_candidate is not None
+        stale.commit()
+
+        current = writer.get(ReleaseCandidate, approved_release.id)
+        assert current is not None
+        current.status = ReleaseCandidateStatus.DRAFT
+        writer.commit()
+
+        with pytest.raises(ReleaseArchiveRefused) as caught:
+            finalize_release_archive(
+                stale,
+                candidate=stale_candidate,
+                finalized_by=seeded["reviewer"],
+                settings=settings,
+            )
+        assert caught.value.reason == "candidate_not_approved"
+        stale.rollback()
+    finally:
+        stale.close()
+        writer.close()
+
+    db.expire_all()
+    assert (
+        db.scalar(
+            select(ReleaseArchive.id).where(
+                ReleaseArchive.release_candidate_id == approved_release.id
+            )
+        )
+        is None
+    )
+    assert not _archive_path(settings, approved_release).exists()
+
+
 def test_retry_adopts_an_exact_orphan_zip_after_database_rollback(
     db: Session,
     approved_release: ReleaseCandidate,
@@ -301,6 +353,22 @@ def test_enabled_release_gate_requires_a_named_current_commented_decision(
     gate.decided_at = utcnow()
     gate.decided_revision_number = project.current_revision_number
     gate.decision_comment = ""
+    approval = Approval(
+        project_id=project.id,
+        release_candidate_id=approved_release.id,
+        gate_key=ApprovalGateKey.RELEASE,
+        kind=ApprovalKind.GATE_DECISION,
+        status=ApprovalStatus.APPROVED,
+        decision=ApprovalDecision.APPROVE,
+        revision_number=project.current_revision_number,
+        title="Approval gate: Release",
+        question="Release this exact candidate?",
+        decided_by_id=seeded["reviewer"].id,
+        decided_at=utcnow(),
+    )
+    db.add(approval)
+    db.flush()
+    gate.approval_id = approval.id
     db.flush()
 
     with pytest.raises(ReleaseArchiveRefused) as caught:
@@ -312,14 +380,43 @@ def test_enabled_release_gate_requires_a_named_current_commented_decision(
     assert caught.value.reason == "release_gate_incomplete"
 
     gate.decision_comment = "Reviewed the frozen manifest and customer delivery scope."
+    approval.release_candidate_id = uuid.uuid4()
+    with pytest.raises(ReleaseArchiveRefused) as wrong_candidate:
+        archive_service._assert_release_gate(
+            db,
+            project=project,
+            candidate=approved_release,
+        )
+    assert wrong_candidate.value.reason == "release_gate_incomplete"
+
+    approval.release_candidate_id = approved_release.id
     archive_service._assert_release_gate(
         db,
         project=project,
         candidate=approved_release,
     )
 
+    approval.kind = ApprovalKind.FINDING_RELEASE
+    with pytest.raises(ReleaseArchiveRefused) as malformed_kind:
+        archive_service._assert_release_gate(
+            db,
+            project=project,
+            candidate=approved_release,
+        )
+    assert malformed_kind.value.reason == "release_gate_incomplete"
 
-def test_disabled_release_gate_requires_a_stated_reason(
+    approval.kind = ApprovalKind.GATE_DECISION
+    approval.decision = ApprovalDecision.REJECT
+    with pytest.raises(ReleaseArchiveRefused) as malformed_decision:
+        archive_service._assert_release_gate(
+            db,
+            project=project,
+            candidate=approved_release,
+        )
+    assert malformed_decision.value.reason == "release_gate_incomplete"
+
+
+def test_final_release_gate_cannot_be_disabled_even_with_a_reason(
     db: Session,
     project: Project,
     approved_release: ReleaseCandidate,
@@ -347,14 +444,16 @@ def test_disabled_release_gate_requires_a_stated_reason(
             project=project,
             candidate=approved_release,
         )
-    assert caught.value.reason == "release_gate_unstated_skip"
+    assert caught.value.reason == "release_gate_required"
 
     gate.disabled_reason = "Customer contract delegates final delivery to the site integrator."
-    archive_service._assert_release_gate(
-        db,
-        project=project,
-        candidate=approved_release,
-    )
+    with pytest.raises(ReleaseArchiveRefused) as stated:
+        archive_service._assert_release_gate(
+            db,
+            project=project,
+            candidate=approved_release,
+        )
+    assert stated.value.reason == "release_gate_required"
 
 
 def test_download_preverification_detects_archive_tampering(

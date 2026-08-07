@@ -290,8 +290,7 @@ class DatabaseTaskQueue:
         return [
             upstream
             for dependency, upstream in self._dependency_rows(task)
-            if dependency.hard
-            and upstream.status in {TaskStatus.FAILED, TaskStatus.CANCELLED}
+            if dependency.hard and upstream.status in {TaskStatus.FAILED, TaskStatus.CANCELLED}
         ]
 
     def incomplete_hard_dependencies(self, task: Task) -> list[Task]:
@@ -482,9 +481,7 @@ class DatabaseTaskQueue:
             update(Task)
             .where(
                 Task.id == task.id,
-                Task.status.notin_(
-                    [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
-                ),
+                Task.status.notin_([TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]),
             )
             .values(
                 status=TaskStatus.CANCELLED,

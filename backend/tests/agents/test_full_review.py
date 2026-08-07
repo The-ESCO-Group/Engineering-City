@@ -319,17 +319,46 @@ def test_the_mock_provider_run_is_labelled_as_not_a_model(
 
 
 def test_running_the_review_twice_does_not_duplicate_findings(
-    db: Session, ingested_project: Project, seeded: dict[str, User], settings: Settings
+    db: Session,
+    ingested_project: Project,
+    seeded: dict[str, User],
+    settings: Settings,
+    reviewer_client: AuthedClient,
 ) -> None:
-    """The queue is at-least-once, so agents must converge rather than accumulate."""
+    """A completed rerun converges instead of accumulating duplicate findings.
+
+    Approval state is deliberately settled through the HTTP transition rather
+    than by editing rows.  The transition releases the parked approval task;
+    draining then completes delivery/finalization and proves the first run is
+    terminal before the one-active-run guard permits the second graph.
+    """
     _run(db, ingested_project, settings, seeded["engineer"])
     first = {finding.dedupe_key for finding in _findings(db, ingested_project)}
 
-    for approval in db.execute(
-        select(Approval).where(Approval.project_id == ingested_project.id)
-    ).scalars():
-        approval.status = ApprovalStatus.APPROVED
-    db.commit()
+    approval_ids = list(
+        db.execute(
+            select(Approval.id).where(
+                Approval.project_id == ingested_project.id,
+                Approval.status == ApprovalStatus.PENDING,
+            )
+        ).scalars()
+    )
+    assert approval_ids
+    for approval_id in approval_ids:
+        response = reviewer_client.post(
+            f"/api/approvals/{approval_id}/decision",
+            json={"approved": True, "notes": "Evidence and senior verdict checked."},
+        )
+        assert response.status_code == 200, response.text
+
+    worker.drain(settings)
+    db.expire_all()
+    db.refresh(ingested_project)
+    assert ingested_project.status is ProjectStatus.COMPLETED
+    assert all(
+        task.status in {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
+        for task in db.execute(select(Task).where(Task.project_id == ingested_project.id)).scalars()
+    )
 
     _run(db, ingested_project, settings, seeded["engineer"])
     second = _findings(db, ingested_project)

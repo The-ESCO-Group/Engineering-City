@@ -28,7 +28,8 @@ describe("OperationsCenter", () => {
 
     expect(screen.getByText("DEMO DATA · SYNTHETIC OFFLINE")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Agent operations" })).toBeInTheDocument();
-    expect(screen.getByText(/This view has no agent-control actions/)).toBeInTheDocument();
+    expect(screen.getByText(/Existing records stay read only/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send agent" })).toBeDisabled();
     expect(screen.getByText("5", { selector: ".ops-summary-grid dd" })).toBeInTheDocument();
     expect(screen.getByText("No instance-linked run is present in the loaded 0-run project window.")).toBeInTheDocument();
 

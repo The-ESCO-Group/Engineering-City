@@ -1,5 +1,9 @@
 import { Archive, Bot, Database, Radio } from "lucide-react";
 import { useMemo } from "react";
+import type {
+  ExternalAgentDeployRequest,
+  ExternalAgentDeployResponse
+} from "../../api/types";
 import { buildOperationsModel } from "./adapters";
 import { AgentsSurface } from "./AgentsSurface";
 import { AuditTrailSurface } from "./AuditTrailSurface";
@@ -9,6 +13,12 @@ import "./OperationsCenter.css";
 export interface OperationsCenterProps {
   source: OperationsSource;
   view: OperationsView;
+  serverBaseUrl?: string;
+  canDeployExternalAgent?: boolean;
+  externalAgentDisabledReason?: string;
+  onDeployExternalAgent?: (
+    payload: ExternalAgentDeployRequest
+  ) => Promise<ExternalAgentDeployResponse>;
   onOpenCityLocation?: (semanticLocation: string) => void;
 }
 
@@ -18,7 +28,15 @@ function modeLabel(mode: OperationsSource["dataMode"]): string {
   return "DATA UNAVAILABLE";
 }
 
-export function OperationsCenter({ source, view, onOpenCityLocation }: OperationsCenterProps) {
+export function OperationsCenter({
+  source,
+  view,
+  serverBaseUrl,
+  canDeployExternalAgent,
+  externalAgentDisabledReason,
+  onDeployExternalAgent,
+  onOpenCityLocation
+}: OperationsCenterProps) {
   const model = useMemo(() => buildOperationsModel(source), [source]);
   const title = view === "agents" ? "Agents" : "Audit Trail";
   const Icon = view === "agents" ? Bot : Archive;
@@ -36,7 +54,15 @@ export function OperationsCenter({ source, view, onOpenCityLocation }: Operation
 
       <div className="ops-center__content">
         {view === "agents" ? (
-          <AgentsSurface agents={model.agents} onOpenCityLocation={onOpenCityLocation} />
+          <AgentsSurface
+            agents={model.agents}
+            projectName={model.project?.name}
+            serverBaseUrl={serverBaseUrl}
+            canDeployExternalAgent={canDeployExternalAgent}
+            externalAgentDisabledReason={externalAgentDisabledReason}
+            onDeployExternalAgent={onDeployExternalAgent}
+            onOpenCityLocation={onOpenCityLocation}
+          />
         ) : (
           <AuditTrailSurface events={model.audit} firstSequence={model.firstSequence} latestSequence={model.latestSequence} sequenceGapCount={model.sequenceGapCount} />
         )}

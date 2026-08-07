@@ -5,25 +5,35 @@ right, which is where the product's value actually is: a discrepancy only exists
 between two documents.
 
 Every assertion here traces to a deliberately planted case in
-``fixtures/README.md``. The negative assertions matter as much as the positive
-ones — a graph that manufactures leads is as harmful as one that misses them,
-because an agent will faithfully turn a false lead into a finding an engineer has
-to disprove.
+``fixtures/README.md``, or — for the Line 4 matrix further down — in
+``fixtures/line4_packaging_conveyor/README.md``. The negative assertions matter as
+much as the positive ones: a graph that manufactures leads is as harmful as one
+that misses them, because an agent will faithfully turn a false lead into a
+finding an engineer has to disprove.
 """
 
 from __future__ import annotations
 
+import io
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.enums import FileKind, FileStatus, ProjectRole
-from app.core.services import evidence_graph
+from app.core.enums import DocumentRole, FileKind, FileStatus, ProjectRole
+from app.core.services import evidence_graph, parsing
+from app.core.services import files as file_service
 from app.core.services import projects as project_service
-from app.core.services.evidence_graph import EvidenceGraph, build_graph
+from app.core.services.evidence_graph import (
+    EvidenceGraph,
+    InterlockRequirement,
+    RequirementScope,
+    build_graph,
+)
 from app.models.file import ParsedArtifact, UploadedFile
 from app.models.project import Project
 from app.models.user import User
@@ -34,7 +44,7 @@ def _graph(db: Session, project: Project) -> EvidenceGraph:
     return build_graph(db, project.id)
 
 
-def _by_id(graph: EvidenceGraph, identifier: str) -> object:
+def _by_id(graph: EvidenceGraph, identifier: str) -> InterlockRequirement:
     matches = [item for item in graph.interlocks if item.identifier == identifier]
     assert len(matches) == 1, f"expected exactly one {identifier}, got {len(matches)}"
     return matches[0]
@@ -83,13 +93,13 @@ def test_correctly_implemented_interlocks_match_exactly(
     graph = _graph(db, ingested_project)
 
     estop = _by_id(graph, "ILK-001")
-    assert estop.matched_tag == "ESTOP_OK"  # type: ignore[attr-defined]
-    assert estop.candidate_tags == []  # type: ignore[attr-defined]
-    assert estop.related_rung_keys, "the matched tag should point at the rungs using it"  # type: ignore[attr-defined]
+    assert estop.matched_tag == "ESTOP_OK"
+    assert estop.candidate_tags == []
+    assert estop.related_rung_keys, "the matched tag should point at the rungs using it"
 
     overload = _by_id(graph, "ILK-002")
-    assert overload.matched_tag == "CV101_OL_TRIP"  # type: ignore[attr-defined]
-    assert overload.candidate_tags == []  # type: ignore[attr-defined]
+    assert overload.matched_tag == "CV101_OL_TRIP"
+    assert overload.candidate_tags == []
 
 
 # ---------------------------------------------------------------------------
@@ -101,9 +111,9 @@ def test_documented_interlock_absent_from_logic_is_visible(
     graph = _graph(db, ingested_project)
     jam = _by_id(graph, "ILK-003")
 
-    assert jam.trip_tag == "CV102_JAM"  # type: ignore[attr-defined]
-    assert jam.is_specified is True, "the schedule specifies it fully"  # type: ignore[attr-defined]
-    assert jam.matched_tag is None, "no declared tag of that name exists"  # type: ignore[attr-defined]
+    assert jam.trip_tag == "CV102_JAM"
+    assert jam.is_specified is True, "the schedule specifies it fully"
+    assert jam.matched_tag is None, "no declared tag of that name exists"
 
     # It is in the I/O list — the signal was wired — which is what makes this a
     # missing implementation rather than a documentation error.
@@ -132,19 +142,19 @@ def test_naming_mismatch_surfaces_as_a_candidate_not_a_conclusion(
     graph = _graph(db, ingested_project)
     guard = _by_id(graph, "ILK-004")
 
-    assert guard.trip_tag == "GUARD_DOOR_CLOSED"  # type: ignore[attr-defined]
-    assert guard.matched_tag is None, "the graph must not silently equate the two names"  # type: ignore[attr-defined]
+    assert guard.trip_tag == "GUARD_DOOR_CLOSED"
+    assert guard.matched_tag is None, "the graph must not silently equate the two names"
 
-    candidates = {item["name"] for item in guard.candidate_tags}  # type: ignore[attr-defined]
+    candidates = {item["name"] for item in guard.candidate_tags}
     assert "GRD_DR_CLSD" in candidates, f"contraction not offered; got {candidates}"
 
-    top = guard.candidate_tags[0]  # type: ignore[attr-defined]
+    top = guard.candidate_tags[0]
     assert top["name"] == "GRD_DR_CLSD", "the real match should rank first"
     assert top["score"] >= evidence_graph.SIMILARITY_THRESHOLD
     assert top["reason"]
 
     # The candidate carries the rungs that use it, so the agent can cite logic.
-    assert guard.related_rung_keys  # type: ignore[attr-defined]
+    assert guard.related_rung_keys
     assert graph.rungs_referencing("GRD_DR_CLSD"), "the logic does implement it"
 
 
@@ -155,10 +165,10 @@ def test_unrelated_tags_are_not_offered_as_candidates(
     graph = _graph(db, ingested_project)
     guard = _by_id(graph, "ILK-004")
 
-    candidates = {item["name"] for item in guard.candidate_tags}  # type: ignore[attr-defined]
+    candidates = {item["name"] for item in guard.candidate_tags}
     for unrelated in ("ESTOP_OK", "AIR_PRESS_PSI", "HOPPER_LEVEL_PCT", "LINE_PERMISSIVE"):
         assert unrelated not in candidates
-    assert len(guard.candidate_tags) <= 5  # type: ignore[attr-defined]
+    assert len(guard.candidate_tags) <= 5
 
 
 # ---------------------------------------------------------------------------
@@ -171,8 +181,8 @@ def test_both_sides_of_the_threshold_disagreement_are_recorded_verbatim(
     graph = _graph(db, ingested_project)
     air = _by_id(graph, "ILK-005")
 
-    assert air.matched_tag == "AIR_PRESS_PSI"  # type: ignore[attr-defined]
-    assert "60" in air.trip_condition, air.trip_condition  # type: ignore[attr-defined]
+    assert air.matched_tag == "AIR_PRESS_PSI"
+    assert "60" in air.trip_condition, air.trip_condition
 
     rungs = graph.rungs_referencing("AIR_PRESS_PSI")
     assert rungs, "the permissive rung uses the tag"
@@ -197,13 +207,13 @@ def test_an_underspecified_requirement_is_marked_not_comparable(
     graph = _graph(db, ingested_project)
     hopper = _by_id(graph, "ILK-007")
 
-    assert hopper.trip_tag == ""  # type: ignore[attr-defined]
-    assert hopper.trip_condition == ""  # type: ignore[attr-defined]
-    assert hopper.is_specified is False  # type: ignore[attr-defined]
-    assert "trip_tag" in hopper.missing_fields  # type: ignore[attr-defined]
-    assert "trip_condition" in hopper.missing_fields  # type: ignore[attr-defined]
-    assert hopper.matched_tag is None  # type: ignore[attr-defined]
-    assert hopper.candidate_tags == [], "an unspecified requirement has nothing to match"  # type: ignore[attr-defined]
+    assert hopper.trip_tag == ""
+    assert hopper.trip_condition == ""
+    assert hopper.is_specified is False
+    assert "trip_tag" in hopper.missing_fields
+    assert "trip_condition" in hopper.missing_fields
+    assert hopper.matched_tag is None
+    assert hopper.candidate_tags == [], "an unspecified requirement has nothing to match"
 
 
 # ---------------------------------------------------------------------------
@@ -217,9 +227,9 @@ def test_a_withdrawn_interlock_is_kept_but_not_treated_as_current(
     graph = _graph(db, ingested_project)
     withdrawn = _by_id(graph, "ILK-006")
 
-    assert withdrawn.from_hidden_sheet is True  # type: ignore[attr-defined]
-    assert withdrawn.is_current is False  # type: ignore[attr-defined]
-    assert withdrawn.sheet == "Superseded"  # type: ignore[attr-defined]
+    assert withdrawn.from_hidden_sheet is True
+    assert withdrawn.is_current is False
+    assert withdrawn.sheet == "Superseded"
 
     counts = graph.counts()
     assert counts["interlocks_from_hidden_sheets"] == 1
@@ -601,3 +611,509 @@ def test_a_tied_timestamp_resolves_by_filename_not_by_insertion_order(
     assert fact.description == "from A"
     assert fact.rung_keys == ["rung:A/0", "rung:B/0"]
     assert [item.anchor_key for item in graph.logic] == ["rung:A/0", "rung:B/0"]
+
+
+def test_a_schedule_with_no_scope_column_leaves_scope_unstated(
+    db: Session, ingested_project: Project
+) -> None:
+    """The demo schedule never says, and the graph must not answer for it.
+
+    "Nobody stated the scope" is a different fact from "stated as existing", and
+    only the first one licenses an agent to say so. Unstated still compares
+    against the logic: a schedule with no scope column is documenting the plant
+    it describes, and reading silence as "not built yet" would quietly stop the
+    comparison this product exists to make.
+    """
+    graph = _graph(db, ingested_project)
+    estop = _by_id(graph, "ILK-001")
+
+    assert estop.scope_text == ""
+    assert estop.scope is RequirementScope.UNSTATED
+    assert estop.is_current is True
+    assert graph.counts()["interlocks_scope_unstated"] == len(graph.interlocks)
+    assert graph.counts()["interlocks_new_in_upgrade"] == 0
+
+
+# ---------------------------------------------------------------------------
+# The Line 4 interlock matrix: two worksheets, only one of them a schedule.
+#
+# Ground truth is ``fixtures/line4_packaging_conveyor/README.md``, which names
+# the seven planted issues and the eleven things a correct review must not
+# report. Six of those eleven were reported because of this join, and the
+# highest-severity planted issue was misreported by it, so each is asserted here
+# as well — where a failure names the cause, rather than only through the
+# acceptance run, where it names a symptom.
+# ---------------------------------------------------------------------------
+LINE4_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "line4_packaging_conveyor"
+
+#: The base controller and the matrix. Enough for every claim below: the matrix
+#: is the document under test and the export is what its rows are matched
+#: against.
+LINE4_FIXTURES: tuple[tuple[str, DocumentRole], ...] = (
+    ("Conveyor_Line4_Base.L5X", DocumentRole.CONTROL_LOGIC),
+    ("Interlock_Matrix.xlsx", DocumentRole.INTERLOCK_SCHEDULE),
+)
+
+
+@pytest.fixture
+def line4_project(
+    db: Session,
+    project: Project,
+    seeded: dict[str, User],
+    settings: Settings,
+) -> Project:
+    """The Line 4 export and interlock matrix, ingested and parsed as an upload."""
+    if not LINE4_DIR.is_dir():  # pragma: no cover - developer aid
+        pytest.fail(f"{LINE4_DIR} is missing. Run: python scripts/backend/make_line4_fixture.py")
+
+    for filename, role in LINE4_FIXTURES:
+        data = (LINE4_DIR / filename).read_bytes()
+        outcome = file_service.ingest_upload(
+            db,
+            project=project,
+            filename=filename,
+            stream=io.BytesIO(data),
+            size_bytes=len(data),
+            declared_role=role,
+            uploader=seeded["engineer"],
+            settings=settings,
+        )
+        assert outcome.accepted, f"{filename} was rejected: {outcome.rejection_reason}"
+    db.commit()
+
+    for record in parsing.parseable_files(db, project.id):
+        outcome = parsing.parse_file(db, record, settings)
+        assert outcome.succeeded, f"{record.original_filename}: {outcome.error_message}"
+    db.commit()
+    return project
+
+
+def test_the_cause_and_effect_worksheet_is_not_a_second_set_of_interlocks(
+    db: Session, line4_project: Project
+) -> None:
+    """Seven rows in the matrix are seven requirements, not fourteen.
+
+    The workbook's second sheet is a cause-and-effect grid. Read as a schedule it
+    yields one requirement per row with the trip tag, the trip condition, the
+    action and the fail-safe column all absent — which reads as seven incompletely
+    specified interlocks, including against the one device this fixture implements
+    correctly from end to end.
+    """
+    graph = build_graph(db, line4_project.id)
+
+    identifiers = [item.identifier for item in graph.interlocks]
+    assert identifiers == [f"ILK-40{number}" for number in range(1, 8)], identifiers
+    assert {item.sheet for item in graph.interlocks} == {"Interlock Matrix"}
+
+    underspecified = [item.identifier for item in graph.interlocks if not item.is_specified]
+    assert underspecified == [], (
+        f"the matrix fills every column of every row; these were read as gaps: {underspecified}"
+    )
+
+
+def test_the_cause_and_effect_worksheet_is_kept_as_cause_and_effect(
+    db: Session, line4_project: Project
+) -> None:
+    """Dropping the grid would lose what it is for: which cause drives which effect.
+
+    The schedule row states the trip and the grid states the actions the trip is
+    meant to produce. Neither document holds both, so a review that has only one
+    of them cannot check either against the logic.
+    """
+    graph = build_graph(db, line4_project.id)
+
+    assert graph.cause_effects, "the grid reached the graph as nothing at all"
+    assert {item.sheet for item in graph.cause_effects} == {"Cause and Effect"}
+
+    diverter = graph.cause_effects_for("ILK-403")
+    effects = {item.effect: item.detail for item in diverter}
+    assert "Stop CV403" in effects, sorted(effects)
+    assert "Inhibit CYL401" in effects, sorted(effects)
+    assert "Stop CV401" not in effects, "a blank cell says the cause does not drive that effect"
+    assert effects["Stop CV403"] == "", "a crossing mark carries no value of its own"
+    assert effects["Alarm Tag"] == "ALM_CYL401_FAIL"
+    assert {item.cause for item in diverter} == {"Diverter fails to extend within 1.5 s"}
+
+
+def test_a_grid_cell_that_is_prose_is_not_resolved_into_a_tag(
+    db: Session, line4_project: Project
+) -> None:
+    """``no alarm required`` is kept as what the engineer wrote and nothing more.
+
+    The alarm column of a grid carries tag names and sentences about scope in the
+    same column. Recording either as a signal would put a tag in the graph that no
+    plant has, and every agent downstream would then be entitled to report it as
+    an alarm nobody implemented.
+    """
+    graph = build_graph(db, line4_project.id)
+
+    accumulation = {item.effect: item.detail for item in graph.cause_effects_for("ILK-404")}
+    assert accumulation["Alarm Tag"] == "no alarm required"
+
+    for prose in ("no alarm required", "new alarm to be added"):
+        assert graph.tag(prose) is None, f"the grid cell '{prose}' was recorded as a tag"
+
+    # And a cell that does name a real alarm is still only a cell. The tag is in
+    # the graph because the export declares it, and the grid adds no evidence
+    # about it: reading one column as tag references means reading them all.
+    alarm = graph.tag("ALM_CYL401_FAIL")
+    assert alarm is not None and alarm.declared_in_logic
+    assert not any("Cause and Effect" in source.display_location for source in alarm.sources), (
+        f"the grid was joined onto the tag: {[item.display_location for item in alarm.sources]}"
+    )
+
+
+def test_every_crossing_cites_the_row_it_came_from(db: Session, line4_project: Project) -> None:
+    """A crossing nobody can cite cannot support a claim about the plant."""
+    from app.models.evidence import EvidenceAnchor
+
+    graph = build_graph(db, line4_project.id)
+    persisted = {
+        (anchor.file_id, anchor.anchor_key)
+        for anchor in db.execute(
+            select(EvidenceAnchor).where(EvidenceAnchor.project_id == line4_project.id)
+        ).scalars()
+    }
+
+    unresolved = [
+        f"{item.identifier} / {item.effect}: {source.anchor_key}"
+        for item in graph.cause_effects
+        for source in item.sources
+        if (source.file_id, source.anchor_key) not in persisted
+    ]
+    assert unresolved == [], unresolved
+
+
+def test_the_scope_column_decides_what_the_export_is_expected_to_hold(
+    db: Session, line4_project: Project
+) -> None:
+    """Two of the seven rows belong to the upgrade, and the base export predates it.
+
+    ILK-405 and ILK-406 are scoped ``New (this upgrade)``. Comparing them against
+    an export of the controller as it runs today reports both as missing
+    protections, which is a finding about work nobody has done yet — and it buries
+    ILK-404, which is documented as existing and really is absent.
+    """
+    graph = build_graph(db, line4_project.id)
+
+    accumulation = _by_id(graph, "ILK-404")
+    assert accumulation.scope_text == "Existing"
+    assert accumulation.scope is RequirementScope.EXISTING
+    assert accumulation.is_current is True
+
+    for identifier in ("ILK-405", "ILK-406"):
+        planned = _by_id(graph, identifier)
+        assert planned.scope_text == "New (this upgrade)"
+        assert planned.scope is RequirementScope.NEW
+        assert planned.is_current is False, "the base export is not expected to implement it"
+        assert planned.matched_tag is None and planned.candidate_tags == [], (
+            "an upgrade-scoped row was compared against the installed logic anyway"
+        )
+
+    counts = graph.counts()
+    assert counts["interlocks"] == 5, "five rows describe the system as it exists"
+    assert counts["interlocks_new_in_upgrade"] == 2
+    assert counts["interlocks_scope_unstated"] == 0
+
+
+def test_an_upgrade_scoped_trip_tag_does_not_look_documented_for_this_export(
+    db: Session, line4_project: Project
+) -> None:
+    """``AIR_PRESS_PSI`` is a new transmitter for a new interlock.
+
+    The 5069-IF8 in slot 3 is spare in the base export, which agrees. A tag named
+    only by a row the upgrade adds must not make the installed controller look as
+    though it is missing a documented signal.
+    """
+    graph = build_graph(db, line4_project.id)
+    buckets = evidence_graph.tag_usage_summary(graph)
+
+    assert "AIR_PRESS_PSI" not in buckets.get("documented_but_not_declared", [])
+
+
+def test_two_photo_eyes_are_not_offered_as_one_signal_under_two_names(
+    db: Session, line4_project: Project
+) -> None:
+    """ILK-404's trip tag is absent from the export, and no near-match hides that.
+
+    ``PE402_BLOCKED`` is the discharge photo-eye and ``PE401_BLOCKED`` is the
+    entry photo-eye of the same accumulation zone. Both are real, both are wired,
+    and the strings are one character apart. Offering one for the other turns the
+    highest-severity issue in this fixture — a documented, wired, never
+    implemented accumulation interlock — into a naming mismatch that cites the
+    wrong device.
+    """
+    graph = build_graph(db, line4_project.id)
+    accumulation = _by_id(graph, "ILK-404")
+
+    entry_eye = graph.tag("PE401_BLOCKED")
+    assert entry_eye is not None and entry_eye.declared_in_logic, (
+        "the near-match this test is about has to exist for the test to mean anything"
+    )
+    discharge_eye = graph.tag("PE402_BLOCKED")
+    assert discharge_eye is not None and not discharge_eye.declared_in_logic, (
+        "the README states that PE402 occurs nowhere in the export"
+    )
+
+    assert accumulation.trip_tag == "PE402_BLOCKED"
+    assert accumulation.is_specified is True
+    assert accumulation.matched_tag is None
+
+    offered = [str(item["name"]) for item in accumulation.candidate_tags]
+    assert "PE401_BLOCKED" not in offered, (
+        f"a different device was offered as the signal: {offered}"
+    )
+    # Whatever else survives the threshold is raw string proximity, which is the
+    # weakest thing the graph can say and is not a claim that two names mean the
+    # same signal. Nothing here is offered on a rule that would make that claim.
+    assert all(item["reason"] == "sequence similarity" for item in accumulation.candidate_tags), (
+        accumulation.candidate_tags
+    )
+
+
+def test_a_row_naming_three_contacts_is_matched_against_all_three(
+    db: Session, line4_project: Project
+) -> None:
+    """ILK-407's trip tag column names the three drive fault contacts.
+
+    Matched as one name it matches nothing, and the graph then offers whatever is
+    textually nearest — which is how an interlock that is implemented three times
+    over becomes a naming mismatch against a tag from another device.
+    """
+    graph = build_graph(db, line4_project.id)
+    drives = _by_id(graph, "ILK-407")
+
+    assert drives.trip_tags == ["MTR401_FAULT", "MTR402_FAULT", "MTR403_FAULT"]
+    assert drives.matched_tags == ["MTR401_FAULT", "MTR402_FAULT", "MTR403_FAULT"]
+    assert drives.matched_tag == "MTR401_FAULT"
+    assert drives.candidate_tags == []
+    assert drives.related_rung_keys, "the permissive rung reads all three contacts"
+    assert graph.tag("MTR401_FAULT, MTR402_FAULT, MTR403_FAULT") is None, (
+        "the whole cell was recorded as though it were one signal"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Candidate scoring, on names built for the purpose.
+# ---------------------------------------------------------------------------
+def _add_schedule_row(
+    db: Session,
+    project: Project,
+    *,
+    sheet: str,
+    headers: list[str],
+    rows: list[list[str]],
+) -> None:
+    """One parsed worksheet, so a table's shape can be stated exactly."""
+    record = UploadedFile(
+        project_id=project.id,
+        original_filename=f"{sheet}.xlsx",
+        stored_filename=f"{sheet}.xlsx",
+        relative_path=f"raw/{sheet}.xlsx",
+        file_kind=FileKind.XLSX,
+        document_role=DocumentRole.INTERLOCK_SCHEDULE,
+        status=FileStatus.PARSED,
+        created_at=_TIED_AT,
+    )
+    db.add(record)
+    db.flush()
+    db.add(
+        ParsedArtifact(
+            project_id=project.id,
+            file_id=record.id,
+            artifact_kind=FileKind.XLSX.value,
+            parser_name="xlsx_parser",
+            parser_version="1.0.0",
+            created_at=_TIED_AT,
+            content={
+                "workbook": {"sheet_names": [sheet], "hidden_sheet_names": []},
+                "candidate_tables": [
+                    {
+                        "sheet": sheet,
+                        "headers": headers,
+                        "records": [
+                            {
+                                "row": index + 2,
+                                "ref": f"A{index + 2}:A{index + 2}",
+                                "values": dict(zip(headers, values, strict=True)),
+                            }
+                            for index, values in enumerate(rows)
+                        ],
+                    }
+                ],
+            },
+        )
+    )
+    db.flush()
+
+
+def _add_declarations(db: Session, project: Project, names: list[str]) -> None:
+    """An export declaring each name and referencing it on one rung."""
+    record = UploadedFile(
+        project_id=project.id,
+        original_filename="Declared.L5X",
+        stored_filename="Declared.L5X",
+        relative_path="raw/Declared.L5X",
+        file_kind=FileKind.L5X,
+        status=FileStatus.PARSED,
+        created_at=_TIED_AT,
+    )
+    db.add(record)
+    db.flush()
+    db.add(
+        ParsedArtifact(
+            project_id=project.id,
+            file_id=record.id,
+            artifact_kind=FileKind.L5X.value,
+            parser_name="l5x_parser",
+            parser_version="1.0.0",
+            created_at=_TIED_AT,
+            content={
+                "tags": [
+                    {
+                        "name": name,
+                        "data_type": "BOOL",
+                        "scope": "controller",
+                        "anchor_key": f"tag:controller/{name}",
+                    }
+                    for name in names
+                ],
+                "rungs": [
+                    {
+                        "program": "MainProgram",
+                        "routine": "R_Main",
+                        "number": 0,
+                        "referenced_tags": names,
+                        "instructions": [],
+                        "anchor_key": "rung:MainProgram/R_Main/0",
+                    }
+                ],
+            },
+        )
+    )
+    db.flush()
+
+
+def test_a_digit_inside_a_device_number_is_not_a_spelling_difference(
+    db: Session, project: Project
+) -> None:
+    """The two halves of the candidate rule, side by side.
+
+    A contraction is the case the rule exists to catch: ``GRD_DR_CLSD`` is
+    ``GUARD_DOOR_CLOSED`` with letters dropped, and an agent should weigh it. Two
+    device numbers are the case it must not catch: whatever the strings score,
+    PE401 and PE402 are two devices, and inviting an agent to treat them as one
+    downgrades an absent protection to a spelling difference.
+    """
+    _add_declarations(db, project, ["PE401_BLOCKED", "GRD_DR_CLSD"])
+    _add_schedule_row(
+        db,
+        project,
+        sheet="Interlocks",
+        headers=["Interlock ID", "Trip Tag", "Trip Condition"],
+        rows=[
+            ["ILK-100", "PE402_BLOCKED", "PE402_BLOCKED = 1 for 5 s"],
+            ["ILK-101", "GUARD_DOOR_CLOSED", "GUARD_DOOR_CLOSED = 0"],
+        ],
+    )
+
+    graph = build_graph(db, project.id)
+
+    photo_eye = _by_id(graph, "ILK-100")
+    assert photo_eye.matched_tag is None
+    assert photo_eye.candidate_tags == [], photo_eye.candidate_tags
+
+    guard = _by_id(graph, "ILK-101")
+    assert guard.matched_tag is None
+    assert [item["name"] for item in guard.candidate_tags] == ["GRD_DR_CLSD"]
+    assert guard.candidate_tags[0]["score"] >= evidence_graph.SIMILARITY_THRESHOLD
+
+
+def test_a_grid_is_recognised_by_its_columns_not_by_its_worksheet_name(
+    db: Session, project: Project
+) -> None:
+    """Both halves of the discriminator, on a sheet named neither way round.
+
+    A customer names the grid whatever they like — "Trip Matrix", "C&E", nothing
+    at all — so the sheet name cannot be what decides. A table with a trip tag
+    column is a schedule however it is titled, and a table without one whose
+    remaining columns are crossings is a grid.
+    """
+    _add_schedule_row(
+        db,
+        project,
+        sheet="Trip Matrix",
+        headers=["Interlock ID", "Cause", "Stop CV901", "Alarm Tag"],
+        rows=[["ILK-900", "Guard door open", "X", "ALM_GD901"]],
+    )
+    _add_schedule_row(
+        db,
+        project,
+        sheet="Cause and Effect",
+        headers=["Interlock ID", "Trip Tag", "Trip Condition", "Effect"],
+        rows=[["ILK-901", "GD901_CLOSED", "GD901_CLOSED = 0", "Stop CV901"]],
+    )
+
+    graph = build_graph(db, project.id)
+
+    assert [item.identifier for item in graph.interlocks] == ["ILK-901"]
+    assert _by_id(graph, "ILK-901").sheet == "Cause and Effect"
+    assert [(item.identifier, item.effect) for item in graph.cause_effects] == [
+        ("ILK-900", "Stop CV901"),
+        ("ILK-900", "Alarm Tag"),
+    ]
+
+
+def test_a_grid_whose_cause_column_is_headed_description_is_still_a_grid(
+    db: Session, project: Project
+) -> None:
+    """The second signal, on its own: columns holding nothing but crossings.
+
+    No alias list recognises every word an engineer puts above the causes, so a
+    grid has to be recognisable from its shape as well. Two marked columns, not
+    one: a single column of ticks is as likely to be a yes/no attribute of a
+    requirement as an axis of a grid.
+
+    The cause is then read from the description column. Detection cannot work that
+    way round — a schedule with a description column and no crossings must stay a
+    schedule — but once the shape says grid, that column is where the causes are.
+    """
+    _add_schedule_row(
+        db,
+        project,
+        sheet="Shutdown Key",
+        headers=["Interlock ID", "Description", "Stop CV901", "Stop CV902"],
+        rows=[
+            ["ILK-910", "Guard door open", "X", "X"],
+            ["ILK-911", "Low air pressure", "", "X"],
+        ],
+    )
+
+    graph = build_graph(db, project.id)
+
+    assert graph.interlocks == [], [item.identifier for item in graph.interlocks]
+    assert [(item.identifier, item.effect) for item in graph.cause_effects] == [
+        ("ILK-910", "Stop CV901"),
+        ("ILK-910", "Stop CV902"),
+        ("ILK-911", "Stop CV902"),
+    ]
+    assert {item.cause for item in graph.cause_effects} == {
+        "Guard door open",
+        "Low air pressure",
+    }
+
+
+def test_one_column_of_ticks_leaves_a_schedule_a_schedule(db: Session, project: Project) -> None:
+    """A safety-related flag column does not make a schedule into a grid."""
+    _add_schedule_row(
+        db,
+        project,
+        sheet="Interlocks",
+        headers=["Interlock ID", "Description", "Safety Related"],
+        rows=[["ILK-920", "Guard door open", "X"]],
+    )
+
+    graph = build_graph(db, project.id)
+
+    assert [item.identifier for item in graph.interlocks] == ["ILK-920"]
+    assert graph.cause_effects == []

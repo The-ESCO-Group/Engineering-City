@@ -369,9 +369,7 @@ def record_progress(
 ) -> AgentInstance:
     instance = _lock_active_instance(db, session)
     submitted_run_id = db.execute(
-        select(AgentRun.id)
-        .where(AgentRun.agent_instance_id == instance.id)
-        .limit(1)
+        select(AgentRun.id).where(AgentRun.agent_instance_id == instance.id).limit(1)
     ).scalar_one_or_none()
     if submitted_run_id is not None:
         raise ConflictError(
@@ -459,9 +457,10 @@ def submit_result(
     ).scalar_one_or_none()
     if existing is not None:
         metadata = _submission_metadata(existing) or {}
-        if metadata.get("submission_id") != str(payload.submission_id) or metadata.get(
-            "sha256"
-        ) != digest:
+        if (
+            metadata.get("submission_id") != str(payload.submission_id)
+            or metadata.get("sha256") != digest
+        ):
             raise ConflictError(
                 "This one-mission agent already submitted a different result.",
                 details={"agent_run_id": str(existing.id)},
@@ -533,9 +532,7 @@ def submit_result(
         },
     ]
     final_status = (
-        AgentStatus.IDLE
-        if outcome.run.status is AgentRunStatus.COMPLETED
-        else AgentStatus.BLOCKED
+        AgentStatus.IDLE if outcome.run.status is AgentRunStatus.COMPLETED else AgentStatus.BLOCKED
     )
     final_activity = "" if final_status is AgentStatus.IDLE else outcome.run.error_message
     set_agent_status(db, instance, final_status, activity=final_activity)

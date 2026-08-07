@@ -16,18 +16,21 @@ mistake a MockProvider run for an engineering review.
 
 The rules deliberately only restate what the evidence graph already established:
 a documented interlock with no matching tag, a near-match under a different name,
-a tag referenced but never declared. Inventing anything beyond that would make the
-demo lie about what the platform can do.
+a tag referenced but never declared, a passage one document records as unsettled.
+Inventing anything beyond that would make the demo lie about what the platform can
+do.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+import re
+from pathlib import PurePosixPath
+from typing import Any, NamedTuple
 
 from app.agents.base.provider import ChatMessage, ProviderResponse, estimate_tokens
-from app.core.enums import ProviderKind
+from app.core.enums import ProviderKind, QuestionCategory
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -722,11 +725,18 @@ def _build_requirements_planning(context: dict[str, Any]) -> dict[str, Any]:
     trip tag, a condition and an action, each traceable to the row it came from.
     Restating those is transcription, which is all this provider does.
 
-    Reading requirements out of the narrative documents is deliberately not
+    Reading *requirements* out of the narrative documents is deliberately not
     attempted. "Is this sentence a requirement or is it background" is the one
     judgement this agent exists to make, and a fixed rule that guessed at it
     would fill the model with untestable items — exactly the failure the real
     prompt spends most of its length warning against.
+
+    Asking a question about a narrative sentence is a different act, and
+    :func:`_deferred_passages` is the one narrative rule here: it reports the
+    passages a *companion* document has already recorded as unsettled. That is
+    still transcription — the document set says the requirement is open, and this
+    restates it — and a question, unlike a requirement, adds nothing to the model
+    that a later stage would build on.
 
     Nothing here is accepted, confirmed or resolved: every requirement is left at
     its default ``proposed`` and every gap becomes an open clarification.
@@ -741,9 +751,19 @@ def _build_requirements_planning(context: dict[str, Any]) -> dict[str, Any]:
     cited: list[str] = []
     transcribed = 0
     gaps = 0
+    deferred = 0
 
     for interlock in (context.get("graph") or {}).get("documented_interlocks") or []:
-        if not interlock.get("is_current", True):
+        # Scope is not a filter here, and that is the difference between this
+        # consumer and the review ones. ``is_current`` answers "should the
+        # supplied logic already implement this row", so it excludes a row scoped
+        # to the upgrade — but a row the upgrade adds is exactly a requirement of
+        # the upgrade, and dropping it leaves the interlocks this job was raised
+        # to build absent from the requirements model. A hidden worksheet is
+        # different: it is superseded or working content, and transcribing a row
+        # from one would record as asked-for something an engineer opening the
+        # workbook cannot even see.
+        if interlock.get("from_hidden_sheet"):
             continue
         identifier = str(interlock.get("identifier") or "").strip()
         if not identifier:
@@ -772,9 +792,19 @@ def _build_requirements_planning(context: dict[str, Any]) -> dict[str, Any]:
         cited.append(anchor)
         gaps += 1
 
+    for passage in _deferred_passages(context.get("documents") or [])[:_MAX_MOCK_CLARIFICATIONS]:
+        question = _deferral_question(passage)
+        if question in asked:
+            continue
+        asked.add(question)
+        operations.append(_deferral_operation(passage, question))
+        cited.extend((passage.passage_anchor, passage.notice_anchor))
+        deferred += 1
+
     rationale = (
         f"Transcribed {transcribed} documented interlock(s) into requirements and "
-        f"raised {gaps} clarification(s) for rows the schedule left incomplete. No "
+        f"raised {gaps} clarification(s) for rows the schedule left incomplete, plus "
+        f"{deferred} for passages a companion document records as unsettled. No "
         f"requirement was read out of narrative text: deciding that a sentence is a "
         f"requirement rather than background is a judgement this provider does not make."
     )
@@ -785,18 +815,20 @@ def _build_requirements_planning(context: dict[str, Any]) -> dict[str, Any]:
             "actions": [
                 {
                     "action_type": "complete_task",
-                    "summary": "Nothing new to record from the interlock schedule.",
+                    "summary": "Nothing new to record from the documents supplied.",
                     "confidence": 0.0,
                     "payload": {
                         "outcome": (
                             "Every documented interlock is already recorded as a "
                             "requirement or a clarification, or none carried an "
-                            "evidence anchor to cite."
+                            "evidence anchor to cite, and no document records a "
+                            "passage of another as unsettled."
                         ),
                         "limitations": [
-                            "Only the interlock schedule was read. The project "
-                            "description and the narrative documents were not, so "
-                            "this is not a complete requirements model.",
+                            "Only the interlock schedule was read for requirements, and "
+                            "the narrative documents only for passages another document "
+                            "records as unsettled. This is not a complete requirements "
+                            "model.",
                             MOCK_WARNING,
                         ],
                     },
@@ -811,7 +843,7 @@ def _build_requirements_planning(context: dict[str, Any]) -> dict[str, Any]:
                 "action_type": "propose_changeset",
                 "summary": (
                     f"Record {transcribed} documented interlock(s) as requirements "
-                    f"and {gaps} incomplete row(s) as clarifications."
+                    f"and {gaps + deferred} open question(s) as clarifications."
                 ),
                 "evidence_anchor_ids": sorted(set(cited)),
                 "confidence": _confidence(0.5),
@@ -819,7 +851,8 @@ def _build_requirements_planning(context: dict[str, Any]) -> dict[str, Any]:
                     "title": "Requirements transcribed from the interlock schedule",
                     "summary": (
                         "One requirement per fully specified documented interlock, one "
-                        "clarification per incomplete row. Each cites the schedule row "
+                        "clarification per incomplete row and per passage a companion "
+                        "document records as unsettled. Each cites the row or paragraph "
                         "it was read from."
                     ),
                     "rationale": rationale,
@@ -827,8 +860,8 @@ def _build_requirements_planning(context: dict[str, Any]) -> dict[str, Any]:
                     "operations": operations,
                     "warnings": [
                         "Transcribed by the deterministic provider from structured "
-                        "schedule rows. The narrative documents were not read, so the "
-                        "requirements model is incomplete by construction.",
+                        "schedule rows. No requirement was read out of narrative text, "
+                        "so the requirements model is incomplete by construction.",
                     ],
                 },
             }
@@ -845,11 +878,18 @@ def _requirement_operation(
     unclassified requirement is a classification nobody made — guessing
     ``safety`` from the word "guard" would hide that from the validator that
     reports it.
+
+    The scope cell travels with the row for the same reason the other cells do:
+    "this interlock exists today" and "this upgrade adds it" are different
+    requirements to accept, and an engineer reading the transcription has to be
+    able to tell which one they are signing for.
     """
     identifier = str(interlock.get("identifier") or "")
     trip_tag = str(interlock.get("trip_tag") or "")
     condition = str(interlock.get("trip_condition") or "")
     action = str(interlock.get("action") or "")
+    scope_text = str(interlock.get("scope_text") or "").strip()
+    scoped = f", scope {scope_text}" if scope_text else ""
     return {
         "operation_type": "create_object",
         "object_type": "requirement",
@@ -874,6 +914,7 @@ def _requirement_operation(
                     condition,
                     action,
                     str(interlock.get("failsafe") or ""),
+                    scope_text,
                 )
                 if value
             ),
@@ -884,10 +925,10 @@ def _requirement_operation(
             {
                 "kind": "direct",
                 "anchor_id": anchor,
-                "note": f"Row {identifier} of the interlock schedule.",
+                "note": f"Row {identifier} of the interlock schedule{scoped}.",
             }
         ],
-        "description": f"Transcribed from the schedule row for {identifier}.",
+        "description": f"Transcribed from the schedule row for {identifier}{scoped}.",
     }
 
 
@@ -923,6 +964,255 @@ def _clarification_operation(
 def _gap_question(identifier: str, interlock: dict[str, Any]) -> str:
     missing = ", ".join(str(item) for item in interlock.get("missing_fields") or []) or "fields"
     return f"What are the {missing} for interlock {identifier}?"
+
+
+# ---------------------------------------------------------------------------
+# Passages a companion document records as unsettled
+#
+# The one narrative rule in this provider, and the reason it is defensible is
+# that it reads no meaning at all. It does not ask whether a sentence *sounds*
+# ambiguous — a rule that did would fire on ordinary prose, because ordinary
+# engineering prose is full of sentences that can be read two ways and are
+# perfectly clear in context. It asks instead whether the document set already
+# says the passage is open, which is a fact about the documents.
+#
+# Three independent textual conditions have to hold together, and no one of them
+# is the signal on its own:
+#
+# 1. a statement records something as not settled, in one of the phrases an
+#    author uses for exactly that and for nothing else;
+# 2. the same statement cites where the unsettled thing was asked for — a
+#    numbered section of a *different* document in this same upload, named in the
+#    statement;
+# 3. a word the notice used to name its subject appears in that section, so the
+#    passage can be quoted rather than gestured at.
+#
+# Condition 1 alone is prose about anything. Condition 2 alone is an ordinary
+# cross-reference. Condition 3 alone is a coincidence of vocabulary. Together
+# they are one engineer writing down that another document's passage is open, and
+# restating that is the same act as restating a schedule row.
+#
+# What the rule deliberately does not do is say what the competing readings are.
+# The documents do not write them down, so the clarification says the problem is
+# missing information — composing the alternatives here would invent the
+# requirement the question exists to ask for.
+# ---------------------------------------------------------------------------
+
+#: How a document records, in its own voice, that something is not yet settled.
+#: A closed set, and every alternative is an author saying so outright rather
+#: than a word that turns up while describing a working plant. ``has to be
+#: confirmed`` is excluded because it states an obligation on the plant, not an
+#: open decision — "extension has to be confirmed within 1.5 s" is a
+#: requirement, and reading it as a deferral would question a settled one.
+_DEFERRAL = re.compile(
+    r"\b(?:"
+    r"(?:has|have|is|are|was|were)\s+(?:not\s+been|not\s+yet\s+been|still\s+not)\s+"
+    r"(?:settled|agreed|decided|confirmed|specified|selected|chosen)"
+    r"|(?<!has )(?<!have )(?<!had )to\s+be\s+(?:confirmed|advised|decided|agreed|settled)"
+    r"|tb[cd]"
+    r")\b",
+    re.IGNORECASE,
+)
+
+#: A cross-reference to a numbered section: "section 3", "sections 4.2".
+_SECTION_REFERENCE = re.compile(r"\bsections?\s+(\d+(?:\.\d+)*)", re.IGNORECASE)
+
+#: The number a heading opens with, which is what a section reference names.
+_SECTION_NUMBER = re.compile(r"^(\d+(?:\.\d+)*)")
+
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
+
+#: Words long enough to name a subject. Four characters and up excludes the
+#: articles, conjunctions and prepositions without a stop list to maintain, and a
+#: stop list is exactly where a rule like this starts being tuned to one fixture.
+_SUBJECT_WORD = re.compile(r"[a-z]{4,}")
+
+#: Statements quoted for one notice. A notice whose subject matches more of the
+#: cited section than this is not naming a passage, and quoting half a section
+#: gives the reader a question they cannot answer in a sentence.
+_MAX_QUOTED_STATEMENTS = 2
+
+
+class _DeferredPassage(NamedTuple):
+    """A passage one document asks for and another records as not settled."""
+
+    passage: str
+    passage_location: str
+    passage_anchor: str
+    notice: str
+    notice_location: str
+    notice_anchor: str
+
+
+def _deferred_passages(documents: list[Any]) -> list[_DeferredPassage]:
+    """Every passage a companion document records as unsettled, with its notice.
+
+    Order is the order the documents were supplied, so two runs over one upload
+    produce the same questions in the same sequence.
+    """
+    readable = [document for document in documents if isinstance(document, dict)]
+    titles = {
+        str(document.get("filename") or ""): _document_title(str(document.get("filename") or ""))
+        for document in readable
+    }
+
+    found: list[_DeferredPassage] = []
+    for document in readable:
+        filename = str(document.get("filename") or "")
+        for statement in _statements(document):
+            notice = str(statement.get("text") or "").strip()
+            notice_anchor = str(statement.get("anchor_id") or "")
+            if not notice_anchor or not _DEFERRAL.search(notice):
+                continue
+
+            numbers = set(_SECTION_REFERENCE.findall(notice))
+            lowered = notice.casefold()
+            named = [
+                other
+                for other in readable
+                if str(other.get("filename") or "") != filename
+                and titles[str(other.get("filename") or "")]
+                and titles[str(other.get("filename") or "")] in lowered
+            ]
+            # One section of one document. Anything else and the citation does not
+            # identify a passage, so there is nothing to quote back to the reader.
+            if len(numbers) != 1 or len(named) != 1:
+                continue
+
+            subject = _subject_words(notice, titles)
+            passages = _cited_passages(named[0], next(iter(numbers)), subject)
+            if not passages:
+                continue
+            found.extend(
+                _DeferredPassage(
+                    passage=str(passage.get("text") or "").strip(),
+                    passage_location=_statement_location(named[0], passage),
+                    passage_anchor=str(passage.get("anchor_id") or ""),
+                    notice=notice,
+                    notice_location=_statement_location(document, statement),
+                    notice_anchor=notice_anchor,
+                )
+                for passage in passages
+            )
+    return found
+
+
+def _statements(document: dict[str, Any]) -> list[dict[str, Any]]:
+    return [item for item in document.get("statements") or [] if isinstance(item, dict)]
+
+
+def _document_title(filename: str) -> str:
+    """The document's name as prose, which is how another document cites it.
+
+    ``Project_Description.docx`` is referred to as "the project description", so
+    the stem with its separators opened out is the string to look for. Nothing
+    smarter: a title read out of the file's own metadata is one the citing author
+    never saw.
+    """
+    return re.sub(r"[_\-]+", " ", PurePosixPath(filename).stem).casefold().strip()
+
+
+def _subject_words(notice: str, titles: dict[str, str]) -> set[str]:
+    """What the notice calls the thing it is deferring.
+
+    Taken from the sentence carrying the deferral phrase, not from the whole
+    paragraph: a notice's second sentence is usually about the notice ("no logic
+    has been written for it"), and its words would match passages that have
+    nothing to do with the subject.
+
+    The deferral phrase, the section reference and the cited document's name are
+    removed first — all three are how the notice points, not what it points at.
+    """
+    sentence = next(
+        (part for part in _SENTENCE_BREAK.split(notice) if _DEFERRAL.search(part)), notice
+    )
+    stripped = _DEFERRAL.sub(" ", _SECTION_REFERENCE.sub(" ", sentence)).casefold()
+    for title in titles.values():
+        if title:
+            stripped = stripped.replace(title, " ")
+    return set(_SUBJECT_WORD.findall(stripped))
+
+
+def _cited_passages(
+    document: dict[str, Any], number: str, subject: set[str]
+) -> list[dict[str, Any]]:
+    """The statements of one numbered section that the notice's subject names."""
+    if not subject:
+        return []
+    scored: list[tuple[int, dict[str, Any]]] = [
+        (
+            len(subject & set(_SUBJECT_WORD.findall(str(statement.get("text") or "").casefold()))),
+            statement,
+        )
+        for statement in _statements(document)
+        if _section_number(str(statement.get("section") or "")) == number
+        and statement.get("anchor_id")
+    ]
+    best = max((score for score, _ in scored), default=0)
+    if best == 0:
+        return []
+    named = [statement for score, statement in scored if score == best]
+    return named if len(named) <= _MAX_QUOTED_STATEMENTS else []
+
+
+def _section_number(section: str) -> str:
+    """The number of the innermost heading a statement sits under."""
+    match = _SECTION_NUMBER.match(section.split(" / ")[-1].strip())
+    return match.group(1).rstrip(".") if match else ""
+
+
+def _statement_location(document: dict[str, Any], statement: dict[str, Any]) -> str:
+    section = str(statement.get("section") or "").split(" / ")[-1].strip()
+    filename = str(document.get("filename") or "")
+    return f"{filename} / {section}" if section else filename
+
+
+def _deferral_question(passage: _DeferredPassage) -> str:
+    return (
+        f'Which behaviour is required by "{passage.passage[:600]}" '
+        f"({passage.passage_location})? {passage.notice_location} records it as not "
+        f"settled, so no reading of it can be taken as agreed."
+    )
+
+
+def _deferral_operation(passage: _DeferredPassage, question: str) -> dict[str, Any]:
+    """The passage, the notice that defers it, and why no reading is offered."""
+    return {
+        "operation_type": "create_object",
+        "object_type": "clarification",
+        "temp_key": f"clarify-deferred-{_dedupe_key(passage.passage_anchor, passage.passage)[:16]}",
+        "values": {
+            "question": question,
+            "ambiguity": (
+                f"{passage.passage_location} asks for this behaviour and "
+                f'{passage.notice_location} records it as unsettled: "{passage.notice[:600]}" '
+                f"Neither document sets out the readings that compete, so this is missing "
+                f"information rather than a stated ambiguity: there is no alternative "
+                f"written down that could be chosen, and composing one here would invent "
+                f"the requirement this question exists to ask for."
+            ),
+            # Designing against a passage the document set records as open means
+            # picking a reading, and a reading picked with no author is exactly
+            # the requirement nobody agreed to.
+            "blocks_generation": True,
+        },
+        "basis": [
+            {
+                "kind": "direct",
+                "anchor_id": passage.passage_anchor,
+                "note": f"The passage {passage.notice_location} leaves unsettled.",
+            },
+            {
+                "kind": "direct",
+                "anchor_id": passage.notice_anchor,
+                "note": f"{passage.notice_location}, the notice that leaves it unsettled.",
+            },
+        ],
+        "description": (
+            f"{passage.notice_location} records the passage cited from "
+            f"{passage.passage_location} as not settled."
+        ),
+    }
 
 
 def _build_tag_architecture(context: dict[str, Any]) -> dict[str, Any]:
@@ -1063,6 +1353,13 @@ _DATA_TYPE_BY_SIGNAL_TYPE: dict[str, str] = {
 #: answers, and the pattern is visible after a handful.
 _MAX_MOCK_CLARIFICATIONS = 10
 
+#: Recorded answers one turn restates in full before it starts counting. Each is
+#: already on the record as a decision, so repeating three hundred of them buys
+#: nothing and overflows the field the statement is written to — and an action
+#: refused for length would take the whole statement with it, leaving a step that
+#: produced nothing looking like one with nothing to say.
+_MAX_MOCK_RESTATEMENTS = 3
+
 
 def _requirement_naming(requirements: list[dict[str, Any]], prefix: str) -> dict[str, Any] | None:
     """The first accepted requirement whose wording names this device."""
@@ -1126,6 +1423,14 @@ def _build_plc_logic(context: dict[str, Any]) -> dict[str, Any]:
     So it proposes nothing and asks. When generation is blocked for the project
     it repeats the block's own question, which is already written to be put to a
     human unedited.
+
+    What it does not do is ask twice. A question a named human has answered
+    arrives in ``answered_questions``, and an answer is a fact this provider may
+    state: it says who answered, what they said, and whether those words name one
+    of the approved templates. Saying which is the whole of what a rule engine can
+    add to an answer — it still selects nothing — and it is what stops the human
+    loop from being decorative, because the third asking of an answered question
+    is not a question, it is a run that cannot move.
     """
     block = context.get("generation_blocked")
     if isinstance(block, dict):
@@ -1172,6 +1477,17 @@ def _build_plc_logic(context: dict[str, Any]) -> dict[str, Any]:
         if str(requirement.get("reference") or "") not in claimed
     ]
 
+    answers = _template_selection_answers(context)
+    outstanding: list[dict[str, Any]] = []
+    restated: list[str] = []
+    for requirement in unimplemented:
+        reference = str(requirement.get("reference") or "")
+        answer = _answer_naming(answers, reference)
+        if answer is None:
+            outstanding.append(requirement)
+        else:
+            restated.append(_restate_answer(answer, reference, templates))
+
     actions: list[dict[str, Any]] = [
         {
             "action_type": "request_clarification",
@@ -1190,8 +1506,48 @@ def _build_plc_logic(context: dict[str, Any]) -> dict[str, Any]:
                 ),
             },
         }
-        for requirement in unimplemented[:_MAX_MOCK_CLARIFICATIONS]
+        for requirement in outstanding[:_MAX_MOCK_CLARIFICATIONS]
     ]
+
+    if restated and outstanding:
+        # Part answered. The unanswered questions carry the block on their own, so
+        # the answers already in are stated where a human will read them next to
+        # the ones still outstanding.
+        actions.append(
+            {
+                "action_type": "post_message",
+                "summary": f"{len(restated)} recorded answer(s) restated, not re-asked.",
+                "confidence": 0.0,
+                "payload": {
+                    "body": _restated_summary(restated),
+                    "context": {"answered": len(restated), "outstanding": len(outstanding)},
+                },
+            }
+        )
+    elif restated:
+        # Nothing left to ask and nothing produced. Saying so once is the honest
+        # end of this line of enquiry; asking the answered questions again would
+        # put the same sentences back in front of the person who answered them.
+        actions.append(
+            {
+                "action_type": "report_blocker",
+                "summary": "Every requirement's selection question is already answered.",
+                "confidence": 0.0,
+                "payload": {
+                    "reason": (
+                        f"No logic was proposed. Every one of the {len(restated)} citable "
+                        f"requirement(s) that no network claims already carries a recorded "
+                        f"answer, and none of those answers gives this provider a pattern "
+                        f"it may expand. " + _restated_summary(restated)
+                    ),
+                    "missing_inputs": [
+                        str(requirement.get("reference") or "")
+                        for requirement in unimplemented[:_MAX_MOCK_CLARIFICATIONS]
+                    ],
+                    "resolvable_by_upload": False,
+                },
+            }
+        )
 
     actions.append(
         {
@@ -1203,15 +1559,26 @@ def _build_plc_logic(context: dict[str, Any]) -> dict[str, Any]:
                     f"Reported the controller organisation already recorded "
                     f"({len(existing.get('controller_tasks') or [])} task(s), "
                     f"{len(existing.get('programs') or [])} program(s), "
-                    f"{len(existing.get('routines') or [])} routine(s)) and asked which "
-                    f"pattern implements each of {len(unimplemented)} citable "
-                    f"requirement(s) that no network yet claims."
+                    f"{len(existing.get('routines') or [])} routine(s)); asked which "
+                    f"pattern implements each of {len(outstanding)} citable "
+                    f"requirement(s) that no network yet claims, and restated the "
+                    f"recorded answer for {len(restated)} more."
                 ),
                 "limitations": [
                     "No template was selected and no logic was proposed. Matching a "
                     "requirement to an approved control pattern is a judgement, and a "
                     "fixed rule that made it would produce logic whose pattern nobody "
                     "chose.",
+                    *(
+                        [
+                            f"{len(restated)} requirement(s) have an answered selection "
+                            "question whose recorded answer names no approved template "
+                            "and no parameters, so the answer is stated and nothing is "
+                            "expanded from it."
+                        ]
+                        if restated
+                        else []
+                    ),
                     MOCK_WARNING,
                 ],
             },
@@ -1222,10 +1589,108 @@ def _build_plc_logic(context: dict[str, Any]) -> dict[str, Any]:
         "rationale": (
             f"{len(templates)} approved template(s) are available for this target. None "
             f"was selected: matching one to a requirement is the judgement this provider "
-            f"does not make."
+            f"does not make. {len(outstanding)} requirement(s) were asked about and "
+            f"{len(restated)} already carry a recorded answer, restated rather than "
+            f"asked again."
         ),
         "actions": actions,
     }
+
+
+def _restated_summary(restated: list[str]) -> str:
+    """The recorded answers this turn states, and a count of the rest."""
+    shown = " ".join(restated[:_MAX_MOCK_RESTATEMENTS])
+    remaining = len(restated) - _MAX_MOCK_RESTATEMENTS
+    if remaining > 0:
+        shown += (
+            f" {remaining} further requirement(s) carry a recorded answer that names no "
+            "approved template either."
+        )
+    return shown
+
+
+def _template_selection_answers(context: dict[str, Any]) -> list[dict[str, Any]]:
+    """Answered questions that were asked about choosing a template.
+
+    Filtered by category rather than by wording: an answer to "which controller
+    family is this" is a fact about the project and says nothing about which
+    pattern implements a requirement, and reading it as though it did would be
+    exactly the invention this provider exists not to make.
+    """
+    return [
+        entry
+        for entry in context.get("answered_questions") or []
+        if isinstance(entry, dict)
+        and str(entry.get("category") or "") == QuestionCategory.TEMPLATE_SELECTION.value
+        and str(entry.get("answer") or "").strip()
+    ]
+
+
+def _answer_naming(answers: list[dict[str, Any]], reference: str) -> dict[str, Any] | None:
+    """The answered selection question that names this requirement, if any.
+
+    Matched on the question rather than the answer because the question is the
+    one this provider wrote, and it names exactly one requirement. The boundary
+    matters: ``REQ-40`` must not collect the answer to a question about
+    ``REQ-401``.
+    """
+    if not reference:
+        return None
+    pattern = re.compile(rf"{re.escape(reference)}(?![0-9A-Za-z_-])")
+    for answer in answers:
+        if pattern.search(str(answer.get("question") or "")):
+            return answer
+    return None
+
+
+def _restate_answer(answer: dict[str, Any], reference: str, templates: list[dict[str, Any]]) -> str:
+    """One recorded answer, restated as the fact it is.
+
+    Never paraphrased and never acted on beyond saying whether it names something
+    this provider could have expanded. The answer is a named human's decision, so
+    the name, the reference and the decision it was recorded as are all part of
+    the statement — an unattributed answer is not evidence of anything.
+    """
+    named = _template_named_in(str(answer.get("answer") or ""), templates)
+    recorded = str(answer.get("decision_reference") or "")
+    statement = (
+        f"{reference}: {answer.get('reference')} was answered by "
+        f"{answer.get('answered_by') or 'nobody the record names'} — "
+        f"{_quote(str(answer.get('answer') or ''))}"
+        + (f", recorded as {recorded}" if recorded else "")
+        + "."
+    )
+    if named:
+        return (
+            f"{statement} The answer names approved template {named}; expanding it also "
+            "needs that template's parameters, which the answer does not state and this "
+            "provider does not compose from prose."
+        )
+    return (
+        f"{statement} The answer names none of the {len(templates)} approved template(s) "
+        "for this target, so there is still no pattern to expand."
+    )
+
+
+def _template_named_in(answer: str, templates: list[dict[str, Any]]) -> str:
+    """The approved template an answer names, or ``""``.
+
+    A containment test over the ids the context actually carries, so an id nobody
+    loaded cannot be recognised here and an answer naming a pattern this
+    installation does not have reads as naming none.
+    """
+    haystack = answer.casefold()
+    for template in templates:
+        for key in ("qualified_id", "template_id"):
+            candidate = str(template.get(key) or "").strip()
+            if candidate and candidate.casefold() in haystack:
+                return str(template.get("qualified_id") or candidate)
+    return ""
+
+
+def _quote(text: str) -> str:
+    collapsed = " ".join(text.split())
+    return f"'{collapsed[:300]}'" if collapsed else "'' (no text was recorded)"
 
 
 def _first_anchor(sources: list[Any], anchors: dict[str, Any]) -> str | None:

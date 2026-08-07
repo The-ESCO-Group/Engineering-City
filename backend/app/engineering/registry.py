@@ -134,8 +134,12 @@ class FieldValueError(ValueError):
 #: that could write ``approval_state`` could approve its own work, one that could
 #: write ``object_revision`` could defeat conflict detection, and one that could
 #: write ``created_by_agent`` could attribute its output to somebody else.
-#: ``deleted_at`` is here because deletion is an operation type, not a field
-#: edit — a soft delete has to bump the revision and record a before-state.
+#: ``approved_object_revision`` is the same rule once more: it is the revision a
+#: reviewer signed, so an agent that could move it forward would silence the
+#: integrity check on an object it had just edited — which is worse than being
+#: unable to edit the object at all, because the signature would survive looking
+#: intact. ``deleted_at`` is here because deletion is an operation type, not a
+#: field edit — a soft delete has to bump the revision and record a before-state.
 PROTECTED_FIELDS: frozenset[str] = frozenset(
     {
         "id",
@@ -146,6 +150,7 @@ PROTECTED_FIELDS: frozenset[str] = frozenset(
         "approval_state",
         "approved_at",
         "approved_by_id",
+        "approved_object_revision",
         "deleted_at",
         "superseded_by_id",
         "origin",

@@ -78,6 +78,10 @@ def test_the_protected_set_names_the_columns_the_brief_requires() -> None:
     assert {
         "approval_state",
         "object_revision",
+        # The revision a reviewer signed. Writable by an agent, it would let one
+        # edit an approved object and then move the baseline after it, leaving a
+        # signature that reads as intact against content nobody approved.
+        "approved_object_revision",
         "created_in_revision",
         "deleted_at",
         "approved_by_id",

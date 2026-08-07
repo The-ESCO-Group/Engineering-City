@@ -20,7 +20,12 @@ const MAX_LABEL_LENGTH = 256;
 const MAX_ACTIVITY_LENGTH = 512;
 const MAX_DETAIL_LENGTH = 1_024;
 
-const EVENT_TYPES = new Set<EventType>([
+// The backend can emit this event before the generated contract artifacts are
+// refreshed by their owner. Keep the runtime decoder forward-compatible while
+// preserving the generated files and contracts as read-only inputs here.
+const CHANGESET_ABANDONED_EVENT_TYPE = "changeset.abandoned";
+
+const EVENT_TYPES = new Set<string>([
   "project.created",
   "project.updated",
   "project.completed",
@@ -58,6 +63,7 @@ const EVENT_TYPES = new Set<EventType>([
   "changeset.validation_failed",
   "changeset.submitted",
   "changeset.reviewed",
+  CHANGESET_ABANDONED_EVENT_TYPE,
   "changeset.merged",
   "revision.created",
   "gate.status_changed",

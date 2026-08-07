@@ -19,15 +19,23 @@ Each of those is a judgement for an agent to make, with evidence, at a stated
 confidence, and for a human to approve. Every entry therefore carries the
 ``(file_id, anchor_key)`` pairs it came from, so whatever an agent concludes can
 be cited back to the source.
+
+The same discipline decides *what kind of thing* each table is joined as. A
+cause-and-effect grid is recorded as crossings and an interlock schedule as
+requirements, because reading the grid as a schedule does not produce a cautious
+half-answer — it produces one confidently blank requirement per row, and an agent
+downstream reports each of them as a documentation gap the customer does not have.
 """
 
 from __future__ import annotations
 
 import difflib
+import re
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import select
@@ -46,6 +54,16 @@ logger = get_logger(__name__)
 #: *consider*, never what it concludes.
 SIMILARITY_THRESHOLD = 0.55
 
+#: The score for a pair of names whose letters agree and whose numbers do not.
+#: Below :data:`SIMILARITY_THRESHOLD`, so the pair is not offered at all.
+#: ``PE401_BLOCKED`` and ``PE402_BLOCKED`` are the entry and the discharge
+#: photo-eye of one accumulation zone: the strings are one character apart, and
+#: an agent invited to consider them the same signal downgrades a protection that
+#: is missing entirely to a spelling difference — naming the wrong device as it
+#: does so. A candidate list is what an agent is asked to weigh, so a lead that
+#: cannot be right does not belong in it.
+DIFFERENT_DEVICE_SCORE = 0.2
+
 #: Column headers, normalised, that identify each field of an interlock schedule.
 #: Several spellings per field because a real schedule is whatever the engineer
 #: who wrote it called things.
@@ -57,8 +75,33 @@ _INTERLOCK_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "action": ("action", "effect", "result", "response"),
     "equipment": ("affected equipment", "equipment", "affects", "asset"),
     "failsafe": ("fail-safe behaviour", "fail-safe behavior", "fail safe", "failsafe"),
+    "scope": ("scope", "status", "existing or new", "new or existing", "scope of work"),
     "notes": ("notes", "note", "comment", "comments", "remarks"),
 }
+
+#: Headers, normalised, that name the cause column of a cause-and-effect grid.
+#: Deliberately not "initiating device": a device is an attribute of an interlock
+#: row, whereas a cause is the event a grid tabulates against its effects.
+_CAUSE_HEADERS: frozenset[str] = frozenset(
+    {"cause", "causes", "cause description", "initiating cause", "initiating event", "trip cause"}
+)
+
+#: Cell values that record a crossing rather than state one. What a grid says is
+#: *where* its marks are, so the mark itself carries nothing about the plant.
+_CROSSING_MARKS: frozenset[str] = frozenset(
+    {"x", "xx", "y", "yes", "true", "1", "✓", "✔", "•", "*"}
+)
+
+#: What separates several tag names written into one cell. A comma or a semicolon
+#: and nothing else: a schedule writes ``MTR401_FAULT, MTR402_FAULT`` in a trip
+#: tag column, but the same column also carries prose such as "guard open and
+#: E-stop", and splitting on "and" would invent two tag names from one sentence.
+_TAG_LIST_SEPARATORS = re.compile(r"[,;]")
+
+#: Word-boundary matches, so ``renewed`` and ``newly commissioned`` do not read as
+#: a scope of "new".
+_SAYS_NEW = re.compile(r"\bnew\b")
+_SAYS_EXISTING = re.compile(r"\bexisting\b")
 
 _IO_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "tag": ("tag", "tag name", "signal", "point", "device tag"),
@@ -76,6 +119,20 @@ _ALARM_HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "group": ("group", "area", "category"),
     "source_tag": ("source tag", "trigger", "condition tag", "input tag"),
 }
+
+
+class RequirementScope(StrEnum):
+    """Whether a documented requirement describes the plant as built or the upgrade.
+
+    Three values rather than two. A schedule that never says is not the same thing
+    as one that says ``Existing``, and collapsing the two would have the graph
+    assert, of every schedule with no scope column, that each row is a requirement
+    of the installed system — a claim the document never made.
+    """
+
+    EXISTING = "existing"
+    NEW = "new"
+    UNSTATED = "unstated"
 
 
 @dataclass(slots=True)
@@ -155,11 +212,26 @@ class InterlockRequirement:
     identifier: str
     description: str = ""
     trip_tag: str = ""
+    #: The trip tag cell read as the list of names it holds. A row often names
+    #: several — ``MTR401_FAULT, MTR402_FAULT, MTR403_FAULT`` is one drive-fault
+    #: interlock with three contacts — and matching the whole cell as a single name
+    #: finds nothing, then offers whatever is textually nearest. That is how an
+    #: interlock which is fully implemented turns into a naming mismatch against a
+    #: tag belonging to a different device.
+    trip_tags: list[str] = field(default_factory=list)
     trip_condition: str = ""
     action: str = ""
     equipment: str = ""
     failsafe: str = ""
     notes: str = ""
+    #: The scope cell verbatim — ``Existing``, ``New (this upgrade)`` — or empty
+    #: when the schedule carries no scope column at all.
+    scope_text: str = ""
+    #: That cell read as existing / new / unstated. Scope decides what the row can
+    #: be compared against: an interlock this upgrade is going to add is not
+    #: expected in an export of the controller as it runs today, so reporting it as
+    #: missing from that export is a finding about work nobody has done yet.
+    scope: RequirementScope = RequirementScope.UNSTATED
     #: Worksheet the row came from.
     sheet: str = ""
     #: True when that worksheet is hidden in the workbook. A hidden sheet is
@@ -172,6 +244,11 @@ class InterlockRequirement:
     #: technical claim, and this is how an agent knows that.
     missing_fields: list[str] = field(default_factory=list)
     matched_tag: str | None = None
+    #: Every declared tag the trip tag cell names. ``matched_tag`` is the answer
+    #: for the ordinary one-name row and stays ``None`` unless *all* the named tags
+    #: are declared, because a multi-tag interlock with one contact missing is not
+    #: a match — it is the one contact that matters.
+    matched_tags: list[str] = field(default_factory=list)
     candidate_tags: list[dict[str, Any]] = field(default_factory=list)
     #: Rungs that reference the matched or candidate tag, if any.
     related_rung_keys: list[str] = field(default_factory=list)
@@ -184,27 +261,80 @@ class InterlockRequirement:
 
     @property
     def is_current(self) -> bool:
-        """Whether this should be treated as a live requirement."""
-        return not self.from_hidden_sheet
+        """Whether the supplied logic is expected to implement this row.
+
+        Two ways a row is not. A hidden worksheet is superseded or working content.
+        And a scope of ``New`` says the row describes the upgrade rather than the
+        installed system, so comparing it against an export of that system reports
+        every planned interlock as a missing one — which buries the interlock that
+        genuinely is missing under the ones nobody has built yet.
+
+        An *unstated* scope stays comparable. A schedule with no scope column is
+        describing the plant it documents, and treating silence as "not yet built"
+        would silently stop comparing anything.
+        """
+        return not self.from_hidden_sheet and self.scope is not RequirementScope.NEW
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "identifier": self.identifier,
             "description": self.description,
             "trip_tag": self.trip_tag,
+            "trip_tags": self.trip_tags,
             "trip_condition": self.trip_condition,
             "action": self.action,
             "equipment": self.equipment,
             "failsafe": self.failsafe,
             "notes": self.notes,
+            "scope_text": self.scope_text,
+            "scope": self.scope.value,
             "sheet": self.sheet,
             "from_hidden_sheet": self.from_hidden_sheet,
             "is_current": self.is_current,
             "missing_fields": self.missing_fields,
             "is_specified": self.is_specified,
             "matched_tag": self.matched_tag,
+            "matched_tags": self.matched_tags,
             "candidate_tags": self.candidate_tags,
             "related_rung_keys": self.related_rung_keys,
+            "sources": [source.as_dict() for source in self.sources],
+        }
+
+
+@dataclass(slots=True)
+class CauseEffectFact:
+    """One crossing of a cause-and-effect grid: a cause, and one effect it drives.
+
+    A grid is not a schedule and must not be recorded as one. It says which effect
+    each cause drives and nothing about what trips or when, so a row of it read as
+    an interlock requirement is a requirement with every comparable field blank —
+    a documentation gap the schedule beside it does not have.
+
+    Held per crossing rather than per row, matching
+    :class:`app.models.interlocks.CauseEffectEntry`, because the crossing is the
+    unit an engineer argues about: does low air pressure really stop CV403.
+    """
+
+    identifier: str
+    cause: str = ""
+    #: The effect column's heading, verbatim: the heading is what the effect is.
+    effect: str = ""
+    #: The cell's own text where it holds more than a crossing mark — the last
+    #: column of a grid usually names an alarm. Verbatim, and deliberately not
+    #: resolved against the tag set: the same column carries "no alarm required"
+    #: and "new alarm to be added", so deciding which cells name a controller tag
+    #: is a judgement rather than a join.
+    detail: str = ""
+    sheet: str = ""
+    sources: list[Provenance] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "identifier": self.identifier,
+            "cause": self.cause,
+            "effect": self.effect,
+            "detail": self.detail,
+            "sheet": self.sheet,
             "sources": [source.as_dict() for source in self.sources],
         }
 
@@ -294,6 +424,7 @@ class EvidenceGraph:
     project_id: uuid.UUID
     tags: dict[str, TagFact] = field(default_factory=dict)
     interlocks: list[InterlockRequirement] = field(default_factory=list)
+    cause_effects: list[CauseEffectFact] = field(default_factory=list)
     logic: list[LogicFact] = field(default_factory=list)
     io_points: list[dict[str, Any]] = field(default_factory=list)
     alarms: list[dict[str, Any]] = field(default_factory=list)
@@ -316,6 +447,18 @@ class EvidenceGraph:
             if any(normalise_tag_name(tag) == target for tag in fact.referenced_tags)
         ]
 
+    def cause_effects_for(self, identifier: str) -> list[CauseEffectFact]:
+        """Every crossing a cause-and-effect grid records against one interlock id.
+
+        The join between the grid and the schedule: the grid states the actions a
+        trip is meant to produce, and the schedule row states the trip. Neither
+        document holds both.
+        """
+        wanted = normalise_tag_name(identifier)
+        return [
+            item for item in self.cause_effects if normalise_tag_name(item.identifier) == wanted
+        ]
+
     @property
     def has_logic(self) -> bool:
         return bool(self.logic)
@@ -335,7 +478,17 @@ class EvidenceGraph:
             "interlocks_unspecified": sum(
                 1 for i in self.interlocks if i.is_current and not i.is_specified
             ),
-            "interlocks_from_hidden_sheets": sum(1 for i in self.interlocks if not i.is_current),
+            "interlocks_from_hidden_sheets": sum(1 for i in self.interlocks if i.from_hidden_sheet),
+            # Counted rather than folded into one "not current" number, so a review
+            # can say "five interlocks to compare and two the upgrade adds" instead
+            # of reporting a seven-row matrix as five rows.
+            "interlocks_new_in_upgrade": sum(
+                1 for i in self.interlocks if i.scope is RequirementScope.NEW
+            ),
+            "interlocks_scope_unstated": sum(
+                1 for i in self.interlocks if i.scope is RequirementScope.UNSTATED
+            ),
+            "cause_effect_crossings": len(self.cause_effects),
             "rungs": len(self.logic),
             "io_points": len(self.io_points),
             "alarms": len(self.alarms),
@@ -351,6 +504,7 @@ class EvidenceGraph:
             "counts": self.counts(),
             "tags": [self.tags[key].as_dict() for key in sorted(self.tags)],
             "interlocks": [item.as_dict() for item in self.interlocks],
+            "cause_effects": [item.as_dict() for item in self.cause_effects],
             "logic": [item.as_dict() for item in self.logic],
             "io_points": self.io_points,
             "alarms": self.alarms,
@@ -528,16 +682,41 @@ class _Builder:
         }
 
         for table in _as_list(artifact.content.get("candidate_tables")):
-            headers = _match_headers(
-                _as_list_of_str(table.get("headers")), _INTERLOCK_HEADER_ALIASES
-            )
-            if "identifier" not in headers and "trip_tag" not in headers:
+            columns = _as_list_of_str(table.get("headers"))
+            headers = _match_headers(columns, _INTERLOCK_HEADER_ALIASES)
+            cause_header = _cause_header(columns)
+            if "identifier" not in headers and "trip_tag" not in headers and not cause_header:
                 # Not an interlock table. Ignoring it here is safe because the
                 # parser already surfaced any sheet it could not structure.
                 continue
             sheet = str(table.get("sheet", ""))
+            rows = _as_list(table.get("records"))
 
-            for entry in _as_list(table.get("records")):
+            if _is_cause_and_effect_grid(headers, columns, cause_header, rows):
+                # Detection needs a cause column proper; reading the grid does not.
+                # A grid that heads its causes "Description" still states a cause
+                # there, and ignoring it would keep the crossings while losing what
+                # they are crossings of.
+                grid_cause = cause_header or headers.get("description", "")
+                self._add_cause_effect_grid(
+                    record,
+                    sheet=sheet,
+                    columns=columns,
+                    identifier_header=headers.get("identifier", ""),
+                    cause_header=grid_cause,
+                    # The identifier, the cause and the row's own commentary are what
+                    # the row *is*. Every other column of a grid is an axis of it.
+                    skip_columns={
+                        headers.get("identifier", ""),
+                        headers.get("description", ""),
+                        headers.get("notes", ""),
+                        grid_cause,
+                    },
+                    rows=rows,
+                )
+                continue
+
+            for entry in rows:
                 record_values = _as_dict(entry.get("values"))
                 row = _as_int(entry.get("row"))
                 identifier = _value(record_values, headers, "identifier")
@@ -545,15 +724,19 @@ class _Builder:
                 if not identifier and not trip_tag:
                     continue
 
+                scope_text = _value(record_values, headers, "scope")
                 requirement = InterlockRequirement(
                     identifier=identifier or f"{sheet} row {row}",
                     description=_value(record_values, headers, "description"),
                     trip_tag=trip_tag,
+                    trip_tags=_tag_names(trip_tag),
                     trip_condition=_value(record_values, headers, "trip_condition"),
                     action=_value(record_values, headers, "action"),
                     equipment=_value(record_values, headers, "equipment"),
                     failsafe=_value(record_values, headers, "failsafe"),
                     notes=_value(record_values, headers, "notes"),
+                    scope_text=scope_text,
+                    scope=_classify_scope(scope_text),
                     sheet=sheet,
                     from_hidden_sheet=normalise_tag_name(sheet) in hidden_sheets,
                 )
@@ -578,13 +761,74 @@ class _Builder:
                 )
                 self.graph.interlocks.append(requirement)
 
-                # A tag named only on a hidden sheet is not a current documented
-                # requirement, so it must not make the tag look documented.
-                if trip_tag and requirement.is_current:
-                    fact = self._tag(trip_tag)
-                    if fact is not None:
-                        fact.in_interlock_schedule = True
-                        fact.sources.append(requirement.sources[-1])
+                # A tag named only on a hidden sheet, or only by a row the upgrade
+                # is going to add, is not a current documented requirement, so it
+                # must not make the tag look documented. One fact per name the cell
+                # holds: recording the whole cell would put the tag
+                # "MTR401_FAULT, MTR402_FAULT, MTR403_FAULT" in the graph, and no
+                # such signal exists in any plant.
+                if requirement.is_current:
+                    for name in requirement.trip_tags:
+                        fact = self._tag(name)
+                        if fact is not None:
+                            fact.in_interlock_schedule = True
+                            fact.sources.append(requirement.sources[-1])
+
+    def _add_cause_effect_grid(
+        self,
+        record: UploadedFile,
+        *,
+        sheet: str,
+        columns: list[str],
+        identifier_header: str,
+        cause_header: str,
+        skip_columns: set[str],
+        rows: list[dict[str, Any]],
+    ) -> None:
+        """Record a cause-and-effect grid as crossings rather than requirements.
+
+        A crossing is recorded only where the grid marks one: a blank cell is the
+        grid stating that this cause does not drive that effect, which is a fact
+        about the plant and not a gap in the document.
+        """
+        filename = record.original_filename
+        effect_columns = [column for column in columns if column and column not in skip_columns]
+
+        for entry in rows:
+            values = _as_dict(entry.get("values"))
+            row = _as_int(entry.get("row"))
+            identifier = (
+                str(values.get(identifier_header) or "").strip() if identifier_header else ""
+            )
+            cause = str(values.get(cause_header) or "").strip() if cause_header else ""
+            # The row range the parser emitted, as for a schedule row. A per-cell
+            # key would cite the crossing itself, but composing one means deriving a
+            # column letter from the header's position, and a derived key that is
+            # wrong resolves to no anchor without saying so.
+            ref = str(entry.get("ref") or "").strip()
+            anchor_key = f"range:{sheet}!{ref}" if ref else f"cell:{sheet}!A{row}"
+
+            for column in effect_columns:
+                cell = str(values.get(column) or "").strip()
+                if not cell:
+                    continue
+                self.graph.cause_effects.append(
+                    CauseEffectFact(
+                        identifier=identifier or f"{sheet} row {row}",
+                        cause=cause,
+                        effect=column,
+                        detail="" if _is_crossing_mark(cell) else cell,
+                        sheet=sheet,
+                        sources=[
+                            Provenance(
+                                file_id=record.id,
+                                filename=filename,
+                                anchor_key=anchor_key,
+                                display_location=f"{filename} / {sheet} / row {row}",
+                            )
+                        ],
+                    )
+                )
 
     def add_io_list(self, record: UploadedFile, artifact: ParsedArtifact) -> None:
         filename = record.original_filename
@@ -840,6 +1084,10 @@ class _Builder:
         ranked ``candidate_tags`` list. The graph stops there: whether a candidate
         represents the same signal under a different name is an engineering
         judgement, and it is the Interlock Review Agent's to make with evidence.
+
+        Each name in the trip tag cell is matched on its own, so a row naming three
+        drive fault contacts is compared against three declared tags rather than
+        against one signal whose name nobody ever wrote.
         """
         declared = {key: fact for key, fact in self.graph.tags.items() if fact.declared_in_logic}
         declared_keys = sorted(declared)
@@ -847,14 +1095,26 @@ class _Builder:
         for requirement in self.graph.interlocks:
             if not requirement.trip_tag or not requirement.is_current:
                 continue
-            key = normalise_tag_name(requirement.trip_tag)
+            keys = [normalise_tag_name(name) for name in requirement.trip_tags]
+            requirement.matched_tags = [declared[key].name for key in keys if key in declared]
+            for key in keys:
+                fact = declared.get(key)
+                if fact is None:
+                    continue
+                for rung_key in fact.rung_keys:
+                    if rung_key not in requirement.related_rung_keys:
+                        requirement.related_rung_keys.append(rung_key)
 
-            if key in declared:
-                requirement.matched_tag = declared[key].name
-                requirement.related_rung_keys = list(declared[key].rung_keys)
+            unmatched = [key for key in keys if key not in declared]
+            if not unmatched:
+                # Every name the cell holds is declared. ``matched_tag`` keeps the
+                # one-name answer; ``matched_tags`` carries the whole set.
+                requirement.matched_tag = requirement.matched_tags[0]
                 continue
 
-            requirement.candidate_tags = _candidates(key, declared_keys, declared)
+            requirement.candidate_tags = _merge_candidates(
+                [_candidates(key, declared_keys, declared) for key in unmatched]
+            )
             for candidate in requirement.candidate_tags:
                 fact = declared.get(normalise_tag_name(str(candidate["name"])))
                 if fact is None:
@@ -911,6 +1171,10 @@ def _candidates(
 
     * ``difflib`` ratio on the whole normalised string;
     * a subsequence check on the initials of each word.
+
+    And one that outranks both, downwards. Where two names differ only inside a
+    number, no textual measure can be right: they are two devices, and the closer
+    the strings are the more confidently a reader is misled.
     """
     scored: list[tuple[float, str, str]] = []
     initials = _initials(key)
@@ -918,7 +1182,16 @@ def _candidates(
     for other in declared_keys:
         ratio = difflib.SequenceMatcher(None, key, other).ratio()
         reason = "sequence similarity"
-        if _initials(other) and initials and _initials(other) == initials:
+        if _differs_only_by_number(key, other):
+            # Checked first, and it replaces the score rather than capping it: both
+            # of the measures below rate this pair near the top. ``pe402 blocked``
+            # against ``pe401 blocked`` is one character in thirteen, which
+            # difflib calls 0.92, and the initials are identical because the digit
+            # is not an initial at all. A number inside a device tag is not a
+            # spelling detail — it is which device the tag belongs to.
+            ratio = DIFFERENT_DEVICE_SCORE
+            reason = "different device number"
+        elif _initials(other) and initials and _initials(other) == initials:
             ratio = max(ratio, 0.75)
             reason = "same word initials"
         elif _is_contraction(key, other) or _is_contraction(other, key):
@@ -940,8 +1213,48 @@ def _candidates(
     ]
 
 
+def _merge_candidates(per_name: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """One ranked list from the candidates found for each unmatched name.
+
+    A declared tag proposed for two of the names is kept once, at its best score,
+    so the list stays a ranking of tags rather than of comparisons.
+    """
+    best: dict[str, dict[str, Any]] = {}
+    for candidates in per_name:
+        for candidate in candidates:
+            normalised = str(candidate["normalised"])
+            incumbent = best.get(normalised)
+            if incumbent is None or float(candidate["score"]) > float(incumbent["score"]):
+                best[normalised] = candidate
+    ranked = sorted(best.values(), key=lambda item: (-float(item["score"]), str(item["name"])))
+    return ranked[:5]
+
+
 def _initials(normalised: str) -> str:
     return "".join(word[0] for word in normalised.split() if word)
+
+
+def _differs_only_by_number(left: str, right: str) -> bool:
+    """Whether two normalised names are the same text carrying different numbers.
+
+    ``pe401 blocked`` and ``pe402 blocked``: identical letters, one digit apart.
+    Compared as a letter skeleton against a digit string rather than as a suffix,
+    because the number that identifies a device sits wherever the plant's tag
+    convention puts it — ``CV401_RUN`` / ``CV402_RUN``, ``ZONE1_PE`` / ``ZONE2_PE``.
+    """
+    if left == right:
+        return False
+    if _letters(left) != _letters(right):
+        return False
+    return _digits(left) != _digits(right)
+
+
+def _letters(normalised: str) -> str:
+    return "".join(char for char in normalised if char.isalpha())
+
+
+def _digits(normalised: str) -> str:
+    return "".join(char for char in normalised if char.isdigit())
 
 
 def _is_contraction(short: str, long: str) -> bool:
@@ -956,6 +1269,108 @@ def _is_contraction(short: str, long: str) -> bool:
         return False
     iterator = iter(b)
     return all(char in iterator for char in a)
+
+
+def _tag_names(cell: str) -> list[str]:
+    """The tag names one schedule cell holds, in the order the schedule writes them.
+
+    Split only where every part reads as a name rather than a phrase. A trip tag
+    column also carries prose — "guard open, E-stop pressed" — and two invented
+    tag names are worse evidence than one cell recorded as the engineer wrote it.
+    """
+    parts = [part.strip() for part in _TAG_LIST_SEPARATORS.split(cell) if part.strip()]
+    if len(parts) > 1 and all(" " not in part for part in parts):
+        return parts
+    return [cell.strip()] if cell.strip() else []
+
+
+def _classify_scope(text: str) -> RequirementScope:
+    """Read a scope cell as existing, new, or unstated.
+
+    Substring matching on whole words, because the cell is prose: ``New (this
+    upgrade)``, ``NEW - phase 2``, ``Existing, to be replaced``.
+
+    A cell naming both, or naming neither, reads as unstated, so that only a row
+    that says nothing but *new* stops being compared against the supplied logic.
+    The asymmetry is deliberate: a new row misread as existing costs an engineer
+    one false finding, while an existing row misread as new hides a protection
+    that really is absent.
+    """
+    lowered = text.strip().lower()
+    if not lowered:
+        return RequirementScope.UNSTATED
+    says_new = bool(_SAYS_NEW.search(lowered))
+    says_existing = bool(_SAYS_EXISTING.search(lowered))
+    if says_new and not says_existing:
+        return RequirementScope.NEW
+    if says_existing and not says_new:
+        return RequirementScope.EXISTING
+    return RequirementScope.UNSTATED
+
+
+def _cause_header(columns: list[str]) -> str:
+    """The column that names the cause of each row, or ``""``."""
+    for column in columns:
+        if normalise_tag_name(column) in _CAUSE_HEADERS:
+            return column
+    return ""
+
+
+def _is_cause_and_effect_grid(
+    headers: dict[str, str],
+    columns: list[str],
+    cause_header: str,
+    rows: list[dict[str, Any]],
+) -> bool:
+    """Whether a table is a cause-and-effect grid rather than an interlock schedule.
+
+    Decided from the columns, never from the worksheet's name. The same grid gets
+    called "Cause and Effect", "C&E", "Trip Matrix" or nothing at all, so a review
+    keyed to a sheet name reads the next customer's grid as a second set of
+    interlock requirements — one per row, every comparable field blank, including
+    against devices that are implemented correctly.
+
+    What separates the two is what one row *is*. A schedule row is one
+    requirement, and the two columns that make it comparable against logic are the
+    trip tag and the trip condition; a table with either of those is a schedule,
+    whatever else it holds. A grid row is a cross-tabulation instead: one column
+    names the cause, and every other column is an effect whose cell is marked or
+    left blank.
+
+    Two signals for that shape, either sufficient. A cause column is the usual
+    one. Columns that hold nothing but crossing marks catch the grid whose cause
+    column is headed "Description", which no alias list would recognise; two of
+    them, because one such column is as likely to be a yes/no attribute of a
+    requirement as an axis of a grid.
+    """
+    if "trip_tag" in headers or "trip_condition" in headers:
+        return False
+    return bool(cause_header) or _marked_columns(columns, rows) >= 2
+
+
+def _marked_columns(columns: list[str], rows: list[dict[str, Any]]) -> int:
+    """How many columns hold only crossing marks.
+
+    A mark is not a value: it says that the row and the column meet. So a column
+    whose every filled cell is a mark is an axis of a grid rather than a field of
+    the rows beneath it.
+    """
+    marked = 0
+    for column in columns:
+        filled = [
+            cell
+            for cell in (
+                str(_as_dict(entry.get("values")).get(column) or "").strip() for entry in rows
+            )
+            if cell
+        ]
+        if filled and all(_is_crossing_mark(cell) for cell in filled):
+            marked += 1
+    return marked
+
+
+def _is_crossing_mark(cell: str) -> bool:
+    return cell.strip().lower() in _CROSSING_MARKS
 
 
 def _looks_like_literal(name: str) -> bool:

@@ -124,6 +124,34 @@ describe("world event normalization", () => {
     const coordinateLocation = normalizeWorldEvent(agentLocationEvent(1, "12.5,40.1"));
     expect(coordinateLocation).toEqual({ ok: false, reason: "invalid_payload" });
   });
+
+  it("accepts change-set abandonment without inventing project state", () => {
+    // The backend event is newer than the generated contract artifacts. The
+    // assertion is local to this compatibility test until the contract owner
+    // publishes the updated EventType union.
+    const envelope = event(
+      1,
+      "changeset.abandoned" as EventType,
+      {
+        changeset_id: "changeset-1",
+        title: "Superseded motor template",
+        status: "abandoned",
+        reason: "Superseded by the revised motor template."
+      }
+    );
+
+    const normalized = normalizeWorldEvent(envelope);
+    expect(normalized).toMatchObject({
+      ok: true,
+      event: { kind: "noop", sourceType: "changeset.abandoned" }
+    });
+
+    const initial = createWorldState(PROJECT_ID);
+    const state = reduceWorldEvent(initial, envelope);
+    expect(state.resyncRequired).toBeNull();
+    expect(state.lastAppliedSequence).toBe(1);
+    expect(state.packages).toEqual(initial.packages);
+  });
 });
 
 describe("world reducer", () => {

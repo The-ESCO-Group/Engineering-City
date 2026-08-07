@@ -8,6 +8,7 @@ export type {
   ApprovalEventPayload,
   ApprovalGateKey,
   ChangeOperationType,
+  ChangeSetAbandonedEventPayload,
   ChangeSetEventPayload,
   ChangeSetMergedEventPayload,
   ChangeSetReviewedEventPayload,

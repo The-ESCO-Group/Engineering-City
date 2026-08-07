@@ -61,8 +61,9 @@ def test_two_signals_on_one_terminal_is_an_error(db: Session, project: Project) 
     assert all(
         "GD401_CLOSED" in issue.message and "MTR403_FAULT" in issue.message for issue in found
     )
-    assert all(
-        issue.detail["signal_names"] == ["GD401_CLOSED", "MTR403_FAULT"] for issue in found
+    assert all(issue.detail["signal_names"] == ["GD401_CLOSED", "MTR403_FAULT"] for issue in found)
+    assert all(issue.detail["signal_ids"] == [str(first.id), str(second.id)] for issue in found), (
+        "the deterministic names and IDs must continue to describe the same claimants"
     )
 
 

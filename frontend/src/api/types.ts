@@ -305,6 +305,8 @@ export type AgentDefinitionRead = components["schemas"]["AgentDefinitionRead"];
 export type AgentMessageRead = components["schemas"]["AgentMessageRead"];
 export type AgentRunRead = components["schemas"]["AgentRunRead"];
 export type AgentRunDetail = components["schemas"]["AgentRunDetail"];
+export type ExternalAgentDeployRequest = components["schemas"]["ExternalAgentDeployRequest"];
+export type ExternalAgentDeployResponse = components["schemas"]["ExternalAgentDeployResponse"];
 
 export interface FindingRead {
   id: string;
@@ -350,19 +352,76 @@ export interface FindingDetail extends FindingRead {
   warnings: unknown[];
 }
 
+export type ApprovalDecision =
+  | "approve"
+  | "reject"
+  | "request_changes"
+  | "accept_risk"
+  | "defer";
+
 export interface ApprovalRead {
   id: string;
   project_id: string;
+  gate_id: string | null;
+  gate_key: string | null;
+  revision_number: number | null;
+  release_candidate_id: string | null;
+  decision: ApprovalDecision | null;
   finding_id: string | null;
   kind: string;
-  status: "pending" | "approved" | "rejected" | "cancelled";
+  status:
+    | "pending"
+    | "approved"
+    | "rejected"
+    | "cancelled"
+    | "changes_requested"
+    | "risk_accepted"
+    | "deferred";
   title: string;
   question: string;
   context: Record<string, unknown>;
   requested_by_agent_kind: string;
   requested_at: string | null;
+  decision_allowed: boolean;
+  decision_disabled_reason: string;
   decision_notes: string;
   created_at: string;
+}
+
+export type ValidationSeverity =
+  | "error"
+  | "warning"
+  | "information"
+  | "unsupported"
+  | "human_review_required";
+
+export interface ValidationResultRead {
+  id: string;
+  project_id: string;
+  validation_run_id: string;
+  code: string;
+  discipline: string;
+  severity: ValidationSeverity;
+  message: string;
+  detail: Record<string, unknown>;
+  object_type: string | null;
+  object_id: string | null;
+  object_label: string;
+  suggested_action: string;
+  requires_human_decision: boolean;
+  is_waived: boolean;
+  waived_by_id: string | null;
+  waiver_reason: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ValidationWaiverRead {
+  result: ValidationResultRead;
+  waived_by_id: string;
+  waived_at: string;
+  decision_replayed: boolean;
+  unblocked_task_count: number;
 }
 
 export interface ReportRead {

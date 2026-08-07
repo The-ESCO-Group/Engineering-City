@@ -17,6 +17,10 @@ the reason these handlers are longer than the review ones:
   tell an engineer the tool is broken;
 * an agent that produced nothing and asked a question is blocked with the
   question, because "waiting for you" and "finished" must never look alike.
+  Neither may "waiting for you" and "you already answered this": a step whose
+  every question has been settled and which still produced nothing is a dead end,
+  and it is reported as one rather than re-raised for ever. See
+  :func:`_blocked_with_nothing_produced`.
 """
 
 from __future__ import annotations
@@ -27,8 +31,17 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.agents.base.actions import ProposeChangesetPayload, RequestClarificationPayload
-from app.agents.base.agent import AgentContext, AgentResult, BaseAgent
+from app.agents.base.actions import (
+    CompleteTaskPayload,
+    ProposeChangesetPayload,
+    RequestClarificationPayload,
+)
+from app.agents.base.agent import (
+    AgentContext,
+    AgentResult,
+    BaseAgent,
+    answered_questions_for,
+)
 from app.agents.base.presence import provision_workflow_agents
 from app.agents.base.runner import ValidatedAction
 from app.agents.review import plc_logic, requirements_planning
@@ -46,7 +59,7 @@ from app.core.services.evidence_graph import build_graph
 from app.engineering import build_changeset, merge_changeset, submit
 from app.generators.plc.template_registry import TemplateRegistry, get_registry, load_templates
 from app.models.finding import Finding
-from app.models.profile import ProjectProfile, TargetPlatform
+from app.models.profile import ProjectProfile, ProjectQuestion, TargetPlatform
 from app.models.revision import ChangeSet, MergeResult
 from app.models.task import Task
 from app.orchestration.handlers import HandlerResult, TaskContext, register
@@ -65,6 +78,11 @@ _SETTLED_MERGES: frozenset[MergeOutcome] = frozenset(
 #: reasons the proposal must be refused, and an empty list when there are none.
 ProposalGuard = Callable[[ProposeChangesetPayload], list[str]]
 
+#: Questions named individually in a dead-end reason before it starts counting.
+#: The reason is read by a person deciding what to do next, and seven paraphrases
+#: of one answer tell them nothing the first three did not.
+_MAX_NAMED_QUESTIONS = 3
+
 
 def _run(
     agent: BaseAgent,
@@ -81,6 +99,11 @@ def _run(
         task_id=context.task.id,
         workflow_run_id=context.task.run_id,
         payload=context.payload,
+        # Assembled here with the graph, because it is the same kind of thing: a
+        # read of what the project already establishes. An answered question is
+        # the one part of that record a human wrote, and an agent that cannot see
+        # it asks again.
+        answered_questions=answered_questions_for(context.db, context.project.id),
     )
     result = agent.run(agent_context, handoff_handlers=handoff_handlers)
     return result, result.summary()
@@ -187,15 +210,106 @@ def _design(
             )
 
     if questions and not merges:
-        # Nothing was produced and something was asked. Completing here would
-        # let the run walk past a question nobody has answered.
+        # Nothing was produced and something was asked. Completing here would let
+        # the run walk past a question, and which question it is decides what the
+        # block has to say.
+        return _blocked_with_nothing_produced(result, questions, summary)
+
+    return HandlerResult.completed(**summary, changesets=merges, questions=_questions(questions))
+
+
+def _blocked_with_nothing_produced(
+    result: AgentResult,
+    questions: Sequence[RequestClarificationPayload],
+    summary: dict[str, Any],
+) -> HandlerResult:
+    """Blocked, and on which of the two reasons this step can produce nothing.
+
+    Both are blocks. A design step that produced nothing is not finished either
+    way, and completing it would mark a design task done that designed nothing —
+    the worst of the available outcomes, because it reads as work somebody did.
+
+    What differs is what a human can do next, which is the whole content of the
+    message. A question nobody has answered is a legitimate wait: the answer is
+    the missing input and the run resumes when it arrives. A question every human
+    has already been through is a **dead end**: the answers are in, this step
+    still produced nothing, and answering again cannot change that. Reporting the
+    second as the first is what made the human loop decorative — the answer
+    requeued the task, the agent asked the identical question, the executor
+    returned the answered row, and the step blocked on the same sentence again,
+    for ever.
+    """
+    raised = {row.id: row for row in result.execution.questions}
+    settled = {row.id: row for row in result.execution.settled_questions}
+    awaiting = [row for row in raised.values() if row.id not in settled]
+
+    if awaiting or not raised:
+        # Something is genuinely outstanding — or the questions were never
+        # persisted, in which case nobody can have answered them and reporting a
+        # dead end would be a claim about a record that does not exist.
         return HandlerResult.blocked(
             "; ".join(item.question for item in questions),
             **summary,
             questions=_questions(questions),
         )
 
-    return HandlerResult.completed(**summary, changesets=merges, questions=_questions(questions))
+    return HandlerResult.blocked(
+        _dead_end_reason(list(settled.values()), result),
+        **summary,
+        questions=_questions(questions),
+        settled_questions=[_settled_view(row) for row in settled.values()],
+        dead_end=True,
+    )
+
+
+def _dead_end_reason(questions: Sequence[ProjectQuestion], result: AgentResult) -> str:
+    """Why this step cannot move, naming what was answered and what is missing.
+
+    Both halves, because either alone sends an engineer to the wrong place. The
+    answers say the human loop has been run and is not the thing to try again;
+    the agent's own stated limitation says what is actually absent, and it is
+    quoted rather than paraphrased — the handler knows a change set is missing,
+    and only the agent knows what it needed to produce one.
+    """
+    named = "; ".join(
+        f"{row.reference} ({_shorten(row.question, 160)}) — {row.status.value}: "
+        f"{_shorten(row.answer, 200) or 'no answer was recorded on the row'}"
+        for row in questions[:_MAX_NAMED_QUESTIONS]
+    )
+    remaining = len(questions) - _MAX_NAMED_QUESTIONS
+    if remaining > 0:
+        named += f"; and {remaining} more already settled the same way"
+    return (
+        "Every question this step would ask has already been put to a human, and it "
+        "still produced no change set, so answering again cannot move it. Settled: "
+        f"{named}. Still missing: "
+        f"{_shorten(_stated_limits(result), 1000) or 'the agent stated nothing further.'}"
+    )
+
+
+def _stated_limits(result: AgentResult) -> str:
+    """What the agent said it could not do, in its own words."""
+    limits = [
+        line
+        for item in _accepted(result, ActionType.COMPLETE_TASK)
+        if isinstance(item.payload, CompleteTaskPayload)
+        for line in item.payload.limitations
+    ]
+    return " ".join(limits) or result.outcome.rationale
+
+
+def _settled_view(question: ProjectQuestion) -> dict[str, str]:
+    return {
+        "reference": question.reference,
+        "status": question.status.value,
+        "question": question.question,
+        "answer": question.answer,
+    }
+
+
+def _shorten(text: str, limit: int) -> str:
+    collapsed = " ".join(text.split())
+    return collapsed if len(collapsed) <= limit else f"{collapsed[: limit - 1]}…"
 
 
 def _accepted(result: AgentResult, action_type: ActionType) -> list[ValidatedAction]:

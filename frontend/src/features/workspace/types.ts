@@ -410,6 +410,10 @@ export type WorkspaceApprovalDecision =
 export interface WorkspaceApproval {
   id: string;
   projectId: string;
+  gateId: string | null;
+  gateKey: string | null;
+  releaseCandidateId: string | null;
+  recordedDecision: WorkspaceApprovalDecision | null;
   findingId: string | null;
   changesetId: string | null;
   gate: string;
@@ -433,6 +437,7 @@ export interface WorkspaceApproval {
   finalRelease: boolean;
   requestedBy: string;
   requestedAt: string | null;
+  decisionDisabledReason: string;
   allowedDecisions: WorkspaceApprovalDecision[];
 }
 
@@ -470,6 +475,7 @@ export interface WorkspaceSource {
   clarifications: ClarificationInbox | null;
   requirements: RequirementRead[];
   events: EventEnvelope[];
+  canReviewValidations?: boolean;
 }
 
 export interface IntakeIdentity {

@@ -398,9 +398,7 @@ def test_awaiting_review_cannot_start_over_any_nonterminal_workflow_task(
         engine.start_run(db, ingested_project, settings, actor=seeded["engineer"])
     db.rollback()
 
-    assert {task.id for task in _tasks(db, ingested_project)} == {
-        task.id for task in first.tasks
-    }
+    assert {task.id for task in _tasks(db, ingested_project)} == {task.id for task in first.tasks}
     assert len(_events(db, ingested_project, EventType.WORKFLOW_STARTED)) == 1
 
 
@@ -428,9 +426,7 @@ def test_awaiting_review_cannot_start_over_a_pending_gate_decision(
         engine.start_run(db, ingested_project, settings, actor=seeded["engineer"])
     db.rollback()
 
-    assert {task.id for task in _tasks(db, ingested_project)} == {
-        task.id for task in first.tasks
-    }
+    assert {task.id for task in _tasks(db, ingested_project)} == {task.id for task in first.tasks}
     assert len(_events(db, ingested_project, EventType.WORKFLOW_STARTED)) == 1
 
 
@@ -836,13 +832,16 @@ def test_cancel_closes_every_gate_request_and_recovery_cannot_resurrect_it(
 
     db.expire_all()
     assert db.get(Task, gate_task.id).status is TaskStatus.CANCELLED  # type: ignore[union-attr]
-    assert db.scalar(
-        select(Approval.id).where(
-            Approval.project_id == ingested_project.id,
-            Approval.kind == ApprovalKind.GATE_DECISION,
-            Approval.status == ApprovalStatus.PENDING,
+    assert (
+        db.scalar(
+            select(Approval.id).where(
+                Approval.project_id == ingested_project.id,
+                Approval.kind == ApprovalKind.GATE_DECISION,
+                Approval.status == ApprovalStatus.PENDING,
+            )
         )
-    ) is None
+        is None
+    )
 
 
 def test_restart_requeues_a_failed_gate_task_when_the_gate_is_authoritatively_skipped(

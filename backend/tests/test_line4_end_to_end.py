@@ -1,10 +1,11 @@
 """The acceptance scenario: Line 4 Packaging Conveyor Upgrade, intake to release.
 
 One project, driven the way an engineer drives it — sign in, create, upload the
-eight artifacts, answer what is asked, decide what is raised — and then judged
-against ``fixtures/line4_packaging_conveyor/README.md``, which states in advance
-which seven defects are planted and which eleven plausible-looking things are
-**not** defects.
+eight artifacts, answer what is asked, decide what is raised, carry what cannot
+be fixed — and then judged against
+``fixtures/line4_packaging_conveyor/README.md``, which states in advance which
+seven defects are planted and which eleven plausible-looking things are **not**
+defects.
 
 Every human act goes through a real door: the HTTP API where one exists, and
 :mod:`app.engineering` where the API has none. Nothing here writes to the
@@ -30,14 +31,38 @@ engineer reads as "we found a problem", and deterministic validation results,
 which gate a release. The README's ground truth is written in the finding
 vocabulary and does not care which voice answers, so :class:`Report` normalises
 both onto one severity scale. The decoy assertions are scoped to **findings**
-and to **release-blocking validation errors**: those are the two outputs that
-cost an engineer time or stop a job. Standing capability disclosures
-(``information``, ``unsupported``, ``human_review_required``) are the platform
-declaring the limits of what it checked, not claims about this plant, and are
-excluded — with the consequence, stated here so it is not hidden, that a defect
-reported only at that level counts as **not found**.
+and to **error-severity validation results, waived or not**: those are the two
+outputs that cost an engineer time or stop a job. Every other validation level
+is excluded — ``information`` and ``unsupported`` because they are the platform
+declaring the limits of what it checked rather than claims about this plant,
+``human_review_required`` because it is a decision put in front of a person, and
+``warning`` because it does not stop a job. That last one is easy to miss:
+``warning`` maps to ``MEDIUM`` and the judged set keeps only ``HIGH``, so a
+warning is outside it however loudly it is worded.
+
+Two consequences follow, stated here so neither is hidden. A defect reported
+only at those levels counts as **not found**. And a *decoy* named only at those
+levels does not register as fired — so the decoy score below is a score over
+findings and error-severity results, not over everything the product said.
+
+**A waiver decides a report; it does not retract one.** The run gets past its
+safety gates only because a named reviewer carries risk the documents cannot
+resolve, so every snapshot here keeps waived results and marks them. Three
+consequences, each deliberate. A planted issue found and then carried still
+counts as found, because the product did say it. A *decoy* that fired and was
+then waived still counts as fired, because a false claim a human had to read and
+sign for cost them exactly as much as one nobody signed. But
+:attr:`Scenario.blocking_errors` holds only the *unwaived* ones, because "what
+stops a release" is a statement about now and a decided result does not stop
+anything.
 
 Runs offline on the deterministic MockProvider: no network, no model, no cost.
+That provider is the reason this file still carries release-half xfails, and it
+is worth stating plainly because it is not the fixture's fault: it will not
+choose which approved template implements a requirement, so a project whose
+accepted requirements are claimed by no logic network parks at
+``design_plc_architecture`` however clean its I/O is. See
+:func:`test_generators_assemble_the_package_and_a_release_candidate_is_sealed`.
 """
 
 from __future__ import annotations
@@ -63,8 +88,10 @@ from app.agents.base.plugins import get_plugin_registry
 from app.core.clock import utcnow
 from app.core.config import Settings, get_settings
 from app.core.enums import (
+    MAX_OFFLINE_VALIDATION_LEVEL,
     SEVERITY_ORDER,
     VALIDATION_LEVEL_ORDER,
+    ApprovalDecision,
     ApprovalGateKey,
     ApprovalKind,
     ApprovalStatus,
@@ -72,6 +99,7 @@ from app.core.enums import (
     ExportArtifactKind,
     FindingSeverity,
     GateStatus,
+    ImportVerificationStatus,
     ProjectRole,
     ProjectStatus,
     RequirementStatus,
@@ -88,12 +116,14 @@ from app.models import Base
 from app.models.file import UploadedFile
 from app.models.finding import Finding
 from app.models.plc import LogicRung, Program, Routine
+from app.models.profile import ProjectQuestion
 from app.models.project import Project
 from app.models.release import ReleaseCandidate, ValidationResult, ValidationRun
 from app.models.requirements import Clarification, Requirement
 from app.models.revision import ApprovalGate
 from app.models.tags import Tag
 from app.models.task import Task
+from app.models.user import User
 from app.orchestration import worker
 from app.orchestration.queue import DatabaseTaskQueue
 
@@ -122,6 +152,14 @@ ARTIFACTS: tuple[tuple[str, DocumentRole], ...] = (
 #: A run that needs more turns than this is going round in circles, and the
 #: assertions should say so rather than hang.
 MAX_ROUNDS = 20
+
+#: The two severities the product itself lets a reviewer carry.
+#: :func:`app.core.services.validation_review.waive` refuses anything else, so
+#: this set is read off the product rather than chosen: ``ERROR`` stops a gate and
+#: ``HUMAN_REVIEW_REQUIRED`` is a decision the platform declines to make.
+WAIVABLE: frozenset[str] = frozenset(
+    {ValidationSeverity.ERROR.value, ValidationSeverity.HUMAN_REVIEW_REQUIRED.value}
+)
 
 #: How a deterministic validation severity compares with a finding severity.
 #: Stated once, here, because the README's ground truth is written in the
@@ -157,6 +195,9 @@ class Report:
     title: str
     text: str
     locations: tuple[str, ...]
+    #: Whether a named reviewer has decided to carry this one knowingly. Only a
+    #: validation result can be waived, so this is always ``False`` on a finding.
+    is_waived: bool = False
 
     @property
     def is_finding(self) -> bool:
@@ -169,7 +210,8 @@ class Report:
         return SEVERITY_ORDER[self.severity] >= SEVERITY_ORDER[severity]
 
     def __str__(self) -> str:
-        return f"[{self.source}/{self.severity.value}] {self.code}: {self.title}"
+        carried = " (carried)" if self.is_waived else ""
+        return f"[{self.source}/{self.severity.value}]{carried} {self.code}: {self.title}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +222,76 @@ class Artifact:
     sha256: str
     size_bytes: int
     stored_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class Waiver:
+    """One validation risk a named reviewer decided to carry, and why."""
+
+    code: str
+    severity: ValidationSeverity
+    object_label: str
+    reviewer: str
+    reason: str
+
+    def __str__(self) -> str:
+        return f"{self.code} at {self.object_label} carried by {self.reviewer}"
+
+
+@dataclass(frozen=True, slots=True)
+class GateRecord:
+    """One gate as the release record reads it.
+
+    ``decision`` is the distinction the whole audit turns on: ``APPROVE`` and
+    ``ACCEPT_RISK`` both leave a gate ``PASSED``, and only the approval row keeps
+    them apart.
+    """
+
+    key: ApprovalGateKey
+    status: GateStatus
+    decision: ApprovalDecision | None
+    decided_by: str
+    comment: str
+    unmet: str
+
+    def __str__(self) -> str:
+        verdict = self.decision.value if self.decision is not None else "undecided"
+        return f"{self.key.value}: {self.status.value}/{verdict} {self.unmet}"
+
+
+@dataclass(frozen=True, slots=True)
+class PackagedArtifact:
+    """One generated file inside the release candidate, next to its bytes."""
+
+    kind: ExportArtifactKind
+    relative_path: str
+    validation_level: ValidationLevel
+    sha256: str
+    size_bytes: int
+    import_order: int
+    stored_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class Readiness:
+    """What ``GET /release-readiness`` says, read through the UI's own door.
+
+    The ceiling claims live here rather than on the candidate because they are
+    answerable before anything is generated, and because a package that has not
+    been built yet is exactly when a product is most tempted to promise more than
+    it can prove.
+    """
+
+    is_ready: bool
+    #: ``BlockCode`` values, so an assertion can name the reason rather than
+    #: pattern-matching a sentence written for a person.
+    blocking_codes: tuple[str, ...]
+    blocking_detail: str
+    outstanding_gates: tuple[str, ...]
+    validation_error_count: int
+    highest_attainable_validation_level: ValidationLevel
+    import_verification_possible: bool
+    import_verification_detail: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,17 +309,22 @@ class Scenario:
     artifacts: tuple[Artifact, ...]
     reports: tuple[Report, ...]
     clarifications: tuple[str, ...]
+    project_questions: tuple[str, ...]
     requirements: tuple[str, ...]
     tags: tuple[str, ...]
     programs: tuple[str, ...]
     routines: tuple[str, ...]
     rung_count: int
     tasks: tuple[tuple[TaskKind, TaskStatus, str], ...]
-    gate_states: tuple[tuple[ApprovalGateKey, GateStatus, str], ...]
-    gates_decided: tuple[ApprovalGateKey, ...]
+    gate_records: tuple[GateRecord, ...]
     open_high_severity: tuple[Report, ...]
+    waivers: tuple[Waiver, ...]
+    validation_stops: tuple[str, ...]
+    readiness: Readiness
     candidate_count: int
-    candidate_artifacts: tuple[tuple[ExportArtifactKind, str, ValidationLevel], ...]
+    candidate_levels: tuple[ValidationLevel, ...]
+    candidate_import_verification: tuple[tuple[ImportVerificationStatus, str], ...]
+    candidate_artifacts: tuple[PackagedArtifact, ...]
     limitations_text: str
     rounds_taken: int
     human_acts: tuple[str, ...] = field(default_factory=tuple)
@@ -218,16 +335,52 @@ class Scenario:
 
     @property
     def blocking_errors(self) -> tuple[Report, ...]:
+        """Error-severity results still standing in a release's way."""
         return tuple(
             item
             for item in self.reports
-            if item.source == "validation" and item.severity is FindingSeverity.HIGH
+            if item.source == "validation"
+            and item.severity is FindingSeverity.HIGH
+            and not item.is_waived
+        )
+
+    @property
+    def carried_errors(self) -> tuple[Report, ...]:
+        """Error-severity results a named reviewer decided to carry knowingly."""
+        return tuple(
+            item
+            for item in self.reports
+            if item.source == "validation"
+            and item.severity is FindingSeverity.HIGH
+            and item.is_waived
         )
 
     @property
     def judged(self) -> tuple[Report, ...]:
-        """The reports the decoy rules apply to: findings and release blockers."""
-        return self.findings + self.blocking_errors
+        """The reports the decoy rules apply to.
+
+        Findings, plus every error-severity result whether or not it was waived.
+        A waiver is a decision about a claim and not a retraction of it, so an
+        over-reaching error a reviewer had to sign for still counts as fired.
+        """
+        return self.findings + self.blocking_errors + self.carried_errors
+
+    @property
+    def questions_raised(self) -> tuple[str, ...]:
+        """Every persisted request for human clarification, at either scope."""
+        return self.clarifications + self.project_questions
+
+    @property
+    def gates_decided(self) -> tuple[ApprovalGateKey, ...]:
+        return tuple(item.key for item in self.gate_records if item.status is GateStatus.PASSED)
+
+    def gate(self, key: ApprovalGateKey) -> GateRecord:
+        matches = [item for item in self.gate_records if item.key is key]
+        assert len(matches) == 1, f"{key.value} has {len(matches)} gate rows"
+        return matches[0]
+
+    def explain_gates(self) -> str:
+        return "\n".join(f"  {item}" for item in self.gate_records)
 
 
 # ---------------------------------------------------------------------------
@@ -403,12 +556,32 @@ def _decide_requirements(
     return decided
 
 
+def _carried_risk(
+    client: TestClient, project_id: uuid.UUID, auth: dict[str, str]
+) -> tuple[str, ...]:
+    """Which validation risks this project is already knowingly carrying."""
+    listing = client.get(f"/api/projects/{project_id}/validation-results", headers=auth)
+    assert listing.status_code == 200, listing.text
+    return tuple(
+        f"{row['code']} at {row['object_label']}" for row in listing.json() if row["is_waived"]
+    )
+
+
 def _decide_approvals(
     client: TestClient,
     project_id: uuid.UUID,
     auth: dict[str, str],
 ) -> list[str]:
-    """Settle eligible human decisions through the same HTTP doors as the UI."""
+    """Settle eligible human decisions through the same HTTP doors as the UI.
+
+    A gate over a project that is carrying waived risk is decided
+    ``accept_risk`` rather than ``approve``, and that is not bookkeeping. Both
+    verdicts leave the gate ``PASSED`` and let the work proceed; only the
+    approval row remembers which, and a delivery that went out over known defects
+    has to stay distinguishable afterwards from one that went out clean.
+    Choosing ``accept_risk`` also exercises the rule that makes the distinction
+    worth anything — the comment is mandatory, so the reason is on the record.
+    """
     listing = client.get(f"/api/projects/{project_id}/approvals", headers=auth)
     assert listing.status_code == 200, listing.text
     acts: list[str] = []
@@ -422,25 +595,111 @@ def _decide_approvals(
             continue
         if row["kind"] == ApprovalKind.GATE_DECISION.value:
             assert row["gate_id"], f"gate approval {row['id']} has no exact gate binding"
+            carried = _carried_risk(client, project_id, auth)
+            verdict = (ApprovalDecision.ACCEPT_RISK if carried else ApprovalDecision.APPROVE).value
+            comment = (
+                "Checked against the functional description, interlock matrix, "
+                "and current validation evidence."
+            )
+            if carried:
+                comment += (
+                    " Proceeding on accepted risk: this project carries "
+                    f"{len(carried)} waived validation result(s) — "
+                    + "; ".join(carried)
+                    + " — each raised with the customer and scheduled into the upgrade scope."
+                )
             decision = client.post(
                 f"/api/approval-gates/{row['gate_id']}/approvals/{row['id']}/decision",
                 headers=auth,
-                json={
-                    "decision": "approve",
-                    "comment": (
-                        "Checked against the functional description, interlock matrix, "
-                        "and current validation evidence."
-                    ),
-                },
+                json={"decision": verdict, "comment": comment},
             )
-        else:
-            decision = client.post(
-                f"/api/approvals/{row['id']}/decision",
-                headers=auth,
-                json={"approved": True, "notes": "Reviewed against the source documents."},
-            )
+            assert decision.status_code == 200, decision.text
+            acts.append(f"{verdict} on gate: {row['title'][:80]}")
+            continue
+        decision = client.post(
+            f"/api/approvals/{row['id']}/decision",
+            headers=auth,
+            json={"approved": True, "notes": "Reviewed against the source documents."},
+        )
         assert decision.status_code == 200, decision.text
         acts.append(f"decided approval: {row['title'][:80]}")
+    return acts
+
+
+def _validation_stops(client: TestClient, project_id: uuid.UUID, auth: dict[str, str]) -> list[str]:
+    """The sentence cross-discipline validation is currently parked on.
+
+    Captured while the run is parked rather than reconstructed afterwards.
+    Waiving the last blocker completes the task and clears ``blocked_reason``, so
+    once the run has moved on there is nothing left on the row to prove it ever
+    stopped — and the stop is the safety property.
+    """
+    listing = client.get(f"/api/projects/{project_id}/tasks", headers=auth)
+    assert listing.status_code == 200, listing.text
+    return [
+        row["blocked_reason"]
+        for row in listing.json()
+        if row["kind"] == TaskKind.VALIDATE_CROSS_DISCIPLINE.value
+        and row["status"] == TaskStatus.BLOCKED.value
+        and row["blocked_reason"]
+    ]
+
+
+def _carry_the_remaining_risk(
+    client: TestClient, project_id: uuid.UUID, auth: dict[str, str]
+) -> list[str]:
+    """Record a named reviewer's waiver over every blocker nothing else can clear.
+
+    The fixture's duplicate I/O assignment is a real defect in the customer's
+    input: ``Local:1:I.Data.10`` is claimed by both ``GD401_CLOSED`` and
+    ``MTR403_FAULT``, only one can be wired, and nothing in the eight documents
+    says which. The product offers an engineer two ways out — correct the
+    assignment, or carry it knowingly — and it has an HTTP door for exactly one
+    of them: ``POST /validation-results/{id}/waiver``. There is no API by which a
+    human edits an I/O assignment, so the correction is not a path this scenario
+    can take without inventing an answer the customer has not given. Carrying it
+    is both what the product supports and what an engineer would actually do with
+    a channel conflict a drawing set does not resolve.
+
+    Called only when nothing else in the round moved, which is the order an
+    engineer works in: answer what can be answered, fix what can be fixed, and
+    only then decide what is left. Without that ordering this would waive
+    ``requirements.unanswered_question`` — a result whose honest remedy is to
+    answer the question, which the round before this one does.
+
+    Scoped to the two severities :func:`app.core.services.validation_review.waive`
+    accepts. ``HUMAN_REVIEW_REQUIRED`` is in that set and is not a defect claim:
+    the two rows it covers here are the ``OTL``/``OTU`` pair in
+    ``Diverter_Control``, which the platform declines to judge rather than
+    reporting as wrong, and gate 4 requires each to be settled with a stated
+    reason before it will pass.
+    """
+    listing = client.get(f"/api/projects/{project_id}/validation-results", headers=auth)
+    assert listing.status_code == 200, listing.text
+    acts: list[str] = []
+
+    for row in listing.json():
+        if row["is_waived"] or row["severity"] not in WAIVABLE:
+            continue
+        waiver = client.post(
+            f"/api/validation-results/{row['id']}/waiver",
+            headers=auth,
+            json={
+                "confirm": True,
+                "reason": (
+                    f"{row['code']} at {row['object_label']} is a defect this upgrade "
+                    "inherits from the existing installation, and the documents the "
+                    "customer supplied do not resolve it. Raised with the customer, "
+                    "carried knowingly into this revision, and scheduled into the "
+                    "upgrade scope."
+                ),
+                "expected_updated_at": row["updated_at"],
+            },
+        )
+        assert waiver.status_code == 200, waiver.text
+        body = waiver.json()
+        assert body["result"]["is_waived"] is True, body
+        acts.append(f"carried validation risk: {row['code']} at {row['object_label']}")
     return acts
 
 
@@ -451,9 +710,16 @@ def _run_project(
     project_id: uuid.UUID,
     engineer_auth: dict[str, str],
     reviewer_auth: dict[str, str],
-) -> tuple[int, list[str]]:
-    """Work, answer, decide, repeat — until nothing is waiting on a human."""
+) -> tuple[int, list[str], list[str]]:
+    """Work, answer, decide, carry, repeat — until nothing is waiting on a human.
+
+    The remediation comes last in a round and only when nothing else moved.
+    ``or approved`` in step 12 of the brief is the last resort, not the first: a
+    reviewer who waived on sight would be signing for results that answering the
+    open questions would have cleared by itself.
+    """
     acts: list[str] = []
+    stops: list[str] = []
     rounds = 0
     for _ in range(MAX_ROUNDS):
         rounds += 1
@@ -461,11 +727,14 @@ def _run_project(
         this_round = _resolve_clarifications(client, project_id, engineer_auth)
         this_round += _decide_requirements(client, project_id, reviewer_auth)
         this_round += _decide_approvals(client, project_id, reviewer_auth)
+        if not this_round:
+            stops.extend(_validation_stops(client, project_id, reviewer_auth))
+            this_round += _carry_the_remaining_risk(client, project_id, reviewer_auth)
         acts.extend(this_round)
         if not this_round:
             break
     worker.drain(settings)
-    return rounds, acts
+    return rounds, acts, stops
 
 
 # ---------------------------------------------------------------------------
@@ -506,10 +775,18 @@ def _validation_report(result: ValidationResult) -> Report:
         title=result.message[:120],
         text=" \n".join(part for part in parts if part).lower(),
         locations=locations,
+        is_waived=result.is_waived,
     )
 
 
-def _snapshot(settings: Settings, project_id: uuid.UUID, rounds: int, acts: list[str]) -> Scenario:
+def _snapshot(
+    settings: Settings,
+    project_id: uuid.UUID,
+    rounds: int,
+    acts: list[str],
+    stops: list[str],
+    readiness: Readiness,
+) -> Scenario:
     """Freeze what the run produced, as an engineer would read it at the end.
 
     Findings accumulate across the whole run, so all of them are taken. Only the
@@ -518,9 +795,10 @@ def _snapshot(settings: Settings, project_id: uuid.UUID, rounds: int, acts: list
     exists. Judging the fixture's ground truth against superseded results would
     report defects the project had already moved past.
 
-    Waived results are excluded for the same reason — a waiver is a named
-    human's decision that the finding is carried knowingly, and re-reporting it
-    would count somebody's signature as a defect.
+    Waived results are kept and marked. They are the reason this run gets past
+    its safety gates at all, and a snapshot that dropped them would report the
+    project as having found fewer defects than it did while also hiding the
+    signatures that let it proceed.
     """
     session = db_session.get_session_factory()()
     try:
@@ -558,18 +836,28 @@ def _snapshot(settings: Settings, project_id: uuid.UUID, rounds: int, acts: list
             .scalars()
             .first()
         )
-        validations = (
-            [
-                _validation_report(row)
-                for row in session.execute(
+        current_results = (
+            list(
+                session.execute(
                     select(ValidationResult).where(
-                        ValidationResult.validation_run_id == newest_run.id,
-                        ValidationResult.is_waived.is_(False),
+                        ValidationResult.validation_run_id == newest_run.id
                     )
                 ).scalars()
-            ]
+            )
             if newest_run is not None
             else []
+        )
+        validations = [_validation_report(row) for row in current_results]
+        waivers = tuple(
+            Waiver(
+                code=row.code,
+                severity=row.severity,
+                object_label=row.object_label,
+                reviewer=_display_name(session, row.waived_by_id),
+                reason=row.waiver_reason,
+            )
+            for row in current_results
+            if row.is_waived
         )
 
         open_high = tuple(
@@ -583,11 +871,20 @@ def _snapshot(settings: Settings, project_id: uuid.UUID, rounds: int, acts: list
             if row.requires_approval
         )
 
-        gate_rows = session.execute(
-            select(ApprovalGate).where(ApprovalGate.project_id == project_id)
-        ).scalars()
-        gate_states = tuple(
-            (row.gate_key, row.status, str(row.unmet_criteria)[:400]) for row in gate_rows
+        from app.engineering import gates
+
+        gate_records = tuple(
+            GateRecord(
+                key=row.gate_key,
+                status=row.status,
+                decision=gates.decision_of(session, row),
+                decided_by=_display_name(session, row.decided_by_id),
+                comment=row.decision_comment,
+                unmet=str(row.unmet_criteria)[:400],
+            )
+            for row in session.execute(
+                select(ApprovalGate).where(ApprovalGate.project_id == project_id)
+            ).scalars()
         )
 
         candidates = list(
@@ -595,11 +892,21 @@ def _snapshot(settings: Settings, project_id: uuid.UUID, rounds: int, acts: list
                 select(ReleaseCandidate).where(ReleaseCandidate.project_id == project_id)
             ).scalars()
         )
-        candidate_artifacts: tuple[tuple[ExportArtifactKind, str, ValidationLevel], ...] = ()
+        candidate_artifacts: tuple[PackagedArtifact, ...] = ()
         limitations = ""
         for candidate in candidates:
             for item in candidate.artifacts:
-                candidate_artifacts += ((item.kind, item.relative_path, item.validation_level),)
+                candidate_artifacts += (
+                    PackagedArtifact(
+                        kind=item.kind,
+                        relative_path=item.relative_path,
+                        validation_level=item.validation_level,
+                        sha256=item.sha256,
+                        size_bytes=item.size_bytes,
+                        import_order=item.import_order,
+                        stored_path=storage.absolute_path(item.relative_path),
+                    ),
+                )
                 if item.kind is ExportArtifactKind.LIMITATIONS:
                     limitations = _read_artifact(storage, item.relative_path)
 
@@ -613,6 +920,12 @@ def _snapshot(settings: Settings, project_id: uuid.UUID, rounds: int, acts: list
                 row.question
                 for row in session.execute(
                     select(Clarification).where(Clarification.project_id == project_id)
+                ).scalars()
+            ),
+            project_questions=tuple(
+                row.question
+                for row in session.execute(
+                    select(ProjectQuestion).where(ProjectQuestion.project_id == project_id)
                 ).scalars()
             ),
             requirements=tuple(
@@ -652,12 +965,17 @@ def _snapshot(settings: Settings, project_id: uuid.UUID, rounds: int, acts: list
                     select(Task).where(Task.project_id == project_id).order_by(Task.priority)
                 ).scalars()
             ),
-            gate_states=gate_states,
-            gates_decided=tuple(
-                key for key, status, _ in gate_states if status is GateStatus.PASSED
-            ),
+            gate_records=gate_records,
             open_high_severity=open_high,
+            waivers=waivers,
+            validation_stops=tuple(stops),
+            readiness=readiness,
             candidate_count=len(candidates),
+            candidate_levels=tuple(item.validation_level for item in candidates),
+            candidate_import_verification=tuple(
+                (item.import_verification_status, item.import_verification_detail)
+                for item in candidates
+            ),
             candidate_artifacts=candidate_artifacts,
             limitations_text=limitations,
             rounds_taken=rounds,
@@ -667,11 +985,40 @@ def _snapshot(settings: Settings, project_id: uuid.UUID, rounds: int, acts: list
         session.close()
 
 
+def _display_name(session: Session, user_id: uuid.UUID | None) -> str:
+    """Who decided it. An unnamed signature is the thing the gates exist to stop."""
+    if user_id is None:
+        return ""
+    user = session.get(User, user_id)
+    return user.display_name if user is not None else ""
+
+
 def _read_artifact(storage: ProjectStorage, relative_path: str) -> str:
     try:
         return storage.absolute_path(relative_path).read_text(encoding="utf-8", errors="replace")
     except (OSError, ValueError):
         return ""
+
+
+def _read_readiness(client: TestClient, project_id: uuid.UUID, auth: dict[str, str]) -> Readiness:
+    """What the product promises about the package it has not built yet."""
+    response = client.get(f"/api/projects/{project_id}/release-readiness", headers=auth)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    return Readiness(
+        is_ready=bool(body["is_ready"]),
+        blocking_codes=tuple(str(item["code"]) for item in body["blocking"]),
+        blocking_detail="; ".join(
+            f"{item['code']}: {item['summary']} {item['detail']}" for item in body["blocking"]
+        ),
+        outstanding_gates=tuple(str(item) for item in body["outstanding_gates"]),
+        validation_error_count=int(body["validation_error_count"]),
+        highest_attainable_validation_level=ValidationLevel(
+            body["highest_attainable_validation_level"]
+        ),
+        import_verification_possible=bool(body["import_verification_possible"]),
+        import_verification_detail=str(body["import_verification_detail"]),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -760,14 +1107,15 @@ def scenario(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Scenario]:
             run = client.post(f"/api/projects/{project_id}/runs", headers=engineer_auth, json={})
             assert run.status_code == 201, run.text
 
-            rounds, acts = _run_project(
+            rounds, acts, stops = _run_project(
                 client,
                 settings,
                 project_id=project_id,
                 engineer_auth=engineer_auth,
                 reviewer_auth=reviewer_auth,
             )
-        yield _snapshot(settings, project_id, rounds, acts)
+            readiness = _read_readiness(client, project_id, reviewer_auth)
+        yield _snapshot(settings, project_id, rounds, acts, stops, readiness)
     finally:
         db_session.reset()
         engine.dispose()
@@ -813,13 +1161,25 @@ def test_every_artifacts_recorded_hash_matches_the_bytes_on_disk(scenario: Scena
 def test_requirements_are_extracted_and_at_least_one_clarification_is_raised(
     scenario: Scenario,
 ) -> None:
-    """Steps 4 and 5. The refusal to guess, expressed as a question."""
+    """Steps 4 and 5. The refusal to guess, expressed as a question.
+
+    Asserted on ``Clarification`` and not on :attr:`Scenario.questions_raised`,
+    and that distinction is the whole content of the test. The two tables are
+    different questions put to different people: a ``ProjectQuestion`` is project
+    scope — which controller family, which naming standard — while a
+    clarification hangs off the one requirement, device or sentence that can be
+    read two ways. What this document set plants is a *local* ambiguity, so the
+    question it has to provoke is a clarification. Widening the assertion to the
+    ten project questions the run does raise would let "which accepted
+    requirement do the tags for MTR401_SPEED_REF come from" stand in for having
+    read the customer's brief.
+    """
     assert scenario.requirements, "nothing was extracted from eight engineering documents"
     assert scenario.clarifications, (
         "the run reached generation without asking a single question about a "
         "document set that contains a deliberate ambiguity"
     )
-    assert any("resolved clarification" in act for act in scenario.human_acts), (
+    assert any(act.startswith("resolved clarification:") for act in scenario.human_acts), (
         "no clarification was answered by a human; the run cannot have been gated on one"
     )
 
@@ -886,37 +1246,42 @@ def test_senior_review_ran_and_every_finding_was_reviewed(scenario: Scenario) ->
     assert scenario.findings, "a defective document set produced no findings at all"
 
 
-def test_cross_discipline_validation_blocks_the_release(scenario: Scenario) -> None:
-    """Step 12. The point of the step is the stop, so the stop is what is asserted."""
-    blocked = [
-        (status, reason)
-        for kind, status, reason in scenario.tasks
-        if kind is TaskKind.VALIDATE_CROSS_DISCIPLINE and status is TaskStatus.BLOCKED
-    ]
+def test_cross_discipline_validation_blocks_the_release_until_a_human_decides(
+    scenario: Scenario,
+) -> None:
+    """Step 12, both halves of it: "resolved **or approved**".
 
-    assert scenario.blocking_errors, (
-        "cross-discipline validation found nothing that stops a release in a document "
-        "set with seven planted defects"
+    The stop is still the point, and it is asserted from the sentence the run was
+    parked on rather than from the task row. Waiving the last blocker completes
+    that task and clears ``blocked_reason``, so by the end there is nothing on
+    the row to show it ever stopped — which is exactly why the stop is captured
+    live, mid-run, by :func:`_validation_stops`.
+
+    What replaces the old task-status assertion is stronger, because a waiver
+    cannot exist by accident. :func:`app.core.services.validation_review.waive`
+    refuses any result that neither blocks a gate nor requires a human decision,
+    so a recorded waiver over an error-severity result *is* the proof that
+    validation stopped the release and that a named person had to act before it
+    moved.
+    """
+    assert scenario.validation_stops, (
+        "cross-discipline validation never parked the run in a document set with "
+        "seven planted defects"
     )
-    assert blocked, "validation found release-blocking errors and let the run continue"
-    assert all(reason for _, reason in blocked), (
-        "a run parked without a stated reason looks like a stalled one"
+    assert any("Local:1:I.Data.10" in reason for reason in scenario.validation_stops), (
+        "validation parked the run without naming the duplicated channel:\n"
+        + "\n".join(f"  {reason}" for reason in scenario.validation_stops)
+    )
+    assert scenario.carried_errors, (
+        "no error-severity result was carried, so nothing was ever decided rather "
+        f"than merely found. Reported:\n{_explain(scenario)}"
+    )
+    assert not scenario.blocking_errors, (
+        "the run reached its end state with release-blocking errors neither fixed nor "
+        "waived:\n" + "\n".join(f"  {report}" for report in scenario.blocking_errors)
     )
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "Accepting a requirement through POST /api/requirements/{id}/decision can turn it "
-        "into a release blocker on the spot. ApprovalIntegrityValidator reports "
-        "cross.approved_object_modified whenever updated_at > approved_at, and the accept "
-        "path writes both in one flush: whether the two clock reads land in the same tick "
-        "decides whether all seven requirements are reported as 'approved at T and modified "
-        "at T+2ms, without a fresh approval'. Non-strict deliberately — the defect is a race, "
-        "so the run that passes is as much evidence of it as the run that fails, and a strict "
-        "marker would make the acceptance suite flaky in place of the product."
-    ),
-)
 def test_accepting_a_requirement_does_not_invalidate_its_own_approval(
     scenario: Scenario,
 ) -> None:
@@ -926,11 +1291,19 @@ def test_accepting_a_requirement_does_not_invalidate_its_own_approval(
     attached to what they read. When the act of signing is itself recorded as a
     later edit, every accepted requirement carries a name against content
     nobody changed, and the release stops for a reason that never happened.
+
+    This was a race and is no longer one: ``ApprovalIntegrityValidator`` compares
+    ``object_revision`` against the ``approved_object_revision`` the decision
+    recorded, so the verdict no longer depends on where two reads of the same
+    clock landed inside one flush. Unmarked deliberately — a run that passes
+    intermittently proved nothing, and this one has to pass every time.
+
+    Scanned over :attr:`Scenario.judged` and not over the unwaived blockers.
+    This run waives whatever it cannot fix, so scoping it to what still blocks
+    would let the bug come back and pass, hidden behind the reviewer's signature.
     """
     self_invalidated = [
-        report
-        for report in scenario.blocking_errors
-        if report.code == "cross.approved_object_modified"
+        report for report in scenario.judged if report.code == "cross.approved_object_modified"
     ]
 
     assert not self_invalidated, "\n".join(f"  {report}" for report in self_invalidated)
@@ -975,19 +1348,6 @@ def _explain(scenario: Scenario) -> str:
     return "\n".join(f"  {report}" for report in scenario.judged) or "  (nothing was reported)"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Planted issue 1 is not found. ILK-404 is documented as Existing, wired to "
-        "Local:1:I.Data.7 and implemented nowhere — the string PE402 does not occur in the "
-        "L5X. The Interlock Review Agent does not report the absence: the evidence graph "
-        "offers PE401_BLOCKED as a candidate for PE402_BLOCKED on the 'same word initials' "
-        "rule at 0.923, which is exactly the rule that cannot tell two photo-eyes apart, and "
-        "the agent downgrades a missing protection to a medium naming mismatch that names the "
-        "wrong device. The only other trace is tags.orphaned_tag on PE402_BLOCKED at "
-        "information severity."
-    ),
-)
 def test_planted_issue_1_the_missing_accumulation_interlock_is_reported(
     scenario: Scenario,
 ) -> None:
@@ -1050,17 +1410,16 @@ def test_planted_issue_3_the_inconsistent_run_command_name_is_reported(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Planted issue 3 is found, but inflated. The README rates it low to medium — the "
-        "signal is implemented and correctly wired, and only its name differs — yet the "
-        "product raises logic.output_without_driving_rung at ERROR, which is release-blocking "
-        "and outranks the genuinely high-severity missing interlock it should sit below."
-    ),
-)
 def test_planted_issue_3_is_not_inflated_into_a_release_blocker(scenario: Scenario) -> None:
-    """A naming inconsistency must not outrank a missing protection."""
+    """A naming inconsistency must not outrank a missing protection.
+
+    Was ``xfail``: the run raised ``logic.output_without_driving_rung`` at ERROR,
+    which said the output could never energise. It can — the rung drives it under
+    the name the logic uses — so the claim was false as well as release-blocking.
+    ``OutputCoverageValidator`` now separates the two cases and this one is
+    ``logic.output_name_mismatch`` at WARNING, which is where the README's
+    low-to-medium rating puts it.
+    """
     inflated = [
         report
         for report in scenario.blocking_errors
@@ -1094,23 +1453,23 @@ def test_planted_issue_5_the_hmi_binding_to_a_missing_tag_is_reported(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Planted issue 6 is not found. The seven clarifications the run raises are all "
-        "generated from the Cause and Effect worksheet's blank columns; none quotes the "
-        "accumulation-release sentence in Project_Description.docx section 3, and no finding "
-        "names it. The one deliberate ambiguity in the document set — the sentence the "
-        "functional description itself records as unsettled — passes through unremarked."
-    ),
-)
 def test_planted_issue_6_the_ambiguous_accumulation_release_is_raised_with_the_customer(
     scenario: Scenario,
 ) -> None:
-    """Two defensible readings, and the product must ask rather than choose."""
+    """Two defensible readings, and the product must ask rather than choose.
+
+    Found by the clarification the deterministic provider raises for a passage a
+    *companion* document records as unsettled: ``Functional_Description.docx``
+    section 8 says the release behaviour asked for in section 3 of the project
+    description has not been settled, and that sentence names both the document
+    and the section, so the passage it defers can be quoted rather than guessed
+    at. The question states that the problem is missing information — neither
+    document writes the two readings down, and a rule that composed them would be
+    inventing the requirement it is asking about.
+    """
     asked = [
         question
-        for question in scenario.clarifications
+        for question in scenario.questions_raised
         if "accumulat" in question.lower() and "releas" in question.lower()
     ]
     reported = _matching(
@@ -1123,23 +1482,10 @@ def test_planted_issue_6_the_ambiguous_accumulation_release_is_raised_with_the_c
 
     assert asked or reported, (
         "nothing asked which reading of the accumulation release applies. Questions "
-        "raised:\n" + ("\n".join(f"  {item}" for item in scenario.clarifications) or "  (none)")
+        "raised:\n" + ("\n".join(f"  {item}" for item in scenario.questions_raised) or "  (none)")
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Planted issue 7, the false-positive control, fails. CYL401 is implemented "
-        "consistently in all eight artifacts and a correct review says nothing about it, but "
-        "the run raises 'ILK-403 is incompletely specified' — a documentation_gap against the "
-        "diverter interlock. The claim is false: row 4 of the Interlock Matrix sheet fills "
-        "every column. It comes from the Cause and Effect worksheet, which the evidence graph "
-        "reads as seven more interlock rows whose trip_tag, trip_condition, action and "
-        "failsafe columns do not exist. The same duplication produces a spurious "
-        "documentation_gap for all seven interlocks and seven spurious clarifications."
-    ),
-)
 def test_planted_issue_7_the_correct_cyl401_diverter_produces_no_findings(
     scenario: Scenario,
 ) -> None:
@@ -1160,14 +1506,7 @@ def test_planted_issue_7_the_correct_cyl401_diverter_produces_no_findings(
 #: a flag on each entry so that the eleven below read as the README's own list,
 #: unedited: what the fixture forbids is permanent, and which of them a given
 #: build fires on is not. Deleting a name here is how a fix gets recorded.
-_DECOY_FIRES_TODAY = (
-    "cyl401",
-    "ilk_405_missing_from_the_base_export",
-    "ilk_406_missing_from_the_base_export",
-    "air_press_psi_has_no_controller_tag",
-    "ilk_401_and_ilk_402",
-    "ilk_407",
-)
+_DECOY_FIRES_TODAY: tuple[str, ...] = ()
 
 #: Each entry is ``(id, subjects, statement)``, in the README's own order. A
 #: decoy fires when any finding or release-blocking error names one of its
@@ -1240,10 +1579,11 @@ def _decoy_params() -> list[Any]:
                 pytest.mark.xfail(
                     strict=True,
                     reason=(
-                        f"Decoy '{key}' fires. The README states: {statement} See the "
-                        "duplication of the Interlock Matrix and Cause and Effect worksheets "
-                        "into fourteen interlock requirements, and the treatment of a "
-                        "'New (this upgrade)' scope as a current one."
+                        f"Decoy '{key}' fires. The README states: {statement} The cause the "
+                        "six original entries shared — the Cause and Effect worksheet read "
+                        "as seven more interlocks, and a 'New (this upgrade)' scope read as a "
+                        "current one — is fixed, so a name reappearing here is a new cause "
+                        "and the run that put it back has to be diagnosed afresh."
                     ),
                 )
             ]
@@ -1274,6 +1614,20 @@ def test_no_decoy_is_reported(
 # ---------------------------------------------------------------------------
 # Gates, release and the end state
 # ---------------------------------------------------------------------------
+#: Why every package assertion below is still unreached. Written once because
+#: they all fail for the identical reason and a reader comparing five paraphrases
+#: of it would spend the effort deciding whether they said the same thing. The
+#: full diagnosis is on
+#: :func:`test_generators_assemble_the_package_and_a_release_candidate_is_sealed`.
+_NO_CANDIDATE = (
+    "No release candidate exists to assert against. Gate 2 now passes on a carried risk, but "
+    "design_plc_architecture parks permanently on the deterministic MockProvider, which "
+    "refuses to choose which approved template implements a requirement no LogicNetwork "
+    "claims. Nothing downstream of generate_logic ever runs. Full diagnosis on "
+    "test_generators_assemble_the_package_and_a_release_candidate_is_sealed."
+)
+
+
 def test_a_gate_decision_has_an_http_door(scenario: Scenario) -> None:
     """The six gates are reachable through an exact gate/request HTTP binding."""
     from app.main import create_app
@@ -1288,52 +1642,187 @@ def test_a_gate_decision_has_an_http_door(scenario: Scenario) -> None:
     assert expected in paths, f"{expected} is absent from {len(paths)} paths"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "The fixture intentionally contains two devices assigned to Local:1:I.Data.10. "
-        "The canonical importer now preserves both assignments and deterministic validation "
-        "correctly blocks gate 2 until an engineer fixes that conflict or a named reviewer "
-        "records a waiver. This scenario performs neither remediation, so approving gate 2 "
-        "would be a safety regression rather than a successful end state."
-    ),
-)
 def test_a_human_approves_gate_two(scenario: Scenario) -> None:
-    """Step 8. Devices, I/O and tags, signed off by a named person."""
+    """Step 8. Devices, I/O and tags, signed off by a named person.
+
+    Reached only because the reviewer settled the channel conflict. The gate's
+    ``no_open_tag_or_io_errors`` criterion counts *unwaived* I/O errors, so
+    ``Local:1:I.Data.10`` held this gate shut until somebody put their name to
+    carrying it — which is the gate working, not a loophole in it: the criterion
+    is recomputed from the model on every read, so there is no way to reach a
+    decision here with the conflict neither fixed nor decided.
+    """
     assert ApprovalGateKey.DEVICES_IO_TAGS in scenario.gates_decided, (
-        "gate 2 was never passed:\n"
-        + "\n".join(
-            f"  {key.value}: {status.value} {unmet}" for key, status, unmet in scenario.gate_states
-        )
+        "gate 2 was never passed:\n" + scenario.explain_gates()
+    )
+    gate = scenario.gate(ApprovalGateKey.DEVICES_IO_TAGS)
+    assert gate.decided_by, "gate 2 passed without recording who decided it"
+    assert gate.comment.strip(), "gate 2 passed without a covering comment"
+
+
+def test_a_release_on_accepted_risk_stays_distinguishable_from_a_clean_one(
+    scenario: Scenario,
+) -> None:
+    """The most important assertion in this file.
+
+    ``APPROVE`` and ``ACCEPT_RISK`` both leave a gate ``PASSED``, because both let
+    the work proceed. If that were the whole record, a delivery that went out
+    over a double-booked safety input would be indistinguishable, six months
+    later, from one that went out clean — and a release record that cannot tell
+    them apart is worse than no release record, because it reassures.
+
+    Three places keep the distinction, and all three are asserted here because
+    any one of them alone can be lost to a refactor: the gate is ``PASSED`` while
+    its approval carries ``ACCEPT_RISK`` (:func:`app.engineering.gates.decision_of`
+    is the product's own way of asking); the decision carries the mandatory
+    comment that ``accept_risk`` obliges; and every waived result names the
+    reviewer who carried it and states why.
+
+    The negative half matters as much. Gate 1 was decided before anything was
+    waived and is recorded as a plain ``APPROVE``, so this asserts a distinction
+    the run actually makes rather than a label it applies to everything.
+    """
+    carried = scenario.gate(ApprovalGateKey.DEVICES_IO_TAGS)
+
+    assert carried.status is GateStatus.PASSED, scenario.explain_gates()
+    assert carried.decision is ApprovalDecision.ACCEPT_RISK, (
+        f"the gate that proceeded over {len(scenario.waivers)} waived validation result(s) "
+        f"is recorded as {carried.decision.value if carried.decision else 'undecided'}, "
+        "which reads afterwards as a release with nothing carried"
+    )
+    assert carried.comment.strip(), (
+        "accept_risk without a comment is a signature with no statement behind it"
+    )
+    assert "Local:1:I.Data.10" in carried.comment, (
+        f"the accepted risk is not named in what was signed: {carried.comment!r}"
+    )
+
+    clean = scenario.gate(ApprovalGateKey.PROJECT_PROFILE)
+    assert clean.status is GateStatus.PASSED, scenario.explain_gates()
+    assert clean.decision is ApprovalDecision.APPROVE, (
+        "the gate decided before anything was waived is not recorded as a plain "
+        f"approval but as {clean.decision.value if clean.decision else 'undecided'}, "
+        "so 'accepted risk' has stopped meaning anything"
+    )
+
+    assert scenario.waivers, "nothing was carried, so this asserts nothing"
+    unattributed = [item for item in scenario.waivers if not item.reviewer or not item.reason]
+    assert not unattributed, (
+        "a carried risk with no named reviewer or no stated reason:\n"
+        + "\n".join(f"  {item}" for item in unattributed)
+    )
+    assert all("Line 4 Senior Reviewer" == item.reviewer for item in scenario.waivers), (
+        "a waiver was recorded against somebody other than the reviewer:\n"
+        + "\n".join(f"  {item}" for item in scenario.waivers)
+    )
+
+
+def test_carried_risk_is_still_counted_and_no_longer_blocks(scenario: Scenario) -> None:
+    """The other half of "resolved **or approved**", read at the release door.
+
+    Two claims that pull in opposite directions, which is the point. The carried
+    errors are still *counted* — ``validation_error_count`` is the total the run
+    found, and it is the number the package manifest records, so a project that
+    reported zero here after a reviewer carried three would look afterwards
+    exactly like one that never had any. And they no longer *block*: an error a
+    named reviewer decided has been resolved by decision, which is what gates 2 to
+    4 already assumed and what the release door did not.
+
+    This is the product change this session made, and it was not reachable from a
+    test before it: nothing had ever waived a Line 4 validation result, so nothing
+    had ever asked the release door what it thought of one. ``release_readiness``
+    read ``ValidationRun.error_count``, which is computed when the run finishes
+    and counts waived and unwaived errors alike, so a project could pass every
+    gate on accepted risk and then be refused a package for the very errors those
+    gates had settled — the waiver mechanism blocking the thing it exists to
+    permit.
+
+    What is left in the way is only the two undecided gates, and those are
+    undecided because ``design_plc_architecture`` is parked; see
+    :data:`_NO_CANDIDATE`.
+    """
+    assert scenario.readiness.validation_error_count >= len(
+        [item for item in scenario.waivers if item.severity is ValidationSeverity.ERROR]
+    ), (
+        "readiness reports fewer errors than were carried, so the carried ones have "
+        f"vanished from the record: {scenario.readiness.validation_error_count} reported, "
+        f"{len(scenario.waivers)} waived"
+    )
+    assert "validation_errors" not in scenario.readiness.blocking_codes, (
+        "every error-severity result carries a named reviewer's waiver and the release "
+        "door still refuses on them:\n  " + scenario.readiness.blocking_detail
+    )
+    assert scenario.readiness.blocking_codes == ("gate_undecided",), (
+        "something other than the open gates is holding the release:\n  "
+        + scenario.readiness.blocking_detail
+    )
+
+
+def test_the_platform_never_claims_more_than_it_can_prove_offline(
+    scenario: Scenario,
+) -> None:
+    """Where a product like this lies to itself first.
+
+    Asserted on ``GET /release-readiness`` rather than on a candidate, because
+    the promise is made before anything is generated and that is precisely when
+    it is cheapest to overstate. Three claims, and each is a place the honest
+    answer is the unflattering one: the ceiling is ``ROUND_TRIP_PARSED`` and not
+    ``ROCKWELL_IMPORT_VERIFIED``; import verification is impossible here rather
+    than merely un-run; and the impossibility comes with the sentence that says
+    what would change it.
+    """
+    assert scenario.readiness.highest_attainable_validation_level is MAX_OFFLINE_VALIDATION_LEVEL, (
+        "the platform claims it can reach "
+        f"{scenario.readiness.highest_attainable_validation_level.value} with no licensed "
+        "Rockwell workstation configured"
+    )
+    assert scenario.readiness.import_verification_possible is False, (
+        "import verification is reported as possible on a machine with no licensed "
+        "workstation adapter"
+    )
+    assert scenario.readiness.import_verification_detail.strip(), (
+        "import verification is impossible and the product does not say why, which is a "
+        "blank an engineer reads as a pass"
     )
 
 
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "The delivery/HMI dependency cycle is fixed, but this deliberately defective fixture "
-        "still carries unwaived release-blocking validation results. The workflow must not "
-        "assemble or seal a candidate while those earlier safety gates remain unsettled."
+        "Gates 1 and 2 now pass and the release door no longer refuses the carried errors, "
+        "so what stops the run is a step further on and is not the fixture's fault. "
+        "design_plc_architecture parks permanently on the deterministic MockProvider. "
+        "app.agents.base.providers.mock._build_plc_logic asks which approved template "
+        "implements every accepted requirement that no LogicNetwork claims, and refuses to "
+        "choose one itself: 'matching one to a requirement is the judgement this provider "
+        "does not make'. This project has no LogicNetwork rows at all — the L5X importer "
+        "records controller tasks, programs, routines, rungs, instructions and operands, "
+        "and creates no networks, so nothing claims anything — and all seven accepted "
+        "REQ-ILK-401..407 come back as unimplemented. "
+        "app.agents.review.handlers._design then blocks, correctly, because a question was "
+        "asked and no change set was produced. Answering does not clear it: the question "
+        "reference is uuid5 over the task id and the payload, so the requeued task asks the "
+        "identical question, the executor returns the already-answered row, and the handler "
+        "blocks on the same sentence for ever. Without generate_logic there is no delivery, "
+        "no candidate and no package. "
+        "backend/tests/orchestration/test_production_workflow.py reaches a sealed candidate "
+        "offline only because its fixture seeds a LogicNetwork carrying "
+        "requirement_reference='REQ-001' — and says so in a comment. Reaching this offline "
+        "needs either a way for a human to record which existing rung implements a "
+        "requirement, or a provider that selects a pattern. Neither is a change to this "
+        "test, and completing the handler instead would be worse: it would mark a design "
+        "task done that designed nothing."
     ),
 )
 def test_generators_assemble_the_package_and_a_release_candidate_is_sealed(
     scenario: Scenario,
 ) -> None:
-    """Steps 14 and 15. Hashes, import order, limitations and approvals."""
+    """Steps 14 and 15. One candidate, carrying files, one of them LIMITATIONS.md."""
     assert scenario.candidate_count == 1, f"{scenario.candidate_count} release candidates"
     assert scenario.candidate_artifacts, "the candidate carries no artifacts"
 
-    kinds = {kind for kind, _, _ in scenario.candidate_artifacts}
+    kinds = {item.kind for item in scenario.candidate_artifacts}
     assert ExportArtifactKind.LIMITATIONS in kinds, sorted(item.value for item in kinds)
-
-    over_claimed = [
-        (kind.value, path, level.value)
-        for kind, path, level in scenario.candidate_artifacts
-        if VALIDATION_LEVEL_ORDER[level] > VALIDATION_LEVEL_ORDER[ValidationLevel.ROUND_TRIP_PARSED]
-    ]
-    assert not over_claimed, (
-        f"artifacts claim more than this backend can prove offline: {over_claimed}"
-    )
     assert "import-ready candidate" in scenario.limitations_text.lower(), (
         "LIMITATIONS.md does not call the package an import-ready candidate"
     )
@@ -1341,11 +1830,142 @@ def test_generators_assemble_the_package_and_a_release_candidate_is_sealed(
 
 @pytest.mark.xfail(
     strict=True,
+    reason=_NO_CANDIDATE,
+)
+def test_every_packaged_artifacts_recorded_hash_matches_the_bytes_on_disk(
+    scenario: Scenario,
+) -> None:
+    """A checksum nobody re-computes is a checksum that proves nothing.
+
+    The customer imports these bytes into a controller. The manifest's whole
+    claim is that the file they open is the file that was signed for, and that
+    claim is worth exactly one re-computation.
+    """
+    assert scenario.candidate_artifacts, "there are no packaged artifacts to hash"
+
+    mismatches: list[str] = []
+    for item in scenario.candidate_artifacts:
+        if not item.stored_path.is_file():
+            mismatches.append(f"{item.relative_path}: not on disk")
+            continue
+        data = item.stored_path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != item.sha256 or len(data) != item.size_bytes:
+            mismatches.append(
+                f"{item.relative_path}: recorded {item.sha256[:12]}/{item.size_bytes}, "
+                f"on disk {digest[:12]}/{len(data)}"
+            )
+
+    assert not mismatches, "; ".join(mismatches)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=_NO_CANDIDATE,
+)
+def test_the_candidate_claims_the_weakest_level_among_its_artifacts(
+    scenario: Scenario,
+) -> None:
+    """A package is only as proved as its least-proved file.
+
+    Two separate claims, and the second is the one that goes wrong quietly. The
+    ceiling is ``ROUND_TRIP_PARSED``: offline we can prove our own output parses
+    back into the same model, which is not proving Studio 5000 will import it. And
+    rolling a set of files up to one level has to take the **minimum** — a tag CSV
+    that round-tripped does not make a partner plugin's HMI export any more
+    verified than it was, and taking the maximum would promote the weakest file to
+    the strength of the strongest.
+    """
+    assert scenario.candidate_artifacts, "there is no package to take a level from"
+    assert scenario.candidate_levels, "no candidate to compare against its artifacts"
+
+    over_claimed = [
+        (item.kind.value, item.relative_path, item.validation_level.value)
+        for item in scenario.candidate_artifacts
+        if VALIDATION_LEVEL_ORDER[item.validation_level]
+        > VALIDATION_LEVEL_ORDER[MAX_OFFLINE_VALIDATION_LEVEL]
+    ]
+    assert not over_claimed, (
+        f"artifacts claim more than this backend can prove offline: {over_claimed}"
+    )
+
+    weakest = min(
+        VALIDATION_LEVEL_ORDER[item.validation_level] for item in scenario.candidate_artifacts
+    )
+    for level in scenario.candidate_levels:
+        assert VALIDATION_LEVEL_ORDER[level] <= weakest, (
+            f"the candidate claims {level.value} while its weakest artifact reached only "
+            f"{[item.validation_level.value for item in scenario.candidate_artifacts]}"
+        )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=_NO_CANDIDATE,
+)
+def test_the_candidate_reports_import_verification_as_unavailable_with_a_reason(
+    scenario: Scenario,
+) -> None:
+    """``NOT_ATTEMPTED`` and ``UNAVAILABLE`` are not the same admission.
+
+    ``NOT_ATTEMPTED`` is the column default and reads as "we have not got to it
+    yet". On a machine with no licensed workstation nobody will ever get to it,
+    and the candidate has to say so in its own words rather than leaving a
+    default an engineer will read as fine.
+    """
+    assert scenario.candidate_import_verification, "no candidate to ask"
+    for status, detail in scenario.candidate_import_verification:
+        assert status is ImportVerificationStatus.UNAVAILABLE, (
+            f"import verification is recorded as {status.value} with no licensed "
+            "workstation configured"
+        )
+        assert detail.strip(), "an unavailable verification with no reason is a blank"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=_NO_CANDIDATE,
+)
+def test_the_import_order_puts_data_types_before_the_tags_that_use_them(
+    scenario: Scenario,
+) -> None:
+    """Getting this wrong costs the customer an hour and names nothing.
+
+    Studio 5000 refuses a tag whose UDT it has not seen, and the error it gives
+    does not name the missing type. The order is therefore part of the
+    deliverable, not a convenience, and it is asserted on ``import_order``
+    because that integer is what the manifest and ``IMPORT_ORDER.md`` are both
+    rendered from.
+    """
+    types = [
+        item.import_order
+        for item in scenario.candidate_artifacts
+        if item.kind in {ExportArtifactKind.UDT_L5X, ExportArtifactKind.AOI_L5X}
+    ]
+    tags = [
+        item.import_order
+        for item in scenario.candidate_artifacts
+        if item.kind is ExportArtifactKind.TAG_CSV
+    ]
+
+    assert types, "the package defines no data types, so this asserts nothing"
+    assert tags, "the package carries no tag table, so this asserts nothing"
+    assert max(types) < min(tags), (
+        "tags are imported before the structured types they reference: "
+        f"types at {sorted(types)}, tags at {sorted(tags)}"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
     reason=(
-        "This fixture deliberately leaves true validation errors unresolved and unwaived, so "
-        "the safe terminal state is blocked rather than export-ready. Separately, a genuinely "
-        "finalized archive converges to COMPLETED; READY_FOR_EXPORT is the pre-finalization "
-        "state, not the durable post-delivery status."
+        "Unreachable for the reason on "
+        "test_generators_assemble_the_package_and_a_release_candidate_is_sealed: no "
+        "candidate is generated, so there is nothing to be ready to export. Separately, "
+        "and worth keeping recorded here: a genuinely finalized archive converges to "
+        "COMPLETED, so READY_FOR_EXPORT is the pre-finalization state rather than the "
+        "durable post-delivery one, and a run that reached it and stayed there would "
+        "itself be worth investigating."
     ),
 )
 def test_the_project_reaches_ready_for_export(scenario: Scenario) -> None:
@@ -1397,6 +2017,7 @@ def test_restarting_preserves_everything(scenario: Scenario) -> None:
                 "findings": _count(session, Finding, scenario.project_id),
                 "requirements": _count(session, Requirement, scenario.project_id),
                 "clarifications": _count(session, Clarification, scenario.project_id),
+                "project_questions": _count(session, ProjectQuestion, scenario.project_id),
                 "tags": _count(session, Tag, scenario.project_id),
                 "rungs": _count(session, LogicRung, scenario.project_id),
                 "tasks": _count(session, Task, scenario.project_id),
@@ -1407,6 +2028,7 @@ def test_restarting_preserves_everything(scenario: Scenario) -> None:
         assert counts["findings"] == len(scenario.findings)
         assert counts["requirements"] == len(scenario.requirements)
         assert counts["clarifications"] == len(scenario.clarifications)
+        assert counts["project_questions"] == len(scenario.project_questions)
         assert counts["tags"] == len(scenario.tags)
         assert counts["rungs"] == scenario.rung_count
         assert counts["tasks"] == len(scenario.tasks)

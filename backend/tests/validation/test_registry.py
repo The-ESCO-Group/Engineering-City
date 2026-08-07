@@ -1,10 +1,17 @@
 """The registry and ``run_validation``.
 
-The test that matters most here is the one where a validator raises. A run that
-dies halfway and reports the three things it found before it fell over is
-indistinguishable, on screen, from a run that found three things — and the second
-is believed. So the failure has to become a result, the run has to finish, and the
-result has to block.
+Two tests matter more than the rest.
+
+The one where a validator raises: a run that dies halfway and reports the three
+things it found before it fell over is indistinguishable, on screen, from a run
+that found three things — and the second is believed. So the failure has to become
+a result, the run has to finish, and the result has to block.
+
+And the ones where a reviewer's waiver has to survive the next run. A run writes
+fresh result rows every time, so "blocks a release until resolved **or**
+accepted" is only half true unless the acceptance is carried onto the new row —
+and it stops being an acceptance at all if it survives a change to the thing it
+was about.
 """
 
 from __future__ import annotations
@@ -16,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import validation
+from app.core.config import Settings
 from app.core.enums import (
     ControllerFamily,
     EventType,
@@ -23,9 +31,12 @@ from app.core.enums import (
     ValidationRunStatus,
     ValidationSeverity,
 )
+from app.core.services import validation_review
 from app.models.event import Event
+from app.models.interlocks import Interlock
 from app.models.project import Project
 from app.models.release import ValidationResult
+from app.models.user import User
 from app.validation import VALIDATOR_FAILED_CODE, VALIDATORS, run_validation, validators_for
 from app.validation.base import MAX_OBJECT_LABEL_CHARS, Issue, ValidationContext
 from tests.validation import (
@@ -36,6 +47,11 @@ from tests.validation import (
 )
 
 _NAMESPACES = {"requirements", "tags", "io", "logic", "cross"}
+
+#: The code a documented-but-unimplemented interlock raises. Used by the waiver
+#: tests because it is the archetype: release-blocking, about one named canonical
+#: object, and exactly the sort of thing an engineer knowingly carries.
+_UNIMPLEMENTED = "logic.interlock_not_implemented"
 
 
 class BrokenValidator:
@@ -258,3 +274,165 @@ def test_a_failed_validator_blocks_the_release(
     assert run.error_count == 1
     assert run.is_blocking is True
     assert "Release blocked" in run.summary
+
+
+# ---------------------------------------------------------------------------
+# A reviewer's waiver, across runs
+# ---------------------------------------------------------------------------
+def _unimplemented_interlock(db: Session, project: Project, reference: str) -> Interlock:
+    return make_interlock(
+        db,
+        project,
+        reference,
+        source_reference=f"Interlock_Schedule.xlsx / {reference}",
+        is_implemented=False,
+    )
+
+
+def _blocking(db: Session, run_id: object, code: str = _UNIMPLEMENTED) -> list[ValidationResult]:
+    return [item for item in _results(db, run_id) if item.code == code]
+
+
+def _waive(
+    db: Session,
+    project: Project,
+    result: ValidationResult,
+    *,
+    reviewer: User,
+    settings: Settings,
+    reason: str,
+) -> None:
+    """Waive through the reviewer's own door, not by setting the column."""
+    validation_review.waive(
+        db,
+        project=project,
+        result=result,
+        expected_updated_at=result.updated_at,
+        reason=reason,
+        actor=reviewer,
+        settings=settings,
+    )
+    db.flush()
+
+
+def test_a_waived_error_survives_the_next_run_with_the_name_behind_it(
+    db: Session, project: Project, seeded: dict[str, User], settings: Settings
+) -> None:
+    """The defect this exists for: an accepted error must not come back unwaived.
+
+    Without the carry the pipeline can never proceed — the validators re-raise
+    what a named reviewer already accepted, the cross-discipline step blocks on
+    it again, and no amount of further engineering clears something nobody
+    considers a defect.
+    """
+    _unimplemented_interlock(db, project, "ILK-101")
+    first = run_validation(db, project=project)
+    reason = "The protection is delivered by the safety relay; out of scope for this package."
+    _waive(
+        db,
+        project,
+        _blocking(db, first.id)[0],
+        reviewer=seeded["reviewer"],
+        settings=settings,
+        reason=reason,
+    )
+
+    second = run_validation(db, project=project)
+    carried = _blocking(db, second.id)
+
+    assert len(carried) == 1
+    assert carried[0].id != _blocking(db, first.id)[0].id, "the row id is new every run"
+    assert carried[0].is_waived is True
+    assert carried[0].waived_by_id == seeded["reviewer"].id
+    assert carried[0].waiver_reason == reason
+
+
+def test_a_carried_waiver_no_longer_stops_the_run(
+    db: Session, project: Project, seeded: dict[str, User], settings: Settings
+) -> None:
+    """The consequence, stated in the terms the workflow reads.
+
+    ``VALIDATE_CROSS_DISCIPLINE`` and the gates both count *unwaived* errors, so
+    the carry is what turns "resolved or accepted" from half true into true.
+    """
+    _unimplemented_interlock(db, project, "ILK-102")
+    first = run_validation(db, project=project)
+    _waive(
+        db,
+        project,
+        _blocking(db, first.id)[0],
+        reviewer=seeded["reviewer"],
+        settings=settings,
+        reason="Accepted for this delivery; the trip is hardwired.",
+    )
+
+    second = run_validation(db, project=project)
+    unwaived = [
+        item.object_label
+        for item in _blocking(db, second.id)
+        if item.severity is ValidationSeverity.ERROR and not item.is_waived
+    ]
+
+    assert not unwaived, f"the accepted interlock error blocks again at {unwaived}"
+
+
+def test_a_waiver_dies_when_the_object_it_was_about_moves_on(
+    db: Session, project: Project, seeded: dict[str, User], settings: Settings
+) -> None:
+    """A signature covers content, not a check code.
+
+    The waiver was recorded over the interlock as it stood at that revision.
+    Edited at a later one, it is not the thing anybody signed for, so the error
+    comes back for a fresh decision rather than inheriting the old one.
+    """
+    interlock = _unimplemented_interlock(db, project, "ILK-103")
+    first = run_validation(db, project=project)
+    _waive(
+        db,
+        project,
+        _blocking(db, first.id)[0],
+        reviewer=seeded["reviewer"],
+        settings=settings,
+        reason="Accepted as documented on the P&ID revision in force.",
+    )
+
+    # The trip condition is rewritten and merged, exactly as a change set would
+    # leave it: the object now belongs to a revision later than the decision.
+    project.current_revision_number += 1
+    interlock.trip_condition = "PT-102 < 1.2 bar for 3 s"
+    interlock.updated_in_revision = project.current_revision_number
+    db.flush()
+
+    second = run_validation(db, project=project)
+    returned = _blocking(db, second.id)
+
+    assert len(returned) == 1
+    assert returned[0].is_waived is False, "a waiver survived a change to the thing it was about"
+    assert returned[0].waived_by_id is None
+    assert returned[0].waiver_reason == ""
+
+
+def test_a_waiver_covers_the_object_it_names_and_no_other(
+    db: Session, project: Project, seeded: dict[str, User], settings: Settings
+) -> None:
+    """One acceptance, one interlock. The other error is still in front of a human."""
+    _unimplemented_interlock(db, project, "ILK-104")
+    _unimplemented_interlock(db, project, "ILK-105")
+    first = run_validation(db, project=project)
+    waived_label = next(item for item in _blocking(db, first.id) if "ILK-104" in item.object_label)
+    _waive(
+        db,
+        project,
+        waived_label,
+        reviewer=seeded["reviewer"],
+        settings=settings,
+        reason="ILK-104 alone is accepted; the divert trip is delivered separately.",
+    )
+
+    second = run_validation(db, project=project)
+    by_reference = {
+        "ILK-104" if "ILK-104" in item.object_label else "ILK-105": item.is_waived
+        for item in _blocking(db, second.id)
+    }
+
+    assert by_reference == {"ILK-104": True, "ILK-105": False}

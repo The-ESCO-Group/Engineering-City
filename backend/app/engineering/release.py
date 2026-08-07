@@ -84,6 +84,7 @@ from app.core.enums import (
     TagScope,
     ValidationLevel,
     ValidationRunStatus,
+    ValidationSeverity,
 )
 from app.core.errors import ConflictError, NotFoundError
 from app.core.logging import get_logger
@@ -137,6 +138,7 @@ from app.models.release import (
     ImportDependency,
     ReleaseCandidate,
     ReleaseManifest,
+    ValidationResult,
     ValidationRun,
 )
 from app.models.requirements import Requirement
@@ -297,8 +299,13 @@ class ReleaseReadiness:
     #: Gates at or before :data:`_PRE_GENERATION_GATE` that are still open, in
     #: gate order, so a UI can point at the first one to work on.
     outstanding_gates: tuple[ApprovalGateKey, ...]
-    #: Unwaived errors in the newest completed validation run. Only ``ERROR``
-    #: blocks; warnings are information a human weighs.
+    #: Every error the newest completed validation run found, waived or not.
+    #: Deliberately the total and not the outstanding subset: it is the number the
+    #: package manifest records, and a project that reported zero once a reviewer
+    #: had carried them would look afterwards exactly like one that never had any.
+    #: What *blocks* is the unwaived subset, which is why this number can be
+    #: nonzero while :attr:`is_ready` is true — the waivers are on the results
+    #: themselves, each naming who carried it and why.
     validation_error_count: int
     #: The ceiling this deployment can reach at all — not what any package has
     #: reached. Without a licensed workstation it is ``ROUND_TRIP_PARSED``, and
@@ -356,6 +363,7 @@ def release_readiness(
         *_validation_blocks(
             run,
             revision,
+            unwaived_errors=_unwaived_error_count(db, run),
             ambiguous_current_revision=selection.ambiguous_current_revision,
             future_revision=selection.future_revision,
         ),
@@ -889,9 +897,26 @@ def _validation_blocks(
     run: ValidationRun | None,
     revision: int,
     *,
+    unwaived_errors: int,
     ambiguous_current_revision: bool = False,
     future_revision: int | None = None,
 ) -> list[ReleaseBlock]:
+    """Why the newest validation run stops a release, or nothing if it does not.
+
+    ``unwaived_errors`` rather than :attr:`ValidationRun.is_blocking` is the whole
+    content of this signature, and it has no default deliberately: a caller that
+    omitted it would get "nothing is in the way", and this function's failure
+    direction has to be closed. ``error_count`` on the run is the total the
+    validators found, and it stays the total because the package manifest records
+    it. What a release turns on is narrower: an error a named reviewer has
+    carried, with a stated reason, through
+    :func:`app.core.services.validation_review.waive`, has been *decided* rather
+    than left outstanding. Gates 2 to 4 already count it that way
+    (:meth:`app.engineering.gates.GateContext.errors` filters waived results), so
+    reading the raw total here made a project able to pass every gate on accepted
+    risk and then be refused a package for the errors those gates had just
+    settled — the waiver mechanism blocking on the thing it exists to permit.
+    """
     if future_revision is not None:
         return [
             ReleaseBlock(
@@ -941,19 +966,45 @@ def _validation_blocks(
                 ),
             )
         ]
-    if not run.is_blocking:
+    if unwaived_errors <= 0:
         return []
+    carried = max(int(run.error_count or 0) - unwaived_errors, 0)
     return [
         ReleaseBlock(
             code=BlockCode.VALIDATION_ERRORS,
             summary="The model has unresolved validation errors.",
             detail=(
                 f"Validation run at revision {run.revision_number} reported "
-                f"{run.error_count} error(s). Generating from a model with errors "
-                "produces a package that fails at import for a reason already known."
+                f"{unwaived_errors} error(s) that nobody has resolved or waived"
+                + (f", alongside {carried} a reviewer has carried" if carried else "")
+                + ". Generating from a model with errors produces a package that fails at "
+                "import for a reason already known."
             ),
         )
     ]
+
+
+def _unwaived_error_count(db: Session, run: ValidationRun | None) -> int:
+    """Errors in ``run`` that no reviewer has carried.
+
+    Counted with a query rather than from ``run.error_count`` because a waiver is
+    recorded on the result long after the run computed its totals, and because
+    those totals are what the manifest reports and must stay the totals.
+    """
+    if run is None:
+        return 0
+    return int(
+        db.execute(
+            select(func.count())
+            .select_from(ValidationResult)
+            .where(
+                ValidationResult.validation_run_id == run.id,
+                ValidationResult.severity == ValidationSeverity.ERROR,
+                ValidationResult.is_waived.is_(False),
+            )
+        ).scalar_one()
+        or 0
+    )
 
 
 def _gate_block(outstanding: Sequence[ApprovalGateKey]) -> ReleaseBlock:

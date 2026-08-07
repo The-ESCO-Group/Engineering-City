@@ -94,9 +94,7 @@ def decide_requirement(
 
     now = utcnow()
     accepted = decision == "accept"
-    requirement.status = (
-        RequirementStatus.ACCEPTED if accepted else RequirementStatus.REJECTED
-    )
+    requirement.status = RequirementStatus.ACCEPTED if accepted else RequirementStatus.REJECTED
     requirement.approval_state = (
         ObjectApprovalState.APPROVED if accepted else ObjectApprovalState.REJECTED
     )
@@ -104,12 +102,19 @@ def decide_requirement(
     requirement.approved_by_id = actor.id if accepted else None
     requirement.object_revision += 1
     requirement.updated_in_revision = project.current_revision_number
+    # The reviewer signed the requirement as this decision leaves it, so the
+    # approval names the revision it leaves it at. Stated here rather than
+    # inferred later: recording the decision is itself an update, and an
+    # approval that does not say which revision it covers cannot be told apart
+    # afterwards from one whose subject was edited underneath it.
+    requirement.approved_object_revision = requirement.object_revision if accepted else None
     for criterion in requirement.acceptance_criteria:
         criterion.status = requirement.status
         criterion.approval_state = requirement.approval_state
         criterion.approved_at = requirement.approved_at
         criterion.approved_by_id = requirement.approved_by_id
         criterion.object_revision += 1
+        criterion.approved_object_revision = criterion.object_revision if accepted else None
         criterion.updated_in_revision = project.current_revision_number
 
     project_decision = ProjectDecision(
@@ -117,7 +122,8 @@ def decide_requirement(
         reference=f"DEC-{uuid.uuid4().hex[:8].upper()}",
         kind=DecisionKind.DESIGN_CHOICE,
         title=f"{decision.title()} requirement {requirement.reference}",
-        statement=f"{requirement.reference} was " + (
+        statement=f"{requirement.reference} was "
+        + (
             "accepted as an engineering requirement."
             if accepted
             else "rejected from project scope."

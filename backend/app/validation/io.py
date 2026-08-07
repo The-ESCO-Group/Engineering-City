@@ -114,7 +114,18 @@ class IOAssignmentValidator:
             if point is None:
                 continue
 
-            claimants = by_point.get(assignment.io_point_id, [])
+            claimants = sorted(
+                by_point.get(assignment.io_point_id, []),
+                key=lambda signal_id: (
+                    context.signals_by_id[signal_id].name.casefold()
+                    if signal_id in context.signals_by_id
+                    else "\uffff",
+                    context.signals_by_id[signal_id].name
+                    if signal_id in context.signals_by_id
+                    else "",
+                    str(signal_id),
+                ),
+            )
             if len(claimants) > 1:
                 claimant_names = [
                     (

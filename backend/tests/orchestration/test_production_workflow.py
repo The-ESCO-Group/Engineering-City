@@ -41,11 +41,15 @@ from app.core.enums import (
     ApprovalKind,
     ApprovalStatus,
     BaseDataType,
+    ClarificationStatus,
     ControllerFamily,
     ControllerTaskType,
+    DocumentRole,
+    EvidenceKind,
     FailState,
     FileKind,
     FindingStatus,
+    GateStatus,
     HmiProduct,
     ImportVerificationStatus,
     InstructionCategory,
@@ -57,6 +61,7 @@ from app.core.enums import (
     ProfileFieldStatus,
     ProjectStatus,
     ProjectType,
+    QuestionCategory,
     ReleaseCandidateStatus,
     ReleaseMode,
     RequirementStatus,
@@ -72,6 +77,7 @@ from app.core.enums import (
     ValidationLevel,
 )
 from app.models.approval import Approval
+from app.models.delivery import HMIBinding, HMIScreen
 from app.models.file import UploadedFile
 from app.models.finding import Finding
 from app.models.plant import AddressAssignment, Device, HardwareModule, IOPoint, Signal
@@ -88,6 +94,7 @@ from app.models.plc import (
 from app.models.profile import (
     REQUIRED_PROFILE_FIELDS,
     ProjectProfile,
+    ProjectQuestion,
     TargetPlatform,
     TemplateSet,
 )
@@ -100,11 +107,14 @@ from app.models.tags import Tag
 from app.models.task import Task, TaskDependency
 from app.models.user import User
 from app.orchestration import engine, worker
+from app.orchestration.handlers import HandlerResult
 
 CATALOG_NUMBER = "1756-L83E"
 FIRMWARE = "35.011"
 STUDIO_VERSION = "35.00"
+HMI_VERSION = "14.00"
 TEMPLATE_ID = "esco.motor.standard@1.0.0"
+HMI_TEMPLATE_ID = "esco.hmi.overview"
 
 #: The device the fixture's requirement names, so the Tag Architecture Agent has
 #: an accepted requirement to cite as the basis for the tags it proposes.
@@ -150,13 +160,27 @@ def _profile(db: Session, project: Project, **overrides: object) -> ProjectProfi
 
 
 def _platform(db: Session, project: Project) -> TargetPlatform:
+    """A controller *and* a PanelView, because ``HmiProduct.NONE`` tested nothing.
+
+    Gate 3 asks whether the HMI design exists, and with no HMI in scope that
+    criterion returns early. A fixture declaring ``NONE`` therefore never
+    exercised it — which is how the pipeline came to hold a deadlock nothing
+    here noticed: ``DELIVERY`` used to sit behind the very gate whose HMI
+    criterion it was expected to satisfy, so any project naming an HMI parked at
+    gate 3 for good. Declaring one keeps that criterion on the path every run in
+    this file takes.
+    """
     platform = TargetPlatform(
         project_id=project.id,
         controller_family=ControllerFamily.CONTROLLOGIX,
         controller_catalog_number=CATALOG_NUMBER,
         firmware_revision=FIRMWARE,
         studio_5000_version=STUDIO_VERSION,
-        hmi_product=HmiProduct.NONE,
+        hmi_product=HmiProduct.FACTORYTALK_VIEW_ME,
+        hmi_version=HMI_VERSION,
+        hmi_terminal_model="2711P-T10C22D9P",
+        hmi_resolution_width=1024,
+        hmi_resolution_height=768,
     )
     db.add(platform)
     db.flush()
@@ -353,6 +377,49 @@ def _logic(db: Session, project: Project) -> Routine:
     return routine
 
 
+def _hmi(db: Session, project: Project) -> HMIScreen:
+    """The overview display the PanelView carries, and one binding on it.
+
+    Read from the existing terminal application rather than generated, which is
+    what an upgrade project actually has: nothing in this backend creates screens
+    — the HMI delivery agent audits them — so a project naming an HMI has to
+    bring its display design with it or gate 3 has nothing to approve.
+
+    ``access='read'`` is load-bearing. An unstated direction is treated as a
+    command, and a command binding on a tag no rung reads is a release-blocking
+    error; this binding displays a status the ladder writes.
+    """
+    screen = HMIScreen(
+        project_id=project.id,
+        key="line3_overview",
+        name="Line 3 overview",
+        title="Line 3 overview",
+        ordinal=0,
+        template_id=HMI_TEMPLATE_ID,
+        template_version="1.0.0",
+        origin=LogicOrigin.PARSED_FROM_SOURCE,
+    )
+    db.add(screen)
+    db.flush()
+    command_tag = db.execute(
+        select(Tag).where(Tag.project_id == project.id, Tag.name == f"{DEVICE_PREFIX}_Run_Cmd")
+    ).scalar_one()
+    db.add(
+        HMIBinding(
+            project_id=project.id,
+            screen_id=screen.id,
+            property_name="Value",
+            tag_name=command_tag.name,
+            tag_id=command_tag.id,
+            is_resolved=True,
+            access="read",
+            origin=LogicOrigin.PARSED_FROM_SOURCE,
+        )
+    )
+    db.flush()
+    return screen
+
+
 def _accepted_requirement(db: Session, project: Project) -> Requirement:
     """A requirement a named engineer already accepted, naming the device.
 
@@ -406,22 +473,27 @@ def production_project(db: Session, ingested_project: Project) -> Project:
     _controller(db, ingested_project)
     _tags(db, ingested_project)
     _logic(db, ingested_project)
+    _hmi(db, ingested_project)
     _accepted_requirement(db, ingested_project)
     _export_profile(db, ingested_project)
-    # This fixture supplies a clean canonical controller, plant, and logic model
-    # explicitly above.  Keep the legacy L5X as review evidence, but mark its
-    # parsed payload as a legacy fixture so the canonical source importer does
-    # not mix a second, deliberately defective controller into this happy-path
-    # release model. Retire the conflicting I/O schedule for the same reason.
-    # Defective source is covered by the blocking workflow tests; this fixture
-    # exists to prove a valid project can finish.
+    # This fixture supplies a clean canonical controller, plant, logic and HMI
+    # model explicitly above. Every demo document that describes the *other*,
+    # deliberately defective controller is kept as review evidence but its parsed
+    # payload is marked a legacy fixture, so the canonical source importer does
+    # not mix a second controller into this happy-path release model. That covers
+    # the L5X, the alarm register — whose triggers name Conveyor_Line3 tags no
+    # rung here writes — and the HMI export, which binds to the same tags. The
+    # conflicting I/O schedule is retired outright for the same reason. Defective
+    # source is covered by the blocking workflow tests; this fixture exists to
+    # prove a valid project can finish.
+    superseded_roles = frozenset({DocumentRole.ALARM_LIST, DocumentRole.HMI_EXPORT})
     for uploaded in db.execute(
         select(UploadedFile).where(UploadedFile.project_id == ingested_project.id)
     ).scalars():
-        if uploaded.file_kind is FileKind.L5X:
+        if uploaded.file_kind is FileKind.L5X or uploaded.document_role in superseded_roles:
             for artifact in uploaded.artifacts:
                 artifact.artifact_kind = "legacy_fixture_evidence"
-        elif uploaded.document_role.value == "io_list":
+        elif uploaded.document_role is DocumentRole.IO_LIST:
             uploaded.deleted_at = utcnow()
     db.commit()
     return ingested_project
@@ -998,6 +1070,53 @@ def test_a_gate_blocks_the_tasks_behind_it_and_releases_them_once_decided(
     assert design.attempts >= 1, "the design task never ran after its gate was decided"
 
 
+def test_a_project_naming_an_hmi_reaches_the_logic_gate_with_its_hmi_criterion_met(
+    db: Session, production_project: Project, seeded: dict[str, User], settings: Settings
+) -> None:
+    """The deadlock, asserted from the side that used to hold.
+
+    Gate 3 asks whether the HMI design exists. Nothing in this backend creates
+    screens, so the work that can satisfy that question must run *before* the
+    gate is evaluated — delivery inspects and reports on the display model, and
+    the validation snapshot the gate reads is taken after it. With delivery
+    behind the gate instead, every project whose target platform named an HMI
+    parked here permanently and the gate's own message said only that no screens
+    were recorded.
+    """
+    from app.engineering import gates
+
+    _start(db, production_project, settings, seeded["engineer"])
+    _run_to_completion(db, production_project, settings, seeded["reviewer"])
+    db.expire_all()
+
+    platform = db.execute(
+        select(TargetPlatform).where(TargetPlatform.project_id == production_project.id)
+    ).scalar_one()
+    delivery = _one(db, production_project, TaskKind.DELIVERY)
+    gate_task = _gate_task(db, production_project, ApprovalGateKey.LOGIC_AND_DELIVERY)
+    gate = next(
+        item
+        for item in gates.evaluate_all(db, project=production_project)
+        if item.gate_key is ApprovalGateKey.LOGIC_AND_DELIVERY
+    )
+    unmet = {str(item.get("key")) for item in gate.unmet_criteria}
+
+    assert platform.hmi_product is not HmiProduct.NONE, (
+        "the fixture stopped declaring an HMI, so gate 3's HMI criterion is untested again"
+    )
+    assert delivery.status is TaskStatus.COMPLETED, (
+        delivery.blocked_reason or delivery.error_message
+    )
+    assert delivery.finished_at is not None
+    assert gate_task.finished_at is not None
+    assert delivery.finished_at <= gate_task.finished_at, (
+        "the gate that asks whether the HMI design exists was decided before the "
+        "delivery step that inspects it"
+    )
+    assert "hmi_screens_recorded" not in unmet, sorted(unmet)
+    assert gate.status is GateStatus.PASSED, f"{gate.status.value}: {gate.unmet_criteria}"
+
+
 def test_an_unanswered_blocking_clarification_stops_the_run_before_design(
     db: Session, production_project: Project, seeded: dict[str, User], settings: Settings
 ) -> None:
@@ -1027,6 +1146,316 @@ def test_an_unanswered_blocking_clarification_stops_the_run_before_design(
     assert task.blocked_reason
     assert task.result["blocking_clarifications"] == len(open_clarifications)
     assert _one(db, production_project, TaskKind.DESIGN_TAGS).attempts == 0
+
+
+# ---------------------------------------------------------------------------
+# Answering a question, and the two ways a design step produces nothing
+# ---------------------------------------------------------------------------
+#: An accepted requirement no logic network claims, which is the state every real
+#: project starts in. The fixture's ``REQ-001`` is deliberately claimed by a
+#: seeded network so the PLC Logic Agent has nothing to ask about; these tests are
+#: about the other case.
+UNCLAIMED_REFERENCE = "REQ-500"
+
+ANSWER = "Confirmed with the line engineer: the existing Zone 2 rung implements it."
+
+
+def _unclaimed_requirement(db: Session, project: Project) -> Requirement:
+    """A requirement a named human accepted and no rung implements yet."""
+    requirement = Requirement(
+        project_id=project.id,
+        reference=UNCLAIMED_REFERENCE,
+        title="Accumulation zone release",
+        statement=(
+            "Zone 2 shall release accumulated cases once the downstream zone reports clear."
+        ),
+        source_text="Zone 2 releases accumulated cases when the downstream zone is clear.",
+        status=RequirementStatus.ACCEPTED,
+    )
+    db.add(requirement)
+    db.flush()
+    return requirement
+
+
+def _design_stage(db: Session, project: Project, settings: Settings) -> HandlerResult:
+    """Run the PLC architecture stage the way the worker runs it.
+
+    Called directly rather than drained, because what is being examined is the
+    handler's outcome — the reason and the result it hands the worker — and a
+    drained run would only leave the reason on the task row after the fact.
+    """
+    from app.agents.review.handlers import design_plc_architecture
+    from app.orchestration.handlers import TaskContext
+
+    task = _one(db, project, TaskKind.DESIGN_PLC_ARCHITECTURE)
+    outcome = design_plc_architecture(
+        TaskContext(db=db, task=task, project=project, settings=settings)
+    )
+    db.flush()
+    return outcome
+
+
+def _questions(db: Session, project: Project) -> list[ProjectQuestion]:
+    return list(
+        db.execute(
+            select(ProjectQuestion)
+            .where(ProjectQuestion.project_id == project.id)
+            .order_by(ProjectQuestion.reference)
+        ).scalars()
+    )
+
+
+def _resolve(
+    db: Session,
+    project: Project,
+    question: ProjectQuestion,
+    actor: User,
+    settings: Settings,
+    *,
+    resolution: str = "answered",
+) -> None:
+    """Answer a question through the door a person answers it through.
+
+    :func:`app.core.services.engineering_intake.resolve_project_question` is what
+    the endpoint calls: it records the answer, the decision, who decided it, and
+    returns the blocked tasks to the queue. Writing the answer onto the row here
+    would prove nothing about whether the run can see it.
+    """
+    from app.core.services import engineering_intake
+
+    engineering_intake.resolve_project_question(
+        db,
+        project=project,
+        question=question,
+        answer=ANSWER,
+        resolution=resolution,
+        actor=actor,
+        settings=settings,
+    )
+    db.flush()
+
+
+def test_a_design_step_that_asks_blocks_on_the_question_rather_than_choosing(
+    db: Session, production_project: Project, seeded: dict[str, User], settings: Settings
+) -> None:
+    """The refusal to guess, at the one step whose central act is a judgement.
+
+    The deterministic provider will not decide which approved pattern implements
+    a requirement, so the step asks and blocks. This is the *legitimate* block —
+    a human owes an answer — and it is asserted separately from the dead end
+    below because the whole point is that the two must not read alike.
+    """
+    _start(db, production_project, settings, seeded["engineer"])
+    _unclaimed_requirement(db, production_project)
+
+    outcome = _design_stage(db, production_project, settings)
+
+    assert outcome.status == "blocked", outcome.reason
+    assert UNCLAIMED_REFERENCE in outcome.reason, outcome.reason
+    assert outcome.result.get("dead_end") is not True, (
+        "a question nobody has answered was reported as a dead end"
+    )
+    asked = _questions(db, production_project)
+    assert len(asked) == 1, [item.reference for item in asked]
+    assert asked[0].status is ClarificationStatus.OPEN
+    assert asked[0].is_blocking, "a question that blocks nothing cannot have stopped this step"
+
+
+def test_an_answered_question_reaches_the_next_run_as_a_citable_human_decision(
+    db: Session, production_project: Project, seeded: dict[str, User], settings: Settings
+) -> None:
+    """What an agent is handed once a person has answered.
+
+    An answer is evidence, and the three things that make it citable travel with
+    it: the words, the name of whoever gave them, and the ``ProjectDecision`` an
+    object built on the answer cites as its basis. A dismissal does not travel,
+    and that is the second half of this test — dismissing records that the answer
+    is no longer needed, never what the answer is, and an agent that read one as
+    an answer would be acting on words nobody offered as one.
+    """
+    from app.agents.base.agent import answered_questions_for
+
+    _start(db, production_project, settings, seeded["engineer"])
+    _unclaimed_requirement(db, production_project)
+    _design_stage(db, production_project, settings)
+    asked = _questions(db, production_project)
+    assert len(asked) == 1
+    _resolve(db, production_project, asked[0], seeded["reviewer"], settings)
+
+    answers = answered_questions_for(db, production_project.id)
+
+    assert [item.reference for item in answers] == [asked[0].reference]
+    answer = answers[0]
+    assert answer.answer == ANSWER
+    assert answer.answered_by == seeded["reviewer"].display_name, (
+        "an answer nobody is named for is not a human decision"
+    )
+    assert answer.decision_reference.startswith("DEC-"), (
+        f"the answer cites no recorded decision: {answer.decision_reference!r}"
+    )
+    assert answer.as_dict()["basis_kind"] == EvidenceKind.HUMAN_DECISION.value
+    assert UNCLAIMED_REFERENCE in answer.question, (
+        "the answer arrives without the question, so nothing can tell what it is about"
+    )
+
+    dismissed = ProjectQuestion(
+        project_id=production_project.id,
+        reference="Q-DISMISSED",
+        category=QuestionCategory.TEMPLATE_SELECTION,
+        question=f"Which approved template implements {UNCLAIMED_REFERENCE}?",
+        why_it_matters="Nothing is generated for it until a pattern is chosen.",
+        created_in_revision=production_project.current_revision_number,
+        updated_in_revision=production_project.current_revision_number,
+    )
+    db.add(dismissed)
+    db.flush()
+    _resolve(
+        db,
+        production_project,
+        dismissed,
+        seeded["reviewer"],
+        settings,
+        resolution="dismissed",
+    )
+
+    assert [item.reference for item in answered_questions_for(db, production_project.id)] == [
+        asked[0].reference
+    ], "a dismissed question was handed over as though somebody had answered it"
+
+
+def test_the_answered_question_is_not_asked_again_and_the_step_says_why_it_is_stuck(
+    db: Session, production_project: Project, seeded: dict[str, User], settings: Settings
+) -> None:
+    """The human loop, closed at the provider.
+
+    The deterministic provider now reads the answer. It still selects nothing —
+    matching a pattern to a requirement is the judgement it does not make, and the
+    recorded answer names no approved template — but it says so *once*, as a
+    stated fact naming who answered and what they said, instead of putting the
+    same question back in front of the person who answered it.
+
+    Two runs after the answer, not one: the second proves the report is stable.
+    A step that alternated between two accounts of the same situation would be a
+    loop with better manners.
+    """
+    _start(db, production_project, settings, seeded["engineer"])
+    _unclaimed_requirement(db, production_project)
+    first = _design_stage(db, production_project, settings)
+    asked = _questions(db, production_project)
+    _resolve(db, production_project, asked[0], seeded["reviewer"], settings)
+
+    second = _design_stage(db, production_project, settings)
+    third = _design_stage(db, production_project, settings)
+
+    assert [item.reference for item in _questions(db, production_project)] == [
+        asked[0].reference
+    ], "the answered question was asked again under a new reference"
+    assert second.status == "blocked", second.reason
+    assert second.reason != first.reason, (
+        "the step reported the identical sentence before and after a human answered it"
+    )
+    assert third.reason == second.reason, (
+        f"the report is not stable: {second.reason!r} then {third.reason!r}"
+    )
+    for expected in (asked[0].reference, ANSWER, seeded["reviewer"].display_name):
+        assert expected in second.reason, f"{expected!r} is missing from: {second.reason}"
+    assert "no logic was proposed" in second.reason.lower(), second.reason
+    assert second.result["blockers"], (
+        "the step reported no blocker, so the sentence a human reads came from somewhere else"
+    )
+
+
+def _re_asking_builder(context: dict[str, object]) -> dict[str, object]:
+    """A PLC-logic turn that asks the same question however often it is answered.
+
+    Stands in for any provider that does not act on the answers — which is every
+    provider until it does, and a model on any given turn. The handler's rule has
+    to hold for that provider too: what is being tested here is not that the
+    deterministic provider behaves, it is that a step cannot block for ever on a
+    question a human has answered, whatever asked it.
+    """
+    return {
+        "rationale": "Asked which approved pattern implements the requirement.",
+        "actions": [
+            {
+                "action_type": "request_clarification",
+                "summary": f"Which approved pattern implements {UNCLAIMED_REFERENCE}?",
+                "confidence": 0.0,
+                "payload": {
+                    "category": QuestionCategory.TEMPLATE_SELECTION.value,
+                    "question": f"Which approved template implements {UNCLAIMED_REFERENCE}?",
+                    "why_it_matters": "No logic is proposed for it until a pattern is chosen.",
+                },
+            },
+            {
+                "action_type": "complete_task",
+                "summary": "No control pattern was selected.",
+                "confidence": 0.0,
+                "payload": {
+                    "outcome": "Asked which pattern implements the requirement.",
+                    "limitations": ["No template was selected and no logic was proposed."],
+                },
+            },
+        ],
+    }
+
+
+def test_a_step_that_re_asks_an_answered_question_reports_a_dead_end_once(
+    db: Session,
+    production_project: Project,
+    seeded: dict[str, User],
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The defect that made the human loop decorative, and where it now stops.
+
+    The question's reference is derived from the task and the payload, so an exact
+    retry returns the question already raised — which is right, or a leased task
+    running twice would queue the same decision twice. What it must not do is make
+    an answered row look newly asked: the answer requeued the task, the agent asked
+    the identical question, and the step blocked on the same sentence again, for
+    ever, however correctly the human answered.
+
+    It is still a block, and deliberately: a design step that produced nothing is
+    not finished, and completing it would mark a design task done that designed
+    nothing. What changes is the sentence, which now says the answers are in and
+    names what is still missing — the only thing an engineer can act on here.
+    """
+    from app.agents.base.providers import mock
+
+    monkeypatch.setitem(mock._BUILDERS, "plc_logic", _re_asking_builder)
+
+    _start(db, production_project, settings, seeded["engineer"])
+    _unclaimed_requirement(db, production_project)
+    first = _design_stage(db, production_project, settings)
+    asked = _questions(db, production_project)
+    assert len(asked) == 1, [item.reference for item in asked]
+    assert first.status == "blocked"
+    assert first.result.get("dead_end") is not True
+
+    _resolve(db, production_project, asked[0], seeded["reviewer"], settings)
+    second = _design_stage(db, production_project, settings)
+    third = _design_stage(db, production_project, settings)
+
+    assert second.status == "blocked", second.reason
+    assert second.result["dead_end"] is True, (
+        "the step blocked on a question a human had answered as though it were still open"
+    )
+    assert second.result["questions_already_settled"] == [asked[0].reference]
+    assert second.reason != first.reason, (
+        "answering the question changed nothing about what the step reported"
+    )
+    for expected in (asked[0].reference, ANSWER, "No template was selected"):
+        assert expected in second.reason, f"{expected!r} is missing from: {second.reason}"
+    assert [item["reference"] for item in second.result["settled_questions"]] == [
+        asked[0].reference
+    ]
+    assert third.reason == second.reason, (
+        f"the dead end is not reported the same way twice: {second.reason!r} then {third.reason!r}"
+    )
+    assert [item.reference for item in _questions(db, production_project)] == [
+        asked[0].reference
+    ], "a second copy of an answered question was raised"
 
 
 # ---------------------------------------------------------------------------

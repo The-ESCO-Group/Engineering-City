@@ -458,7 +458,8 @@ def _assert_release_gate(db: Session, *, project: Project, candidate: ReleaseCan
         or approval.gate_key is not ApprovalGateKey.RELEASE
         or approval.revision_number != head_revision
         or approval.status not in {ApprovalStatus.APPROVED, ApprovalStatus.RISK_ACCEPTED}
-        or approval.decision not in {
+        or approval.decision
+        not in {
             ApprovalDecision.APPROVE,
             ApprovalDecision.ACCEPT_RISK,
         }

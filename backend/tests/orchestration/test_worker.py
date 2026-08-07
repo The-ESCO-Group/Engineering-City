@@ -411,15 +411,21 @@ def test_cancellation_after_claim_but_before_dispatch_prevents_all_worker_side_e
     assert current.status is TaskStatus.CANCELLED
     assert current.result == {}
     assert handler_calls == []
-    assert db.scalars(
-        select(Event.event_type).where(
-            Event.task_id == task.id,
-            Event.event_type.in_([EventType.TASK_ASSIGNED, EventType.TASK_STARTED]),
+    assert (
+        db.scalars(
+            select(Event.event_type).where(
+                Event.task_id == task.id,
+                Event.event_type.in_([EventType.TASK_ASSIGNED, EventType.TASK_STARTED]),
+            )
+        ).all()
+        == []
+    )
+    assert (
+        db.scalar(
+            select(func.count(AgentInstance.id)).where(AgentInstance.project_id == project.id)
         )
-    ).all() == []
-    assert db.scalar(
-        select(func.count(AgentInstance.id)).where(AgentInstance.project_id == project.id)
-    ) == 0
+        == 0
+    )
 
 
 def test_dependency_failure_cannot_overwrite_a_cancellation_committed_after_claim(
@@ -474,12 +480,15 @@ def test_dependency_failure_cannot_overwrite_a_cancellation_committed_after_clai
     assert current is not None
     assert current.status is TaskStatus.CANCELLED
     assert current.error_code == ""
-    assert db.scalars(
-        select(Event.id).where(
-            Event.task_id == downstream.id,
-            Event.event_type == EventType.TASK_FAILED,
-        )
-    ).all() == []
+    assert (
+        db.scalars(
+            select(Event.id).where(
+                Event.task_id == downstream.id,
+                Event.event_type == EventType.TASK_FAILED,
+            )
+        ).all()
+        == []
+    )
 
 
 @pytest.mark.parametrize(
@@ -523,13 +532,9 @@ def test_cancellation_committed_during_a_handler_beats_every_stale_outcome(
         elif handler_outcome == "blocked":
             outcome = HandlerResult.blocked("stale block", stale_output=True)
         elif handler_outcome == "awaiting_approval":
-            outcome = HandlerResult.awaiting_approval(
-                "stale approval request", stale_output=True
-            )
+            outcome = HandlerResult.awaiting_approval("stale approval request", stale_output=True)
         else:
-            outcome = HandlerResult.failed(
-                "stale_failure", "stale failure", stale_output=True
-            )
+            outcome = HandlerResult.failed("stale_failure", "stale failure", stale_output=True)
         outcome.enqueue.append(
             EnqueueRequest(
                 kind=SPARE_KIND,
@@ -726,12 +731,15 @@ def test_a_gate_reopened_during_its_dependent_handler_discards_the_stale_outcome
     assert "hard prerequisite reopened" in current.error_message.lower()
     assert current.result == {}
     assert db.scalar(select(Task.id).where(Task.idempotency_key == follow_up_key)) is None
-    assert db.scalar(
-        select(func.count(Event.id)).where(
-            Event.task_id == dependent.id,
-            Event.event_type == EventType.TASK_COMPLETED,
+    assert (
+        db.scalar(
+            select(func.count(Event.id)).where(
+                Event.task_id == dependent.id,
+                Event.event_type == EventType.TASK_COMPLETED,
+            )
         )
-    ) == 0
+        == 0
+    )
 
 
 def test_a_handler_that_returns_blocked_parks_the_task_with_its_reason(
@@ -807,9 +815,22 @@ def test_a_handler_that_fails_retries_while_attempts_remain(
 
 
 def test_a_retry_is_not_claimable_until_its_backoff_has_elapsed(
-    db: Session, project: Project, settings: Settings
+    db: Session,
+    project: Project,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without this the worker would spin on a failing task at full speed."""
+    """Without this the worker would spin on a failing task at full speed.
+
+    Use a controlled queue clock rather than assuming the default two-second
+    delay cannot elapse while the first tick finishes its event and gate
+    reconciliation.  That assumption fails on a loaded full-suite run even
+    though production is behaving correctly.  The exact-boundary assertion
+    also documents that ``available_at`` is inclusive.
+    """
+
+    queue_now = [utcnow()]
+    monkeypatch.setattr("app.orchestration.queue.utcnow", lambda: queue_now[0])
 
     def handler(_: TaskContext) -> HandlerResult:
         return HandlerResult.failed("provider_unreachable", "The model provider did not answer.")
@@ -822,10 +843,14 @@ def test_a_retry_is_not_claimable_until_its_backoff_has_elapsed(
         assert task.status is TaskStatus.QUEUED
         assert task.available_at is not None
 
+        queue_now[0] = task.available_at - timedelta(microseconds=1)
         assert worker.tick(settings, WORKER_ID).claimed == 0
 
+        queue_now[0] = task.available_at
+        assert worker.tick(settings, WORKER_ID).claimed == 1
+
     db.refresh(task)
-    assert task.attempts == 1
+    assert task.attempts == 2
 
 
 def test_a_handler_that_raises_fails_only_its_own_task(

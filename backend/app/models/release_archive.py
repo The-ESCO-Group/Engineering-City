@@ -87,18 +87,14 @@ class ReleaseArchive(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     relative_path: Mapped[str] = mapped_column(String(500), nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
-    media_type: Mapped[str] = mapped_column(
-        String(120), default="application/zip", nullable=False
-    )
+    media_type: Mapped[str] = mapped_column(String(120), default="application/zip", nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     file_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
     source_revision: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     validation_level: Mapped[ValidationLevel] = mapped_column(nullable=False)
-    import_verification_status: Mapped[ImportVerificationStatus] = mapped_column(
-        nullable=False
-    )
+    import_verification_status: Mapped[ImportVerificationStatus] = mapped_column(nullable=False)
     import_verification_detail: Mapped[str] = mapped_column(Text, default="", nullable=False)
     rockwell_import_verified: Mapped[bool] = mapped_column(default=False, nullable=False)
 

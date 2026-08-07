@@ -15,7 +15,10 @@ const FIXTURE = path.resolve(
 
 interface ApprovalSummary {
   id: string;
+  title: string;
+  kind: string;
   status: string;
+  decision_allowed: boolean;
 }
 
 interface ProjectSummary {
@@ -35,6 +38,54 @@ async function pendingApprovals(request: APIRequestContext, projectId: string): 
   const response = await request.get(`${BACKEND}/projects/${projectId}/approvals`);
   expect(response.ok(), await response.text()).toBeTruthy();
   return ((await response.json()) as ApprovalSummary[]).filter((item) => item.status === "pending");
+}
+
+async function waitForEligibleFindingApproval(
+  request: APIRequestContext,
+  projectId: string,
+  page: Page
+): Promise<ApprovalSummary> {
+  const deadline = Date.now() + 150_000;
+  while (Date.now() < deadline) {
+    const eligible = (await pendingApprovals(request, projectId)).find(
+      (approval) => approval.kind !== "gate_decision" && approval.decision_allowed
+    );
+    if (eligible) return eligible;
+    await page.waitForTimeout(500);
+  }
+  throw new Error("No finding approval became eligible after independent senior review ran.");
+}
+
+async function driveReviewToCompletion(
+  request: APIRequestContext,
+  projectId: string,
+  page: Page
+): Promise<void> {
+  const deadline = Date.now() + 150_000;
+  while (Date.now() < deadline) {
+    const projectResponse = await request.get(`${BACKEND}/projects/${projectId}`);
+    expect(projectResponse.ok(), await projectResponse.text()).toBeTruthy();
+    const project = (await projectResponse.json()) as { status: string };
+    if (project.status === "completed") return;
+    if (["failed", "cancelled"].includes(project.status)) {
+      throw new Error(`Workflow entered terminal status '${project.status}'.`);
+    }
+
+    for (const approval of await pendingApprovals(request, projectId)) {
+      if (!approval.decision_allowed) continue;
+      expect(approval.kind, "The review-only acceptance run must not create production gate approvals.")
+        .not.toBe("gate_decision");
+      const response = await request.post(`${BACKEND}/approvals/${approval.id}/decision`, {
+        data: {
+          approved: true,
+          notes: "Approved for this isolated synthetic run after reviewing the published evidence and limitations."
+        }
+      });
+      expect(response.ok(), await response.text()).toBeTruthy();
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error("Review-only workflow did not complete after all eligible decisions were recorded.");
 }
 
 async function generatedReports(request: APIRequestContext, projectId: string): Promise<ReportSummary[]> {
@@ -62,6 +113,7 @@ async function signIn(page: Page): Promise<void> {
 }
 
 test("real local workflow persists intake, human decisions, and downloadable reports", async ({ page }) => {
+  test.setTimeout(300_000);
   await signIn(page);
   await page.evaluate(() => localStorage.removeItem("esco:intake-draft:v1"));
   await page.goto("/#/workspace/intake");
@@ -77,6 +129,8 @@ test("real local workflow persists intake, human decisions, and downloadable rep
   await page.getByLabel("Catalog number").fill("5069-L306ER");
   await page.getByLabel("Firmware").fill("35");
   await page.getByLabel("Studio 5000 version").fill("35");
+  await page.getByText("Advanced project settings").click();
+  await page.getByLabel("Release mode").selectOption("review_only");
 
   await page.locator('input[type="file"]').setInputFiles(FIXTURE);
   await expect(page.getByText("Line3_Project_Package.zip")).toBeVisible();
@@ -95,6 +149,12 @@ test("real local workflow persists intake, human decisions, and downloadable rep
     },
     { timeout: 90_000, intervals: [500, 1000, 2000] }
   ).not.toBe("");
+  const projectResponse = await page.request.get(`${BACKEND}/projects/${projectId}`);
+  expect(projectResponse.ok(), await projectResponse.text()).toBeTruthy();
+  const project = (await projectResponse.json()) as {
+    attributes?: { workflow?: { kind?: string } };
+  };
+  expect(project.attributes?.workflow?.kind).toBe("review");
 
   await page.goto("/#/tasks");
   await expect(page.getByRole("heading", { name: "Task board & list" })).toBeVisible();
@@ -106,16 +166,14 @@ test("real local workflow persists intake, human decisions, and downloadable rep
   await expect(page.locator(".project-switch")).toContainText("Live E2E Conveyor Review");
   await expect(page.locator(".demo-badge")).toHaveText("LIVE LOCAL DATA");
 
-  await expect.poll(
-    async () => (await pendingApprovals(page.request, projectId)).length,
-    { timeout: 150_000, intervals: [500, 1000, 2000] }
-  ).toBeGreaterThan(0);
+  const firstEligibleApproval = await waitForEligibleFindingApproval(page.request, projectId, page);
 
   await page.goto("/#/approvals");
   await expect(page.getByRole("heading", { name: "Human decision inbox" })).toBeVisible();
-  const firstRequest = page.locator(".eng-approval-list button").filter({ hasText: /Pending/i }).first();
+  const firstRequest = page.locator(".eng-approval-list button").filter({ hasText: firstEligibleApproval.title }).first();
   await expect(firstRequest).toBeVisible();
   await firstRequest.click();
+  await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Approve", exact: true }).click();
   await page.getByLabel(/Engineering comment/).fill(
     "Approved for this synthetic local E2E run after reviewing the published evidence and limitations."
@@ -123,15 +181,7 @@ test("real local workflow persists intake, human decisions, and downloadable rep
   await page.getByRole("button", { name: "Submit signed decision" }).click();
   await expect(page.getByText(/Approve recorded for/)).toBeVisible();
 
-  for (const approval of await pendingApprovals(page.request, projectId)) {
-    const response = await page.request.post(`${BACKEND}/approvals/${approval.id}/decision`, {
-      data: {
-        approved: true,
-        notes: "Approved by the automated synthetic acceptance run after one full UI decision."
-      }
-    });
-    expect(response.ok(), await response.text()).toBeTruthy();
-  }
+  await driveReviewToCompletion(page.request, projectId, page);
 
   await expect.poll(
     async () => (await generatedReports(page.request, projectId)).length,
@@ -157,9 +207,7 @@ test("real local workflow persists intake, human decisions, and downloadable rep
   expect(downloadedPath).toBeTruthy();
   expect((await stat(downloadedPath!)).size).toBeGreaterThan(100);
 
-  await expect.poll(async () => {
-    const response = await page.request.get(`${BACKEND}/projects/${projectId}`);
-    if (!response.ok()) return "request_failed";
-    return ((await response.json()) as { status: string }).status;
-  }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe("completed");
+  const completedProject = await page.request.get(`${BACKEND}/projects/${projectId}`);
+  expect(completedProject.ok(), await completedProject.text()).toBeTruthy();
+  expect(((await completedProject.json()) as { status: string }).status).toBe("completed");
 });

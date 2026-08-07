@@ -26,6 +26,12 @@ export function workspaceSourceFromEngineering(data: WorkspaceEngineeringData): 
   const authenticatedEmptyProject = data.dataMode === "unavailable" &&
     data.connection === "live" &&
     Boolean(data.currentUser);
+  const projectId = data.project?.id;
+  const globalRoles = new Set(data.currentUser?.user.roles ?? []);
+  const projectRole = projectId ? data.currentUser?.project_roles[projectId] : undefined;
+  const canReviewValidations = globalRoles.has("administrator") || (
+    globalRoles.has("reviewer") && (projectRole === "owner" || projectRole === "reviewer")
+  );
   return {
     dataMode: authenticatedEmptyProject ? "live" : data.dataMode,
     fallbackReason: data.fallbackReason,
@@ -36,7 +42,8 @@ export function workspaceSourceFromEngineering(data: WorkspaceEngineeringData): 
     approvals: data.approvals,
     clarifications: data.clarifications,
     requirements: data.requirements,
-    events: data.events
+    events: data.events,
+    canReviewValidations
   };
 }
 
@@ -134,6 +141,14 @@ export function workspaceOperationsFromEngineering(
     return { projectId: project.id };
   };
   operations.decideApproval = async (approval, decision, comment) => {
+    if (approval.kind === "gate_decision") {
+      if (!approval.gateId || !approval.gateKey) {
+        throw new Error("This workflow gate approval is missing its exact gate binding.");
+      }
+      await engineeringApi.decideApprovalGate(approval.gateId, approval.id, decision, comment);
+      await data.refresh();
+      return;
+    }
     if (decision !== "approve" && decision !== "reject") {
       throw new Error(`${decision.replaceAll("_", " ")} is not supported by the current local approval endpoint.`);
     }
